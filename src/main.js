@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { buildExplodedView, setExplode, isolateParts, clearPartStates, setHighlight, findParts } from './explode.js';
+import { buildExplodedView, setExplode, setPartExplode, isolateParts, clearPartStates, setHighlight, findParts } from './explode.js';
+import { updateTweens, tweenTo, cancelTween, isTweening, easeInOutCubic, flyToParts, moveCamera } from './animate.js';
 import { attachPicker } from './select.js';
 import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames, knowledgeDigest, describePart } from './modes.js';
 import { isARSupported, startAR, updateAR, endAR, requestMove } from './ar.js';
@@ -71,6 +72,9 @@ camera.position.set(3, 2.2, 3.5);
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
+// Grabbing the scene mid-flight aborts the flight — otherwise the tween keeps
+// writing camera.position and fights whatever the user is dragging.
+controls.addEventListener('start', () => cancelTween('camera'));
 
 // ---- Lighting --------------------------------------------------------------
 
@@ -190,6 +194,10 @@ function loadModel(key) {
 }
 
 function rebuild() {
+  // Any tween in flight still points at the outgoing part list — drop them both
+  // before the meshes are disposed.
+  cancelTween('explode');
+  cancelTween('camera');
   if (explodedGroup) {
     scene.remove(explodedGroup);
     for (const p of parts) p.mesh.geometry.dispose();
@@ -223,6 +231,14 @@ function rebuild() {
   });
 }
 
+/**
+ * Fit the scene to a freshly built model: ground/shadow sizing, clip planes,
+ * slider range, and the home camera pose.
+ *
+ * Only ever called at rebuild time, with the parts at rest. It must NOT be
+ * re-run to "reset the view" — measuring a spread-out model would inflate
+ * modelRadius and, with it, the explode slider's own maximum. Use homeView().
+ */
 function frameModel() {
   const box = new THREE.Box3().setFromObject(explodedGroup);
   const size = box.getSize(new THREE.Vector3());
@@ -242,17 +258,34 @@ function frameModel() {
   sc.top = modelRadius * 2.5; sc.bottom = -modelRadius * 2.5;
   sc.updateProjectionMatrix();
 
-  controls.target.set(0, size.y * 0.5, 0);
-  const dist = modelRadius * 3.2;
-  camera.position.set(dist * 0.8, size.y * 0.6 + dist * 0.4, dist * 0.9);
+  // Projection + framing always apply immediately; only the pose is optionally flown.
   camera.near = modelRadius * 0.01;
   camera.far = modelRadius * 200;
   camera.updateProjectionMatrix();
-  controls.update();
+
+  const dist = modelRadius * 3.2;
+  homePos.set(dist * 0.8, size.y * 0.6 + dist * 0.4, dist * 0.9);
+  homeTarget.set(0, size.y * 0.5, 0);
+  homeView();
 
   ui.explode.max = (modelRadius * 2.5).toFixed(3);
   ui.explode.step = (modelRadius * 0.004).toFixed(4);
   ui.explode.value = 0;
+}
+
+// The default framing, captured by frameModel() when the model was built.
+const homePos = new THREE.Vector3();
+const homeTarget = new THREE.Vector3();
+
+/**
+ * Return the camera to that default framing — the Reset button and "recenter".
+ * Skipped during AR for the same reason as flyTo(): `camera` is the device pose
+ * there. "Recenter" is still reachable by voice mid-session, so the guard has to
+ * live here rather than at the call sites.
+ */
+function homeView({ animate = false } = {}) {
+  if (renderer.xr.isPresenting) return;
+  moveCamera(camera, controls, homePos, homeTarget, { animate });
 }
 
 function buildLegend() {
@@ -293,12 +326,86 @@ function onExplodeChange() {
   const amount = parseFloat(ui.explode.value);
   setExplode(parts, amount);
   groundExploded(); // exploding pushes parts every direction incl. down — keep them above the floor
+  updateExplodeReadout(amount);
+}
+
+// Slider value + numeric readouts. Split out of onExplodeChange because the
+// explode tween positions parts itself (per-part, staggered) and must not go
+// back through setExplode — that would flatten the cascade to a uniform amount.
+function updateExplodeReadout(amount) {
   ui.explodeVal.textContent = amount.toFixed(2);
   // Keep the Explore card's inline slider in step with the panel slider.
   if (cardExplode) {
     cardExplode.slider.value = ui.explode.value;
     cardExplode.val.textContent = amount.toFixed(2);
   }
+}
+
+// Fraction of the tween spent handing off between parts. Each part eases over
+// the remaining window, so the model unpeels outward instead of inflating as one
+// rigid shell. Parts are ordered largest-first, so the big shapes lead.
+const EXPLODE_STAGGER = 0.45;
+
+/**
+ * Set the explode amount programmatically, optionally animated.
+ *
+ * Dragging the slider stays instant (a tweened drag just feels laggy); every
+ * *indirect* change — entering a mode, a voice command, Reset — animates.
+ */
+function setExplodeAmount(amount, { animate = false, duration = 700 } = {}) {
+  const to = THREE.MathUtils.clamp(amount, parseFloat(ui.explode.min) || 0, parseFloat(ui.explode.max));
+  const from = parseFloat(ui.explode.value) || 0;
+
+  if (!animate) {
+    cancelTween('explode');
+    ui.explode.value = to;
+    onExplodeChange();
+    return;
+  }
+  // Already there (e.g. Fix → Diagnose, both at the same mild spread): don't
+  // collapse and re-expand for nothing.
+  if (Math.abs(to - from) < 1e-4) return;
+
+  const n = parts.length;
+  tweenTo('explode', {
+    duration,
+    onUpdate: (eased, raw) => {
+      for (let i = 0; i < n; i++) {
+        const start = n > 1 ? (i / (n - 1)) * EXPLODE_STAGGER : 0;
+        const local = THREE.MathUtils.clamp((raw - start) / (1 - EXPLODE_STAGGER), 0, 1);
+        setPartExplode(parts[i], from + (to - from) * easeInOutCubic(local));
+      }
+      groundExploded();
+      ui.explode.value = from + (to - from) * eased;
+      updateExplodeReadout(parseFloat(ui.explode.value));
+    },
+  });
+}
+
+/**
+ * Bounds of the model with every part at rest — what AR sizes its placement
+ * against, so "fit to 0.7 m" always means the assembled object regardless of how
+ * far it happens to be exploded when the session starts.
+ *
+ * Computed without touching the live positions: parts rest at the group origin
+ * with their geometry baked to world space, so the union of their geometry
+ * bounding boxes *is* the assembled model. Only the size carries over — the
+ * placement itself is fully determined by the invariant that frameModel() and
+ * groundExploded() maintain at rest (centred in x/z, bottom on the floor), and
+ * the group's live y is contaminated by the current explode.
+ */
+function restBounds() {
+  const local = new THREE.Box3();
+  for (const p of parts) {
+    if (!p.mesh.geometry.boundingBox) p.mesh.geometry.computeBoundingBox();
+    local.union(p.mesh.geometry.boundingBox);
+  }
+  if (local.isEmpty()) return null;
+  const size = local.getSize(new THREE.Vector3());
+  return new THREE.Box3(
+    new THREE.Vector3(-size.x / 2, 0, -size.z / 2),
+    new THREE.Vector3(size.x / 2, size.y, size.z / 2)
+  );
 }
 
 // Lift the whole exploded group so its lowest point rests on the ground plane
@@ -316,7 +423,8 @@ function groundExploded() {
   if (box.isEmpty()) return;
   explodedGroup.position.y -= box.min.y; // shift so the parent-local bottom sits at 0
 }
-ui.explode.addEventListener('input', onExplodeChange);
+// A direct drag wins over any animation still in flight.
+ui.explode.addEventListener('input', () => { cancelTween('explode'); onExplodeChange(); });
 
 ui.model.addEventListener('change', () => { track('model-load', { metadata: { model: ui.model.value } }); loadModel(ui.model.value); });
 ui.mode.addEventListener('change', () => { if (originalScene) rebuild(); });
@@ -331,9 +439,8 @@ function applyWireframe(on) {
 ui.wireframe.addEventListener('change', () => applyWireframe(ui.wireframe.checked));
 
 ui.reset.addEventListener('click', () => {
-  ui.explode.value = 0;
-  onExplodeChange();
-  if (explodedGroup) frameModel();
+  setExplodeAmount(0, { animate: true });
+  homeView({ animate: true });
 });
 
 window.addEventListener('resize', resize);
@@ -400,18 +507,39 @@ function showCard(kicker, bodyHtml, meta = '', { chips = null, nav = false } = {
 function hideCard() { ui.card.classList.remove('show'); }
 
 // Reset all part visuals to a clean, fully-assembled, fully-visible state.
+// The collapse animates, but a mode that immediately re-spreads (Fix, Diagnose,
+// Quiz) replaces the tween before it ticks, so there's no collapse-then-expand
+// flicker on the way in — see setExplodeAmount's no-op guard.
 function resetParts() {
   clearPartStates(parts);
   for (const p of parts) p.mesh.visible = true;
-  ui.explode.value = 0;
-  onExplodeChange();
+  setExplodeAmount(0, { animate: true });
 }
 
 // Spread parts a little so the highlighted one is easy to see in a procedure.
 function mildExplode() {
-  const amt = parseFloat(ui.explode.max) * 0.35;
-  ui.explode.value = amt;
-  onExplodeChange();
+  setExplodeAmount(parseFloat(ui.explode.max) * 0.35, { animate: true });
+}
+
+/**
+ * Frame a step's part(s): the guided modes move the camera to whatever they just
+ * spotlighted, so the user never has to hunt for the glowing piece.
+ *
+ * Skipped during AR, where `camera` is the device pose and writing to it would
+ * fight WebXR — there you walk around the object instead.
+ */
+function flyTo(indices) {
+  if (renderer.xr.isPresenting || !indices || !indices.length) return;
+  flyToParts({
+    camera,
+    controls,
+    parts,
+    indices,
+    // Never closer than roughly the model's own size, or framing a caster would
+    // put the camera inside the chair.
+    minDistance: modelRadius * 1.15,
+    maxDistance: modelRadius * 4,
+  });
 }
 
 function enterMode(id) {
@@ -472,7 +600,7 @@ function enterFix() {
 function enterAssemble() {
   const proc = resolveAssemble(currentKey(), parts);
   steps = proc.steps; stepIndex = 0; stepTitle = proc.title; stepKicker = 'Assemble';
-  ui.explode.value = 0; onExplodeChange();
+  setExplodeAmount(0, { animate: true });
   renderStep();
 }
 function renderStep() {
@@ -491,6 +619,7 @@ function renderStep() {
   } else {
     isolateParts(parts, stepIndices); // spotlight this step's part(s), dim the rest
   }
+  flyTo(stepIndices); // and bring it to the user rather than making them orbit for it
 
   const partName = stepIndices.length ? parts[stepIndices[0]].name : null;
   focusedPart = partName;
@@ -530,6 +659,7 @@ async function showDiagnosis(i) {
   const d = diagnoses[i];
   const myReq = ++diagnoseSeq;               // newest pick wins if answers race
   isolateParts(parts, d.indices);
+  flyTo(d.indices);
   const chips = diagnoses.map((dd, j) => ({ label: dd.symptoms[0], onClick: () => showDiagnosis(j) }));
   const partName = d.indices.length ? parts[d.indices[0]].name : '';
   focusedPart = partName || focusedPart;
@@ -555,6 +685,7 @@ function renderQuiz() {
   const q = quizItems[quizIndex];
   quizRevealed = false;
   isolateParts(parts, q.indices);
+  flyTo(q.indices); // the part being asked about has to be visible to be answerable
   focusedPart = q.indices.length ? parts[q.indices[0]].name : focusedPart;
   showCard('Quiz', q.question, `Question ${quizIndex + 1} of ${quizItems.length}`, {
     chips: [
@@ -680,9 +811,8 @@ function setToggle(el, on) {
 
 // Reframe the camera + collapse the explode (same as the Reset-view button).
 function recenterView() {
-  ui.explode.value = 0;
-  onExplodeChange();
-  if (explodedGroup) frameModel();
+  setExplodeAmount(0, { animate: true });
+  homeView({ animate: true });
 }
 
 // Highlight a part the user named out loud. Returns true if one matched.
@@ -775,10 +905,9 @@ async function runCommand(cmd) {
     case 'repeat': say(lastSpoken); break;
     case 'reset': enterMode(currentMode); break;
     case 'explode':
-      ui.explode.value = cmd.amount ? (parseFloat(ui.explode.max) * cmd.amount).toFixed(3) : ui.explode.max;
-      onExplodeChange();
+      setExplodeAmount(parseFloat(ui.explode.max) * (cmd.amount || 1), { animate: true, duration: 1100 });
       break;
-    case 'collapse': ui.explode.value = 0; onExplodeChange(); break;
+    case 'collapse': setExplodeAmount(0, { animate: true, duration: 1100 }); break;
     case 'recenter': recenterView(); break;
     case 'reveal': if (currentMode === 'quiz') revealQuiz(); break;
     case 'wireframe': setToggle(ui.wireframe, cmd.value); break;
@@ -862,12 +991,14 @@ ui.micBtn.addEventListener('click', () => {
 async function startARFlow() {
   if (renderer.xr.isPresenting) return;
   if (ui.startAR.disabled) { showCaption('AR needs an Android phone. Tap 📱 for details.'); return; }
+  cancelTween('camera'); // ar.js saves + owns the camera pose from here on
   try {
     document.body.classList.add('ar-active');
     track('ar-start', { metadata: { model: ui.model.value } });
     await startAR({
       renderer, scene, camera, group: explodedGroup, controls,
       overlay: document.body,
+      fitBox: restBounds(), // size to the assembled chair, not its exploded spread
       onPlaced: () => {
         track('ar-placed', { metadata: { model: ui.model.value } });
         showCaption('Placed! Long-press to grab it, then drag to move · pinch to zoom · twist to rotate.');
@@ -943,13 +1074,22 @@ function resize() {
 
 // setAnimationLoop works both for normal rAF and inside a WebXR session
 // (three.js passes the XRFrame as the 2nd arg during an AR session).
+let lastFrameTime = 0;
 renderer.setAnimationLoop((time, frame) => {
+  // Clamp the delta: a backgrounded tab resumes with a huge gap, which would
+  // otherwise finish every in-flight tween in a single jump.
+  const dt = lastFrameTime ? Math.min((time - lastFrameTime) / 1000, 0.1) : 0;
+  lastFrameTime = time;
+
   if (frame) updateAR(frame);
   if (!renderer.xr.isPresenting) {
     resize();
-    controls.autoRotate = ui.autorotate.checked;
+    // Auto-rotate orbits around controls.target every update, so it has to yield
+    // while a flight is writing the camera pose — otherwise the two fight.
+    controls.autoRotate = ui.autorotate.checked && !isTweening('camera');
     controls.autoRotateSpeed = 1.2;
   }
+  updateTweens(dt);
   controls.update();
   renderer.render(scene, camera);
 });

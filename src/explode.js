@@ -375,11 +375,18 @@ export function findPart(parts, keywords) {
 }
 
 /**
+ * Move one part along its explode direction by `amount` world units.
+ * Exposed so an animation can give each part its own amount (a staggered
+ * cascade) instead of driving them all as one rigid shell.
+ */
+export function setPartExplode(part, amount) {
+  part.mesh.position.copy(part.restPosition).addScaledVector(part.direction, amount);
+}
+
+/**
  * Move every part along its explode direction by `amount` world units.
  * amount = 0 reassembles the model exactly.
  */
 export function setExplode(parts, amount) {
-  for (const p of parts) {
-    p.mesh.position.copy(p.restPosition).addScaledVector(p.direction, amount);
-  }
+  for (const p of parts) setPartExplode(p, amount);
 }

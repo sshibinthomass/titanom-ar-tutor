@@ -38,6 +38,7 @@ modules are focused, mostly-pure helpers it calls.
 |------|----------------|
 | [src/main.js](src/main.js) | App shell: renderer/scene/camera/lights, model registry, UI wiring, mode state machine, voice + AR glue, render loop. |
 | [src/explode.js](src/explode.js) | The **core**. Splits a glTF into parts and drives the exploded view + per-part highlight/dim/isolate. |
+| [src/animate.js](src/animate.js) | Tween engine (keyed channels, driven from the render loop) + the camera flight that frames a part. |
 | [src/modes.js](src/modes.js) | The 5 modes + **authored per-model content** (fix steps, diagnoses, quizzes) and semantic part names. |
 | [src/select.js](src/select.js) | Raycast tap/click part-picking (drag threshold so orbiting ≠ tapping). |
 | [src/ar.js](src/ar.js) | WebXR `immersive-ar` session: hit-test reticle, tap-to-place, long-press to grab then one-finger drag-to-move / pinch scale + twist rotate; voice "move it" re-places on a fresh anchor. |
@@ -68,6 +69,39 @@ identity transform and drops in exactly where the original sat.
 Key exports used across the app: `buildExplodedView`, `setExplode`,
 `isolateParts` (spotlight some, dim the rest), `setHighlight`, `clearPartStates`,
 `findParts`/`findPart` (match parts by name keyword).
+
+### Motion (`animate.js`)
+
+Nothing snaps. Two tween **channels** — `'explode'` and `'camera'` — are advanced
+by the single `updateTweens(dt)` call in the render loop; starting a tween on a
+channel replaces the one already there, so mashing **Next** never stacks
+half-finished flights. `prefers-reduced-motion` completes every tween on
+creation, which is exactly the app's old snap behaviour.
+
+- **Explode** is *staggered*: `setExplodeAmount()` gives each part its own slice
+  of the timeline (`EXPLODE_STAGGER`), so the model unpeels outward instead of
+  inflating as one rigid shell. That's why the tween calls `setPartExplode()`
+  per part rather than `setExplode()` — a uniform amount would flatten the
+  cascade. Dragging the slider stays instant and cancels any tween.
+- **Camera** — `flyToParts()` frames whatever a guided step just spotlighted.
+  It **keeps the user's viewing angle** and only orbits (smallest turn that
+  clears the view) when something *solid* blocks the part. Ghosted parts
+  (`isolateParts` dims the rest to ~7%) explicitly don't count as occluders,
+  or every Fix step would swing the camera for nothing.
+
+Three things keep it from fighting other systems — don't regress them:
+
+1. **The destination is re-derived every frame**, not frozen at t=0. An explode
+   tween usually runs alongside, so parts are still moving and `groundExploded()`
+   is still shifting the group vertically. Freezing the target makes the camera
+   drift toward a stale point; freezing the *distance* frames the same step
+   differently depending on whether it was reached mid-explode or after.
+2. **`controls`' `start` event cancels the camera tween** — the moment the user
+   grabs the scene, the flight lets go instead of fighting the drag.
+3. **`autoRotate` yields while a flight runs**, and flights are **skipped
+   entirely during AR** (`renderer.xr.isPresenting`), where `camera` is the
+   device pose and writing to it would fight WebXR. The explode animation *does*
+   run in AR — it's the best thing in the demo there.
 
 ### Modes (`modes.js` + state in `main.js`)
 
@@ -136,7 +170,12 @@ voice commands, modes, model loads and AR; `tts.js` tracks the spoken provider.
 ### AR (`ar.js`)
 
 Scene graph once placed: `anchor` (world pose, on the floor) → `pivot` (user
-rotate/scale about the floor contact) → `group` (the model, fit to ~0.7 m). HTML
+rotate/scale about the floor contact) → `group` (the model, fit to ~0.7 m).
+That fit is measured against the **assembled** model — `main.js` passes
+`fitBox: restBounds()`, since the live bounds grow with the explode amount and
+starting AR from a spread-out mode (Fix/Diagnose/Quiz) would otherwise scale the
+object down to fit its exploded silhouette: entering from Fix placed a chair that
+stood 0.39 m once reassembled, and from a full explode, 0.21 m. HTML
 UI is kept as a `dom-overlay` so the mode bar/cards/mic render over the camera
 feed. `renderer.setAnimationLoop` handles both normal rAF and the XRFrame (Three
 passes the frame as the 2nd arg during a session). `onSessionEnd` fully restores
