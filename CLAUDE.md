@@ -45,6 +45,7 @@ modules are focused, mostly-pure helpers it calls.
 | [src/voice.js](src/voice.js) | Speech-to-text via Web Speech API (`SpeechRecognition`), auto-restarting recognizer. |
 | [src/ai.js](src/ai.js) | DeutschlandGPT chat client (OpenAI-compatible `/chat/completions`). |
 | [src/tutor.js](src/tutor.js) | "Brain" glue: classify a spoken phrase into an app command vs. a free-form question, then answer via AI with context. |
+| [src/telemetry.js](src/telemetry.js) | Langfuse tracing. Batches ingestion events to a credential-free proxy (Vite in dev, Worker in prod). No-op when unconfigured. |
 
 ### The part-splitting core (`explode.js`)
 
@@ -109,6 +110,29 @@ Mic → `voice.js` transcript → `tutor.classifyCommand()`:
 and AI both **degrade gracefully**: no ElevenLabs key → browser speech; no
 DeutschlandGPT → a canned local answer.
 
+### Telemetry (`telemetry.js`)
+
+Everything is traced to **Langfuse**: a session per page load, a trace per voice
+utterance, AI answers as *generations* (model + token usage + latency), plus
+mode/model switches, AR place/exit, TTS provider/fallback, and errors. It speaks
+the Langfuse **ingestion API directly** (batched `{id,type,timestamp,body}`
+events → `POST /api/public/ingestion`) — no SDK, no extra runtime dep.
+
+The interesting constraint: Langfuse ingestion authenticates with a **secret**
+key via Basic auth, which must never enter a static bundle. So the browser sends
+**credential-free** batches and a proxy injects the auth server-side:
+
+- **dev:** the app POSTs to `/lf-api/*`; the Vite proxy ([vite.config.js](vite.config.js))
+  adds `Authorization: Basic <public:secret>` from the non-`VITE_`-prefixed
+  `LANGFUSE_*` vars (so they're never bundled) and forwards to Langfuse Cloud.
+- **prod:** set `VITE_LANGFUSE_BASE_URL` to the Worker's `/langfuse` route — the
+  same Worker as DGPT ([worker/](worker/dgpt-proxy.js)), which holds the keys as
+  secrets. If it's unset, telemetry is a **silent no-op** (like AI/TTS degrade).
+
+Instrumentation points: `answerQuestion` (tutor.js) opens the trace and `chat`
+(ai.js) records the generation; `main.js` calls `track()`/`initTelemetry()` for
+voice commands, modes, model loads and AR; `tts.js` tracks the spoken provider.
+
 ### AR (`ar.js`)
 
 Scene graph once placed: `anchor` (hit-test pose, on the floor) → `pivot` (user
@@ -120,33 +144,46 @@ the desktop scene (parent, transform, background, controls).
 
 ## Configuration & secrets
 
-Config is via `VITE_*` env vars (see [.env.example](.env.example)) — copy to
-`.env` (gitignored). ElevenLabs voice/model, DeutschlandGPT key/base/model.
+Config is via env vars (see [.env.example](.env.example)) — copy to `.env`
+(gitignored). ElevenLabs voice/model, DeutschlandGPT key/base/model, Langfuse
+keys.
 
-> 🔐 **All `VITE_*` values are baked into the public JS bundle** (static site).
-> They are visible to anyone who opens the deployed site. Use **restricted /
-> throwaway keys** and revoke them after the hackathon. A real backend would
-> proxy these.
+> 🔐 **Every `VITE_`-prefixed value is baked into the public JS bundle** (static
+> site) and visible to anyone who opens the deployed site. Use **restricted /
+> throwaway keys** and revoke them after the hackathon.
+>
+> The **Langfuse** keys are deliberately **not** `VITE_`-prefixed
+> (`LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_BASE_URL`), so Vite
+> never bundles them — they're consumed only server-side (the Vite dev proxy and
+> the Worker). The only Langfuse value the client sees is `VITE_LANGFUSE_BASE_URL`
+> (a proxy URL, not a key). This is the pattern the other keys *should* use; a
+> real backend would proxy those too.
 
-### DeutschlandGPT has no CORS
+### DeutschlandGPT + Langfuse both need a proxy
 
-The browser can't call it directly. Two paths, handled in [src/ai.js](src/ai.js):
-- **dev:** the app calls `/dgpt-api/*`; Vite proxies it server-side to
-  `api.deutschlandgpt.de/v2` (see [vite.config.js](vite.config.js)).
-- **prod:** deploy the Cloudflare Worker in [worker/](worker/dgpt-proxy.js)
-  (holds the key as a secret, adds CORS) and set `VITE_DGPT_BASE_URL` to its
-  URL — then **don't** set `VITE_DGPT_API_KEY` in the app.
+Neither can be called from the browser directly (DGPT has no CORS; Langfuse
+needs a secret key). Same two-path pattern for both:
+- **dev:** the app calls `/dgpt-api/*` and `/lf-api/*`; the Vite proxy forwards
+  them server-side (and injects Langfuse Basic auth). See [vite.config.js](vite.config.js).
+- **prod:** deploy the single Cloudflare Worker in [worker/](worker/dgpt-proxy.js)
+  (holds the keys as secrets, adds CORS, routes `/langfuse/*` to Langfuse and
+  everything else to DGPT). Set `VITE_DGPT_BASE_URL` to its root and
+  `VITE_LANGFUSE_BASE_URL` to its `/langfuse` route — and **don't** set
+  `VITE_DGPT_API_KEY` or any `LANGFUSE_*` key in the app.
 
 ## Deploy
 
 [.github/workflows/deploy.yml](.github/workflows/deploy.yml) builds and deploys
 to GitHub Pages on push to `main` (Vite `base: './'` so it works under the Pages
-sub-path). The build reads the six `VITE_*` values from repo **Actions secrets**.
+sub-path). The build reads the `VITE_*` values from repo **Actions secrets**
+(the ElevenLabs/DGPT keys plus `VITE_LANGFUSE_BASE_URL` — note the Langfuse keys
+themselves are **not** here; they live as Worker secrets).
 
 **Status / gotcha:** the build job passes but deploy fails until a repo **admin**
 does two one-time manual steps:
 1. Settings → Pages → Source: **GitHub Actions**.
-2. Add the six `VITE_*` Actions secrets.
+2. Add the `VITE_*` Actions secrets (and deploy the Worker with its secrets for
+   AI + telemetry to work — see [worker/README.md](worker/README.md)).
 
 Then the site is at `https://<owner>.github.io/titanom_hack_2026/`.
 
