@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { buildExplodedView, setExplode, isolateParts, clearPartStates, setHighlight } from './explode.js';
+import { buildExplodedView, setExplode, isolateParts, clearPartStates, setHighlight, findParts } from './explode.js';
 import { attachPicker } from './select.js';
 import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames } from './modes.js';
 import { isARSupported, startAR, updateAR, endAR, requestMove } from './ar.js';
@@ -546,7 +546,97 @@ async function explainFocused() {
   say(ans);
 }
 
-// Execute a parsed voice command.
+// Flip a checkbox and fire its change listeners (so wireframe/tint/autorotate
+// behave exactly as if the user clicked them). `on` undefined → toggle.
+function setToggle(el, on) {
+  el.checked = on === undefined ? !el.checked : !!on;
+  el.dispatchEvent(new Event('change'));
+}
+
+// Reframe the camera + collapse the explode (same as the Reset-view button).
+function recenterView() {
+  ui.explode.value = 0;
+  onExplodeChange();
+  if (explodedGroup) frameModel();
+}
+
+// Highlight a part the user named out loud. Returns true if one matched.
+function selectPartByName(text) {
+  const t = text.toLowerCase();
+  const names = [...new Set(parts.map((p) => (p.name || '').toLowerCase()).filter(Boolean))];
+  // Prefer a full-name hit ("gas cylinder"); fall back to a significant token
+  // ("cylinder", "backrest") so partial phrases still land. Longest match wins.
+  let best = null;
+  for (const name of names) {
+    if (t.includes(name) && (!best || name.length > best.key.length)) best = { name, key: name };
+    for (const tok of name.split(/\s+/)) {
+      if (tok.length >= 3 && new RegExp(`\\b${tok}\\b`).test(t) && (!best || tok.length > best.key.length)) {
+        best = { name, key: tok };
+      }
+    }
+  }
+  if (!best) return false;
+
+  const indices = findParts(parts, [best.name]);
+  if (!indices.length) return false;
+  selectedPart = indices[0];
+  isolateParts(parts, indices);
+  focusedPart = parts[indices[0]].name;
+  showCard('Explore', `<b>${parts[indices[0]].name}</b>`, `${indices.length > 1 ? indices.length + ' pieces' : parts[indices[0]].triangleCount.toLocaleString() + ' triangles'} · say “explain this” for detail`);
+  say(parts[indices[0]].name);
+  return true;
+}
+
+// Switch the active model when the user names one out loud. Returns true if handled.
+const MODEL_KEYWORDS = {
+  'office-chair': ['office chair', 'the chair', 'chair', 'office'],
+  bicycle: ['bicycle', 'bike', 'cycle'],
+  bed: ['bed'],
+};
+function switchModelByVoice(text) {
+  const t = text.toLowerCase();
+  const hasVerb = /(load|switch|change|open|go to|select|bring up|give me|show me|display|put up)/.test(t);
+  const short = t.split(/\s+/).length <= 3; // a bare "bicycle" is intent enough
+  for (const [key, words] of Object.entries(MODEL_KEYWORDS)) {
+    if (words.some((w) => t.includes(w))) {
+      if (key === ui.model.value) { showCaption(`Already on the ${currentModel().label}.`); return true; }
+      if (!hasVerb && !short) return false; // "the chair squeaks" shouldn't switch models
+      ui.model.value = key;
+      ui.model.dispatchEvent(new Event('change'));
+      showCaption(`Loading the ${MODELS[key].label}…`);
+      say(`Here is the ${MODELS[key].label}.`);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Diagnose mode: match a spoken symptom to one of the authored symptom chips.
+function pickSymptomByVoice(text) {
+  if (currentMode !== 'diagnose' || !diagnoses.length) return false;
+  const t = text.toLowerCase();
+  for (let i = 0; i < diagnoses.length; i++) {
+    if (diagnoses[i].symptoms.some((s) => t.includes(s.toLowerCase()))) { showDiagnosis(i); return true; }
+  }
+  return false;
+}
+
+// Quiz mode: did the spoken phrase contain the answer? Reveal + react.
+function answerQuizByVoice(text) {
+  if (currentMode !== 'quiz' || !quizItems.length || quizRevealed) return false;
+  const q = quizItems[quizIndex];
+  const key = String(q.answer).toLowerCase().replace(/^the\s+/, '').split(/[\s(]+/)[0];
+  if (key.length >= 3 && text.toLowerCase().includes(key)) {
+    revealQuiz();
+    say(`Correct — it's ${q.answer}.`);
+    return true;
+  }
+  return false;
+}
+
+const HELP_LINE = 'Try: “next”, “back”, “repeat”, “explode”, “put it together”, “fix it”, “quiz me”, “diagnose”, “show me the seat”, “load the bicycle”, “start AR”, or ask any question.';
+
+// Execute a parsed (model-independent) voice command.
 async function runCommand(cmd) {
   if (cmd.mode) { enterMode(cmd.mode); return; }
   switch (cmd.action) {
@@ -559,7 +649,22 @@ async function runCommand(cmd) {
       break;
     case 'repeat': say(lastSpoken); break;
     case 'reset': enterMode(currentMode); break;
-    case 'explode': ui.explode.value = ui.explode.max; onExplodeChange(); break;
+    case 'explode':
+      ui.explode.value = cmd.amount ? (parseFloat(ui.explode.max) * cmd.amount).toFixed(3) : ui.explode.max;
+      onExplodeChange();
+      break;
+    case 'collapse': ui.explode.value = 0; onExplodeChange(); break;
+    case 'recenter': recenterView(); break;
+    case 'reveal': if (currentMode === 'quiz') revealQuiz(); break;
+    case 'wireframe': setToggle(ui.wireframe, cmd.value); break;
+    case 'tint': setToggle(ui.tint, cmd.value); break;
+    case 'autorotate': setToggle(ui.autorotate, cmd.value); break;
+    case 'startAR': await startARFlow(); break;
+    case 'exitAR': await endAR(); break;
+    case 'move': moveARFlow(); break;
+    case 'stopSpeaking': stopSpeaking(); break;
+    case 'stopListening': recognizer?.stop(); showCaption('Mic off. Tap 🎤 to talk again.'); break;
+    case 'help': showCaption(HELP_LINE); say('You can say next, back, explode, fix it, quiz me, diagnose, show me a part, load a different model, or ask me any question.'); break;
     case 'explain': await explainFocused(); break;
     default: break;
   }
@@ -568,6 +673,15 @@ async function runCommand(cmd) {
 async function handleSpeech(text) {
   const cmd = classifyCommand(text);
   if (cmd.type === 'command') { showCaption(`“${text}”`); await runCommand(cmd); return; }
+
+  // Not a global command — try the data-driven intents that need the live
+  // model/part/symptom lists, in order of specificity, before falling back to AI.
+  if (pickSymptomByVoice(text)) { showCaption(`“${text}”`); return; }
+  if (answerQuizByVoice(text)) { showCaption(`“${text}”`); return; }
+  if (switchModelByVoice(text)) return;
+  const wantsPart = /(show|highlight|select|isolate|where|find|point to|light up|take me to|look at|focus on|which is)/.test(text.toLowerCase());
+  if ((wantsPart || currentMode === 'explore') && selectPartByName(text)) { showCaption(`“${text}”`); return; }
+
   showCaption(`“${text}” · …thinking`);
   const ans = await answerQuestion(getContext(), cmd.text);
   showCaption(ans);
@@ -586,7 +700,12 @@ if (!recognizer) { ui.micBtn.disabled = true; ui.micBtn.title = 'Voice input nee
 ui.micBtn.addEventListener('click', () => {
   if (!recognizer) return;
   stopSpeaking();
-  if (recognizer.isListening()) recognizer.stop(); else recognizer.start();
+  if (recognizer.isListening()) {
+    recognizer.stop();
+  } else {
+    recognizer.start();
+    showCaption(HELP_LINE); // once listening, everything below is voice-drivable
+  }
 });
 
 // AR availability + start/exit.
@@ -598,7 +717,12 @@ ui.micBtn.addEventListener('click', () => {
   }
 })();
 
-ui.startAR.addEventListener('click', async () => {
+// Shared AR entry points (buttons *and* voice call these). Note: WebXR
+// requestSession normally needs a user gesture, so a purely voice-triggered
+// start may be rejected — we catch that and tell the user to tap the button.
+async function startARFlow() {
+  if (renderer.xr.isPresenting) return;
+  if (ui.startAR.disabled) { showCaption('AR needs an Android phone. Tap 📱 for details.'); return; }
   try {
     document.body.classList.add('ar-active');
     await startAR({
@@ -615,15 +739,19 @@ ui.startAR.addEventListener('click', async () => {
   } catch (e) {
     console.error('AR failed', e);
     document.body.classList.remove('ar-active');
-    showCaption('Could not start AR: ' + e.message);
+    showCaption('Could not start AR — tap the ▶ AR button to launch it.');
   }
-});
-ui.exitAR.addEventListener('click', () => endAR());
-ui.moveBtn.addEventListener('click', () => {
+}
+function moveARFlow() {
+  if (!renderer.xr.isPresenting) { showCaption('Start AR first, then say “move it”.'); return; }
   requestMove();
   ui.moveBtn.classList.add('active');
   showCaption('Tap the floor where you want the chair.');
-});
+}
+
+ui.startAR.addEventListener('click', startARFlow);
+ui.exitAR.addEventListener('click', () => endAR());
+ui.moveBtn.addEventListener('click', moveARFlow);
 
 // Mobile: gear toggles the dev panel.
 ui.panelToggle.addEventListener('click', () => ui.panel.classList.toggle('open'));
