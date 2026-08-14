@@ -3,11 +3,11 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { buildExplodedView, setExplode, isolateParts, clearPartStates, setHighlight, findParts } from './explode.js';
 import { attachPicker } from './select.js';
-import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames } from './modes.js';
+import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames, knowledgeDigest } from './modes.js';
 import { isARSupported, startAR, updateAR, endAR, requestMove } from './ar.js';
 import { speak, stop as stopSpeaking } from './tts.js';
 import { createRecognizer, speechRecognitionAvailable } from './voice.js';
-import { classifyCommand, answerQuestion, looksLikeQuestion } from './tutor.js';
+import { classifyCommand, answerQuestion, looksLikeQuestion, answerDiagnosis } from './tutor.js';
 import { initTelemetry, track } from './telemetry.js';
 
 // ---- Model registry --------------------------------------------------------
@@ -321,6 +321,7 @@ let stepIndex = 0;
 let stepTitle = '';
 let stepKicker = '';
 let diagnoses = [];    // diagnose: [{ symptoms, index, text }]
+let diagnoseSeq = 0;   // guards against out-of-order AI answers when chips are tapped quickly
 let quizItems = [];    // quiz: [{ index, question, answer }]
 let quizIndex = 0;
 let quizRevealed = false;
@@ -468,14 +469,21 @@ function enterDiagnose() {
   }));
   showCard('Diagnose', 'What is the symptom? Pick one:', '', { chips });
 }
-function showDiagnosis(i) {
+async function showDiagnosis(i) {
   const d = diagnoses[i];
+  const myReq = ++diagnoseSeq;               // newest pick wins if answers race
   isolateParts(parts, d.indices);
   const chips = diagnoses.map((dd, j) => ({ label: dd.symptoms[0], onClick: () => showDiagnosis(j) }));
   const partName = d.indices.length ? parts[d.indices[0]].name : '';
   focusedPart = partName || focusedPart;
-  showCard('Diagnose', d.text, partName ? `Likely part: ${partName}` : '', { chips });
-  say(d.text);
+  const kicker = partName ? `Likely part: ${partName}` : '';
+  // Highlight the part immediately, then let dGPT explain the fault — grounded in
+  // the authored diagnosis (d.text) so it stays on this part and can't invent.
+  showCard('Diagnose', '…diagnosing', kicker, { chips });
+  const ans = await answerDiagnosis(getContext(), { symptom: d.symptoms[0], part: partName, reference: d.text });
+  if (myReq !== diagnoseSeq) return;         // a newer symptom was picked meanwhile
+  showCard('Diagnose', ans, kicker, { chips });
+  say(ans);
 }
 
 // --- Quiz: highlight a part, ask you to name it ---
@@ -539,6 +547,9 @@ function getContext() {
     parts: parts.map((p) => p.name).filter(Boolean),
     mode: currentMode,
     focusedPart,
+    // Authored fix + diagnosis knowledge for this model, so the AI tutor grounds
+    // free-form answers in the real faults instead of guessing.
+    diagnostics: knowledgeDigest(currentKey()),
   };
 }
 

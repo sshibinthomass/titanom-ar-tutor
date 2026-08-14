@@ -119,6 +119,58 @@ export function looksLikeQuestion(text) {
 }
 
 /**
+ * Diagnose-mode answer. The user picked (or spoke) a symptom that maps to one
+ * specific part; ask DeutschlandGPT to explain THAT fault on THAT part, strictly
+ * grounded in the authored diagnosis so it can't drift to other parts or invent
+ * specifics (torque values, model numbers, steps). Low temperature + an explicit
+ * "don't guess" instruction keep it honest; if the AI is unreachable we fall
+ * back to the authored line, so the demo never goes silent.
+ *
+ * ctx: getContext() result (uses modelLabel + diagnostics digest).
+ * opts: { symptom, part, reference, question? } — reference is the authored
+ * ground-truth diagnosis line; question is an optional user follow-up.
+ */
+export async function answerDiagnosis(ctx, { symptom, part, reference, question }) {
+  const trace = startTrace('ai-diagnose', {
+    input: question || symptom,
+    metadata: { model: ctx.modelLabel, part, symptom },
+  });
+
+  if (!aiAvailable()) {
+    trace.end({ output: reference, metadata: { aiAvailable: false } });
+    return reference; // graceful fallback: the canned diagnosis line
+  }
+
+  const system = [
+    'You are an augmented-reality repair tutor speaking out loud to a user.',
+    `The user is looking at a ${ctx.modelLabel} through their phone camera.`,
+    `They report this symptom: "${symptom}". The relevant part is the ${part}.`,
+    'Explain the cause and the key fix for THIS symptom on THIS part only — nothing else.',
+    'Ground your answer strictly in the reference facts below plus well-established, general repair knowledge for this exact part.',
+    'Do NOT invent part names, model numbers, measurements, torque values, prices, or steps that the reference does not support. Do not mention other parts or unrelated faults.',
+    "If a detail is not covered by the reference, stay general and say what to check rather than guessing. Never state something you are not sure about.",
+    `Reference facts (the ground truth): ${reference}`,
+    ctx.diagnostics && `Broader authored knowledge for this model, for context only: ${ctx.diagnostics}`,
+    'Answer the specific question if one is given, otherwise explain the cause and fix. At most two short spoken sentences. No markdown, no lists.',
+  ].filter(Boolean).join(' ');
+
+  const user = question || `Why does "${symptom}" happen on the ${part}, and how do I fix it?`;
+
+  try {
+    const answer = await chat(
+      [{ role: 'system', content: system }, { role: 'user', content: user }],
+      { temperature: 0.2, maxTokens: 160, trace, name: 'diagnose-answer' }
+    );
+    trace.end({ output: answer });
+    return answer;
+  } catch (e) {
+    console.warn('answerDiagnosis failed:', e.message);
+    trace.end({ output: reference, metadata: { error: e.message } });
+    return reference; // fall back to the authored line on any AI error
+  }
+}
+
+/**
  * Answer a free-form question about the current object via DeutschlandGPT.
  * context: { modelLabel, parts:[names], mode, focusedPart }
  * opts.focusOnly: constrain the answer to `context.focusedPart` alone — used by
@@ -144,7 +196,6 @@ export async function answerQuestion(context, question, { focusOnly = false } = 
     trace.end({ output: fallback, metadata: { aiAvailable: false } });
     return fallback;
   }
-
   let system;
   if (scoped) {
     // Explore: pin the tutor to the one selected part. It must not wander onto
@@ -163,6 +214,11 @@ export async function answerQuestion(context, question, { focusOnly = false } = 
       `The user is looking at a ${context.modelLabel} through their phone camera.`,
       parts && `Its parts are: ${parts}.`,
       focusPart && `They currently have the "${focusPart}" highlighted.`,
+      context.mode === 'diagnose' && 'They are in Diagnose mode, troubleshooting a fault: name the most likely faulty part and the key fix.',
+      // Ground answers in the authored fix/fault knowledge when it applies; fall
+      // back to general repair sense otherwise. This is what lets Diagnose answer
+      // any spoken question, not just the pre-authored symptom chips.
+      context.diagnostics && `Reference knowledge for THIS model — prefer it when relevant, and answer in your own words: ${context.diagnostics}`,
       'Answer in at most two short sentences, plain spoken language, practical and friendly.',
       'If they ask how to fix or replace a part, give the key step. Do not use markdown or lists.',
     ].filter(Boolean).join(' ');
