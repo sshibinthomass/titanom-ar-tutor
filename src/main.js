@@ -804,14 +804,14 @@ async function startARFlow() {
       onPlaced: () => {
         ui.moveBtn.classList.remove('active');
         track('ar-placed', { metadata: { model: ui.model.value } });
-        showCaption('Placed! Long-press the object to select it, then drag to rotate · pinch to scale.');
-        say('Placed. Press and hold the object to select it, then drag to rotate or pinch to resize.');
+        showCaption('Placed! Long-press to grab it, then drag to move · pinch to zoom · twist to rotate.');
+        say('Placed. Press and hold the object to grab it, then drag to move it, or pinch to resize.');
       },
       onSelectedChange: (sel) => {
         track(sel ? 'ar-select' : 'ar-deselect');
         showCaption(sel
-          ? 'Selected — drag to rotate · pinch to scale · tap to deselect.'
-          : 'Deselected. Long-press the object again to make changes.');
+          ? 'Grabbed — drag to move · pinch to zoom · twist to rotate · tap to release.'
+          : 'Released. Long-press the object again to move or resize it.');
       },
       onEnd: () => { document.body.classList.remove('ar-active'); ui.moveBtn.classList.remove('active'); track('ar-exit'); },
     });

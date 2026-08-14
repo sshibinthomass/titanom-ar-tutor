@@ -28,12 +28,13 @@ import * as THREE from 'three';
  *
  * Flow: start session → a reticle tracks real surfaces (only shown once stable)
  * → tap to place the exploded model → then manipulate it:
- *   • long-press       → select the object (a turquoise floor ring appears);
- *                        rotate/scale only act on a *selected* object, so a
- *                        stray touch never nudges it. A tap deselects.
- *   • one-finger drag  → rotate around the vertical axis (when selected)
- *   • two-finger pinch → scale (when selected)
- *   • "Move" button    → tap a new spot to re-place it
+ *   • long-press       → "grab" the object (a turquoise floor ring appears);
+ *                        keep dragging the same finger to slide it. Manipulation
+ *                        only acts on a *selected* object, so a stray touch
+ *                        never nudges it. A tap deselects.
+ *   • one-finger drag  → move it across the floor (when selected)
+ *   • two-finger pinch → scale, and twist to rotate (when selected)
+ *   • "Move" button    → tap a new spot to re-place it on a fresh anchor
  *
  * Scene graph once placed:
  *   anchor (matrix driven by the live XRAnchor pose, on the floor)
@@ -130,6 +131,14 @@ function stabilizerStart(pos, quat) {
 const _p = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _s = new THREE.Vector3();
+
+// Scratch vectors for drag-to-move (reused so a drag doesn't churn GC).
+const _right = new THREE.Vector3();
+const _fwd = new THREE.Vector3();
+const _delta = new THREE.Vector3();
+const _quat = new THREE.Quaternion();
+
+const MOVE_METERS_PER_PX = 0.0022; // drag sensitivity for sliding on the floor
 
 /** Feed a raw hit-test matrix; returns a smoothed Matrix4 once stable, else null. */
 function stabilizerUpdate(rawMatrix, dt) {
@@ -391,6 +400,36 @@ function cancelPressTimer() {
   if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
 }
 
+/** Begin sliding the object under the current one-finger press. */
+function startMoveGesture(clientX, clientY) {
+  gesture = { mode: 'move', startX: clientX, startY: clientY, startPos: pivot.position.clone(), moved: false };
+}
+
+/**
+ * Slide the object across the floor, camera-relative: horizontal drag moves it
+ * left/right, vertical drag pushes it away / pulls it closer. The delta is
+ * built in world space from the camera's (flattened) right/forward axes, then
+ * rotated into the anchor's local frame — the anchor is gravity-aligned, so the
+ * object stays on the floor and only its footprint position changes.
+ */
+function applyMove(clientX, clientY) {
+  const dx = clientX - gesture.startX;
+  const dy = clientY - gesture.startY;
+
+  const cam = refs.renderer.xr.getCamera();
+  _right.setFromMatrixColumn(cam.matrixWorld, 0); _right.y = 0; _right.normalize();
+  cam.getWorldDirection(_fwd); _fwd.y = 0; _fwd.normalize();
+
+  _delta.set(0, 0, 0)
+    .addScaledVector(_right, dx * MOVE_METERS_PER_PX)
+    .addScaledVector(_fwd, -dy * MOVE_METERS_PER_PX); // drag up → push away
+
+  anchor.getWorldQuaternion(_quat).invert();
+  _delta.applyQuaternion(_quat); // world → anchor-local (yaw only, stays horizontal)
+
+  pivot.position.copy(gesture.startPos).add(_delta);
+}
+
 function onTouchStart(e) {
   if (!placed || moveMode) return;
   if (isUI(e.target)) return;
@@ -400,21 +439,24 @@ function onTouchStart(e) {
     pressStart = { x: t.clientX, y: t.clientY, t: performance.now() };
     pressMovedFar = false;
     longPressFired = false;
-    // A one-finger press only rotates once the object is already selected.
-    gesture = selected
-      ? { mode: 'rotate', x: t.clientX, startRotY: pivot.rotation.y, moved: false }
-      : null;
-    // Hold still long enough → select (only meaningful while unselected).
     cancelPressTimer();
-    if (!selected) {
+    if (selected) {
+      // Already selected → this drag slides the object right away.
+      startMoveGesture(t.clientX, t.clientY);
+    } else {
+      // Not selected yet → hold still to "grab" it, then keep dragging to move.
+      gesture = null;
       pressTimer = setTimeout(() => {
         pressTimer = null;
-        if (!pressMovedFar) { longPressFired = true; gesture = null; setSelected(true); }
+        if (pressMovedFar) return;
+        longPressFired = true;
+        setSelected(true);
+        startMoveGesture(pressStart.x, pressStart.y);
       }, LONG_PRESS_MS);
     }
   } else if (e.touches.length === 2) {
     cancelPressTimer();
-    // Pinch/twist also requires a prior selection.
+    // Pinch to scale + twist to rotate — also requires a prior selection.
     gesture = selected ? {
       mode: 'pinch',
       startDist: touchDist(e.touches),
@@ -437,10 +479,9 @@ function onTouchMove(e) {
   }
 
   if (!gesture) return;
-  if (gesture.mode === 'rotate' && e.touches.length === 1) {
-    const dx = e.touches[0].clientX - gesture.x;
-    pivot.rotation.y = gesture.startRotY + dx * 0.01;
-    gesture.moved = true;
+  if (gesture.mode === 'move' && e.touches.length === 1) {
+    applyMove(e.touches[0].clientX, e.touches[0].clientY);
+    if (pressMovedFar) gesture.moved = true;
     e.preventDefault();
   } else if (gesture.mode === 'pinch' && e.touches.length === 2) {
     const scale = gesture.startScale * (touchDist(e.touches) / gesture.startDist);
@@ -454,8 +495,8 @@ function onTouchEnd(e) {
   if (e.touches.length > 0) return; // wait until all fingers are up
   cancelPressTimer();
 
-  // A quick, still, single-finger tap (that neither selected nor rotated)
-  // deselects — the way to "let go" of the object.
+  // A quick, still, single-finger tap (that neither selected nor moved the
+  // object) deselects — the way to "let go".
   const wasTap = pressStart && !pressMovedFar && !longPressFired
     && (performance.now() - pressStart.t) < LONG_PRESS_MS
     && !(gesture && gesture.moved);
