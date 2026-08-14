@@ -11,24 +11,29 @@ import { classifyCommand, answerQuestion } from './tutor.js';
 
 // ---- Model registry --------------------------------------------------------
 
+// Vite's base URL ('./' here) so model paths resolve under the GitHub Pages
+// sub-path (…/titanom-ar-tutor/) as well as at localhost root. An absolute
+// '/models/…' would wrongly point at the domain root on Pages.
+const BASE_URL = import.meta.env.BASE_URL;
+
 const MODELS = {
   'office-chair': {
     label: 'Office Chair',
-    url: '/models/office-chair/scene.gltf',
+    url: `${BASE_URL}models/office-chair/scene.gltf`,
     credit: 'Office Chair Modern — thethieme, CC-BY-4.0',
     creditUrl: 'https://sketchfab.com/3d-models/office-chair-modern-675f34f7304e4d92812a41e9750539aa',
     defaultMode: 'component', // single fused mesh → must split by connected pieces
   },
   bicycle: {
     label: 'Bicycle',
-    url: '/models/bicycle/scene.gltf',
+    url: `${BASE_URL}models/bicycle/scene.gltf`,
     credit: 'bicycle — local.yany, CC-BY-4.0',
     creditUrl: 'https://sketchfab.com/3d-models/bicycle-8db2d442b58045baac2edfc5e9ee11e3',
     defaultMode: 'group', // 14 meshes, one per material → clean semantic parts
   },
   bed: {
     label: 'Bed Low Poly',
-    url: '/models/bed/scene.gltf',
+    url: `${BASE_URL}models/bed/scene.gltf`,
     credit: 'Bed Low Poly — LinNacume, CC-BY-4.0',
     creditUrl: 'https://sketchfab.com/3d-models/bed-low-poly-b19855811635449288827767b45d4b38',
     defaultMode: 'component', // single merged mesh → must split by connected pieces
