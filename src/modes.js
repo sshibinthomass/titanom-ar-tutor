@@ -89,10 +89,74 @@ const CONTENT = {
         { match: ['seat', 'cushion', 'pan'], text: 'Refit the seat onto the cylinder and press down firmly to seat the taper.' },
       ],
     },
+    // Diagnose = symptom → likely part. symptoms[0] is the chip label; every
+    // string in the array is also a voice-match keyword (spoken transcript is
+    // substring-matched against them, so include short single words, not just
+    // the display phrase). `match` targets a part by name.includes() — note
+    // 'base' would hit BOTH "Star base" and "Base hub", so we use 'star' and
+    // 'hub' to keep them distinct. Ordered most-common first; keep single-word
+    // keywords unique across entries so voice picks the intended symptom.
     diagnose: [
-      { symptoms: ['sinking', 'sinks', 'drops', 'lowering'], match: ['cylinder', 'gas', 'lift', 'piston', 'strut'], text: 'A chair that slowly sinks has a failed gas cylinder — its internal seal leaks. Highlighted is the gas lift; it needs replacing.' },
-      { symptoms: ['wobble', 'tilts', 'leaning', 'unstable'], match: ['base', 'star', 'foot', 'spider'], text: 'Wobble usually means a cracked star base or a loose caster. Highlighted is the base.' },
-      { symptoms: ['rolling', 'stuck', 'caster', 'wheel'], match: ['wheel', 'caster', 'roller'], text: 'Rolling trouble is a jammed or broken caster. Highlighted is the wheel set — pop it out and swap it.' },
+      {
+        symptoms: ['Seat keeps sinking', 'sinking', 'sinks', 'drops', 'lowering', 'goes down', 'losing height', 'wont stay up'],
+        match: ['cylinder', 'gas', 'lift', 'piston', 'strut'],
+        text: 'A seat that slowly sinks under your weight is a failed gas cylinder — the pneumatic seal has lost its charge. It cannot be refilled, so swap the whole gas lift. Highlighted is the cylinder.',
+      },
+      {
+        symptoms: ['Won\'t rise', 'wont rise', 'wont go up', 'wont raise', 'wont lift', 'stays down', 'stuck low'],
+        match: ['cylinder', 'gas', 'lift', 'piston', 'strut'],
+        text: 'If pressing the lever no longer raises the seat, the gas cylinder has lost its pressure completely. First confirm the lever actually pushes the valve pin; if it does, replace the gas lift. Highlighted is the cylinder.',
+      },
+      {
+        symptoms: ['Height lever stuck', 'lever', 'paddle', 'wont adjust', 'height stuck', 'cant change height'],
+        match: ['lever', 'height'],
+        text: 'No height change when you lift the paddle points to a stuck or disconnected height lever — its linkage is not pressing the cylinder valve pin. Check the arm or cable down to the valve. Highlighted is the height lever.',
+      },
+      {
+        symptoms: ['Chair wobbles', 'wobble', 'wobbles', 'unstable', 'rocking', 'leaning', 'tilts', 'shaky'],
+        match: ['star'],
+        text: 'Side-to-side wobble usually means a cracked or flexing star base, or one arm not sitting flat. Set it on hard floor and press each arm to find the give. Highlighted is the star base.',
+      },
+      {
+        symptoms: ['Cracked base', 'crack', 'cracked', 'split base', 'broken base', 'snapped'],
+        match: ['star'],
+        text: 'A visible crack in a plastic star base is a safety risk and cannot be reliably glued — replace the base. A metal base can sometimes be re-welded. Highlighted is the star base.',
+      },
+      {
+        symptoms: ['Won\'t roll', 'jammed', 'stuck wheel', 'dragging', 'hard to move', 'wont roll', 'caught'],
+        match: ['caster', 'wheel', 'roller'],
+        text: 'A chair that drags or will not roll has a jammed caster — usually hair and carpet fibre wound around the axle. Pop the caster out, clear it, or swap in a new one. Highlighted is the caster set.',
+      },
+      {
+        symptoms: ['Rolls away', 'rolls away', 'drifts', 'slides', 'wont stay put', 'rolls on its own'],
+        match: ['caster', 'wheel', 'roller'],
+        text: 'A chair that rolls on its own has worn casters or the wrong wheel for the floor — fit braked casters, or the correct hard-floor or carpet type. Highlighted is the caster set.',
+      },
+      {
+        symptoms: ['Squeaks and creaks', 'squeak', 'squeaks', 'creak', 'noise', 'clicking', 'grinding'],
+        match: ['hub'],
+        text: 'Squeaks and creaks come from the central mechanism and swivel — the tilt springs, the seat-plate bolts, or the cylinder top bearing. Tighten the under-seat bolts and grease the swivel. Highlighted is the base hub.',
+      },
+      {
+        symptoms: ['Won\'t swivel', 'wont swivel', 'wont turn', 'stiff swivel', 'hard to turn', 'seized'],
+        match: ['hub'],
+        text: 'A seat that will not rotate has a seized swivel bearing in the base hub, usually dry or rust-bound. Lift the seat off and grease the bearing race. Highlighted is the base hub.',
+      },
+      {
+        symptoms: ['Loose backrest', 'backrest', 'back wobbles', 'wont recline', 'reclines too far', 'floppy back'],
+        match: ['backrest'],
+        text: 'A loose or free-flopping backrest is loose mounting bolts or a worn recline-tension knob on the back bracket. Tighten the bracket bolts and reset the tension. Highlighted is the backrest.',
+      },
+      {
+        symptoms: ['Loose armrest', 'armrest', 'arm wobbles', 'arm loose', 'broken arm'],
+        match: ['armrest', 'arm'],
+        text: 'A wobbly armrest is almost always loose bolts under the seat pan where the arm mounts. Tighten them; if the arm itself is cracked, replace it. Highlighted is the armrest.',
+      },
+      {
+        symptoms: ['Seat wobbles', 'seat loose', 'seat rocks', 'loose seat', 'seat moves'],
+        match: ['seat'],
+        text: 'A seat that rocks but does not sink is loose seat-plate bolts between the cushion and the tilt mechanism. Flip the chair and tighten the four mounting bolts. Highlighted is the seat.',
+      },
     ],
     quiz: [
       { match: ['cylinder', 'gas', 'lift', 'strut'], question: 'What part lets you raise and lower the seat?', answer: 'the gas cylinder (pneumatic lift)' },
@@ -180,6 +244,30 @@ export function resolveAssemble(modelKey, parts) {
 export function resolveDiagnose(modelKey, parts) {
   const entries = CONTENT[modelKey]?.diagnose ?? [];
   return entries.map((e) => ({ symptoms: e.symptoms, indices: findParts(parts, e.match), text: e.text }));
+}
+
+/**
+ * A compact, spoken-friendly digest of everything we've authored about a model:
+ * the repair procedure and every symptom → cause → fix. Handed to the AI tutor
+ * as grounding so free-form questions ("why does it sink?", "how do I fix the
+ * wobble?", "what makes it squeak?") are answered from THIS chair's real faults
+ * and repairs, not generic guesses — while the canned chips stay for a reliable
+ * tap/voice demo. The UI-only "Highlighted is the X." tail is stripped so the AI
+ * doesn't parrot it. Returns '' when a model has no authored content.
+ */
+export function knowledgeDigest(modelKey) {
+  const c = CONTENT[modelKey];
+  if (!c) return '';
+  const clean = (s) => s.replace(/\s*Highlighted is[^.]*\.\s*$/i, '').trim();
+  const lines = [];
+  if (c.fix?.title) {
+    lines.push(`Repair procedure — ${c.fix.title}: ${c.fix.steps.map((s) => clean(s.text)).join(' ')}`);
+  }
+  if (c.diagnose?.length) {
+    lines.push('Known faults (symptom — cause and fix): ' +
+      c.diagnose.map((d) => `${d.symptoms[0]}: ${clean(d.text)}`).join(' '));
+  }
+  return lines.join(' ');
 }
 
 /** Quiz entries → [{ indices, question, answer }] (only those that matched parts). */
