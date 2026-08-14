@@ -120,6 +120,7 @@ const ui = {
   panelToggle: document.getElementById('panelToggle'),
   themeToggle: document.getElementById('themeToggle'),
   panel: document.querySelector('.panel'),
+  sheetBackdrop: document.getElementById('sheetBackdrop'),
 };
 
 // ---- State -----------------------------------------------------------------
@@ -773,8 +774,16 @@ ui.startAR.addEventListener('click', startARFlow);
 ui.exitAR.addEventListener('click', () => endAR());
 ui.moveBtn.addEventListener('click', moveARFlow);
 
-// Mobile: gear toggles the dev panel.
-ui.panelToggle.addEventListener('click', () => ui.panel.classList.toggle('open'));
+// Mobile: gear opens the dev-controls bottom sheet; the backdrop (or gear
+// again) dismisses it. On desktop the sheet class is inert — the panel is
+// always visible top-left — so this just no-ops visually there.
+function toggleSheet(open) {
+  const isOpen = open === undefined ? !ui.panel.classList.contains('open') : open;
+  ui.panel.classList.toggle('open', isOpen);
+  ui.sheetBackdrop.classList.toggle('show', isOpen);
+}
+ui.panelToggle.addEventListener('click', () => toggleSheet());
+ui.sheetBackdrop.addEventListener('click', () => toggleSheet(false));
 
 // ---- Theme (light default; persisted) --------------------------------------
 // Light is the product default — we only flip to dark on an explicit choice,
