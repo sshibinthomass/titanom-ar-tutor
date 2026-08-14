@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { buildExplodedView, setExplode, isolateParts, clearPartStates, setHighlight } from './explode.js';
 import { attachPicker } from './select.js';
 import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames } from './modes.js';
-import { isARSupported, startAR, updateAR, endAR } from './ar.js';
+import { isARSupported, startAR, updateAR, endAR, requestMove } from './ar.js';
 import { speak, stop as stopSpeaking } from './tts.js';
 import { createRecognizer, speechRecognitionAvailable } from './voice.js';
 import { classifyCommand, answerQuestion } from './tutor.js';
@@ -111,6 +111,7 @@ const ui = {
   startAR: document.getElementById('startAR'),
   exitAR: document.getElementById('exitAR'),
   micBtn: document.getElementById('micBtn'),
+  moveBtn: document.getElementById('moveBtn'),
   voiceCaption: document.getElementById('voiceCaption'),
   panelToggle: document.getElementById('panelToggle'),
   panel: document.querySelector('.panel'),
@@ -603,8 +604,12 @@ ui.startAR.addEventListener('click', async () => {
     await startAR({
       renderer, scene, camera, group: explodedGroup, controls,
       overlay: document.body,
-      onPlaced: () => { showCaption('Placed! Pick a mode or tap 🎤 Ask.'); say('Placed. What would you like to do?'); },
-      onEnd: () => { document.body.classList.remove('ar-active'); },
+      onPlaced: () => {
+        ui.moveBtn.classList.remove('active');
+        showCaption('Placed! Drag to rotate · pinch to scale · ✋ Move to reposition.');
+        say('Placed. Drag with one finger to rotate, or pinch to resize.');
+      },
+      onEnd: () => { document.body.classList.remove('ar-active'); ui.moveBtn.classList.remove('active'); },
     });
     showCaption('Point at the floor, then tap to place the chair.');
   } catch (e) {
@@ -614,6 +619,11 @@ ui.startAR.addEventListener('click', async () => {
   }
 });
 ui.exitAR.addEventListener('click', () => endAR());
+ui.moveBtn.addEventListener('click', () => {
+  requestMove();
+  ui.moveBtn.classList.add('active');
+  showCaption('Tap the floor where you want the chair.');
+});
 
 // Mobile: gear toggles the dev panel.
 ui.panelToggle.addEventListener('click', () => ui.panel.classList.toggle('open'));

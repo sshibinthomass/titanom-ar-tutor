@@ -151,6 +151,10 @@
       #exitAR {
         position: fixed; top: 16px; left: 16px; z-index: 40; display: none;
       }
+      #moveBtn {
+        position: fixed; bottom: 24px; left: 16px; z-index: 40; display: none;
+      }
+      #moveBtn.active { background: var(--accent); color: #0b0d12; border-color: var(--accent); }
       .voice-caption {
         position: fixed; bottom: 44px; left: 50%; transform: translateX(-50%);
         max-width: min(560px, calc(100vw - 32px)); z-index: 25;
@@ -173,7 +177,8 @@
       body.ar-active #panelToggle,
       body.ar-active .status,
       body.ar-active .fab.ar { display: none !important; }
-      body.ar-active #exitAR { display: flex; }
+      body.ar-active #exitAR,
+      body.ar-active #moveBtn { display: flex; }
 
       /* ---- Mobile ---- */
       @media (max-width: 720px) {
@@ -252,6 +257,7 @@
     </div>
 
     <button class="fab" id="exitAR">✕ Exit AR</button>
+    <button class="fab" id="moveBtn">✋ Move</button>
 
     <div class="voice-caption" id="voiceCaption"></div>
 
