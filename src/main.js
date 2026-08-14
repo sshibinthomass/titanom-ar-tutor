@@ -115,7 +115,6 @@ const ui = {
   startAR: document.getElementById('startAR'),
   exitAR: document.getElementById('exitAR'),
   micBtn: document.getElementById('micBtn'),
-  moveBtn: document.getElementById('moveBtn'),
   voiceCaption: document.getElementById('voiceCaption'),
   panelToggle: document.getElementById('panelToggle'),
   themeToggle: document.getElementById('themeToggle'),
@@ -802,7 +801,6 @@ async function startARFlow() {
       renderer, scene, camera, group: explodedGroup, controls,
       overlay: document.body,
       onPlaced: () => {
-        ui.moveBtn.classList.remove('active');
         track('ar-placed', { metadata: { model: ui.model.value } });
         showCaption('Placed! Long-press to grab it, then drag to move · pinch to zoom · twist to rotate.');
         say('Placed. Press and hold the object to grab it, then drag to move it, or pinch to resize.');
@@ -813,7 +811,7 @@ async function startARFlow() {
           ? 'Grabbed — drag to move · pinch to zoom · twist to rotate · tap to release.'
           : 'Released. Long-press the object again to move or resize it.');
       },
-      onEnd: () => { document.body.classList.remove('ar-active'); ui.moveBtn.classList.remove('active'); track('ar-exit'); },
+      onEnd: () => { document.body.classList.remove('ar-active'); track('ar-exit'); },
     });
     showCaption('Point at the floor, then tap to place the chair.');
   } catch (e) {
@@ -823,16 +821,17 @@ async function startARFlow() {
     showCaption('Could not start AR — tap the ▶ AR button to launch it.');
   }
 }
+// Voice-only ("move it"): re-enter placement so the next floor tap re-places
+// the model on a fresh anchor — hands-free reposition to a new spot/surface.
+// Everyday nudging is just long-press + drag, so there's no on-screen button.
 function moveARFlow() {
   if (!renderer.xr.isPresenting) { showCaption('Start AR first, then say “move it”.'); return; }
   requestMove();
-  ui.moveBtn.classList.add('active');
   showCaption('Tap the floor where you want the chair.');
 }
 
 ui.startAR.addEventListener('click', startARFlow);
 ui.exitAR.addEventListener('click', () => endAR());
-ui.moveBtn.addEventListener('click', moveARFlow);
 
 // Mobile: gear opens the dev-controls bottom sheet; the backdrop (or gear
 // again) dismisses it. On desktop the sheet class is inert — the panel is

@@ -34,7 +34,8 @@ import * as THREE from 'three';
  *                        never nudges it. A tap deselects.
  *   • one-finger drag  → move it across the floor (when selected)
  *   • two-finger pinch → scale, and twist to rotate (when selected)
- *   • "Move" button    → tap a new spot to re-place it on a fresh anchor
+ *   • voice "move it"  → re-enter placement; tap a new spot to re-place it on a
+ *                        fresh anchor (hands-free reposition to another surface)
  *
  * Scene graph once placed:
  *   anchor (matrix driven by the live XRAnchor pose, on the floor)

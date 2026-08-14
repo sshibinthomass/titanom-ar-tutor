@@ -220,13 +220,6 @@
         top: calc(16px + env(safe-area-inset-top, 0px));
         left: calc(16px + env(safe-area-inset-left, 0px));
       }
-      #moveBtn {
-        position: fixed; z-index: 40; display: none;
-        bottom: calc(24px + env(safe-area-inset-bottom, 0px));
-        left: calc(16px + env(safe-area-inset-left, 0px));
-      }
-      #moveBtn.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-
       #panelToggle {
         position: fixed; top: 16px; left: 16px; z-index: 25; width: auto; margin: 0;
         padding: 9px 12px; border-radius: 10px; display: none;
@@ -240,14 +233,13 @@
         background: var(--panel); border: 1px solid var(--border); box-shadow: var(--shadow); backdrop-filter: blur(10px);
       }
 
-      /* ---- AR mode: hide the dev chrome, show exit/move ---- */
+      /* ---- AR mode: hide the dev chrome, show exit ---- */
       body.ar-active .panel,
       body.ar-active #panelToggle,
       body.ar-active #themeToggle,
       body.ar-active .status,
       body.ar-active .fab.ar { display: none !important; }
-      body.ar-active #exitAR,
-      body.ar-active #moveBtn { display: flex; }
+      body.ar-active #exitAR { display: flex; }
 
       /* Modal backdrop behind the mobile controls sheet. Off on desktop. */
       #sheetBackdrop {
@@ -403,7 +395,6 @@
     <button id="themeToggle" title="Toggle light / dark theme">🌙 Dark</button>
 
     <button class="fab" id="exitAR">✕ Exit AR</button>
-    <button class="fab" id="moveBtn">✋ Move</button>
 
     <script type="module" src="/src/main.js"></script>
   </body>
