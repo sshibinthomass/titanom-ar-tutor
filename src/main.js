@@ -25,6 +25,13 @@ const MODELS = {
     creditUrl: 'https://sketchfab.com/3d-models/office-chair-modern-675f34f7304e4d92812a41e9750539aa',
     defaultMode: 'component', // single fused mesh → must split by connected pieces
   },
+  'markus-chair': {
+    label: 'IKEA Markus Chair',
+    url: `${BASE_URL}models/markus-chair/scene.gltf`,
+    credit: 'IKEA Markus Office Chair — Graham Rust, Sketchfab Standard',
+    creditUrl: 'https://sketchfab.com/3d-models/ikea-markus-office-chair-cee12c29ebda4bcdb91b84a6f126a971',
+    defaultMode: 'group', // already 47 separate meshes → one clean part per mesh
+  },
   bicycle: {
     label: 'Bicycle',
     url: `${BASE_URL}models/bicycle/scene.gltf`,

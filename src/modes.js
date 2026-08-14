@@ -22,6 +22,38 @@ export const SEMANTIC_NAMES = {
     13: 'Star base', 14: 'Star base', 15: 'Star base', 16: 'Star base', 17: 'Star base',
     18: 'Base hub',
   },
+
+  // IKEA Markus — a 'group'-mode model: 47 separate meshes, so the part index is
+  // the mesh's rank by triangle count (largest first), per buildExplodedView's
+  // sort. Mapping verified from each part's world-space bbox: the signature high
+  // mesh back (its own material) + headrest sit at the top; seat/tilt in the
+  // middle; gas lift, star base and 5 casters (each caster = wheel + housing +
+  // stem, so 3 islands apiece → 15 caster parts) at the bottom. Several tiny
+  // 1-triangle slivers at the recline pivot (37–46) are folded into 'Tilt
+  // mechanism' so no group is left hidden in Assemble. Re-export ⇒ re-run the
+  // split (window.__parts) and re-map.
+  'markus-chair': {
+    0: 'Backrest',
+    1: 'Tilt mechanism',
+    2: 'Seat',
+    3: 'Armrest', 4: 'Armrest',
+    5: 'Headrest',
+    6: 'Armrest', 7: 'Armrest', 8: 'Armrest', 9: 'Armrest',
+    10: 'Height lever',
+    11: 'Caster', 12: 'Caster', 13: 'Caster', 14: 'Caster', 15: 'Caster',
+    16: 'Mesh back', 17: 'Mesh back',
+    18: 'Star base',
+    19: 'Gas cylinder',
+    20: 'Armrest', 21: 'Armrest',
+    22: 'Tilt mechanism',
+    23: 'Caster', 24: 'Caster', 25: 'Caster', 26: 'Caster', 27: 'Caster',
+    28: 'Caster', 29: 'Caster', 30: 'Caster', 31: 'Caster', 32: 'Caster',
+    33: 'Armrest', 34: 'Armrest', 35: 'Armrest', 36: 'Armrest',
+    37: 'Tilt mechanism', 38: 'Tilt mechanism', 39: 'Tilt mechanism',
+    40: 'Tilt mechanism', 41: 'Tilt mechanism', 42: 'Tilt mechanism',
+    43: 'Tilt mechanism', 44: 'Tilt mechanism', 45: 'Tilt mechanism',
+    46: 'Tilt mechanism',
+  },
 };
 
 /** Rename raw parts to semantic names for a model, if we have a mapping. */
@@ -166,6 +198,92 @@ const CONTENT = {
     ],
   },
 
+  'markus-chair': {
+    fix: {
+      title: 'Fix a sinking Markus — replace the gas lift',
+      steps: [
+        { match: ['seat'], text: 'Tip the chair on its side and take out the four screws holding the seat plate to the tilt mechanism.' },
+        { match: ['cylinder', 'gas', 'lift'], text: 'Twist the seat off the gas cylinder, then knock the cylinder out of the star base with a rubber mallet.' },
+        { match: ['star'], text: 'Stand the five-star base upright with all five casters flat on the floor.' },
+        { match: ['cylinder', 'gas', 'lift'], text: 'Drop the new gas lift into the cone of the star base, wide collar down.' },
+        { match: ['seat'], text: 'Refit the seat and tilt mechanism onto the cylinder, then sit on it to lock the taper.' },
+      ],
+    },
+    // symptoms[0] is the chip label; every string is also a voice-match keyword
+    // (spoken transcript is substring-matched), so keep single words unique across
+    // entries. `match` hits a part by name.includes() — 'back' would light BOTH
+    // "Backrest" and "Mesh back", so use 'backrest' vs 'mesh' to keep them apart.
+    diagnose: [
+      {
+        symptoms: ['Seat keeps sinking', 'sinking', 'sinks', 'drops', 'lowering', 'goes down', 'losing height'],
+        match: ['cylinder', 'gas', 'lift'],
+        text: 'A Markus that slowly sinks under your weight has a failed gas cylinder — the pneumatic seal has lost its charge and cannot be refilled. Swap the whole gas lift. Highlighted is the gas cylinder.',
+      },
+      {
+        symptoms: ['Won\'t rise', 'wont rise', 'wont go up', 'wont raise', 'stays down', 'stuck low'],
+        match: ['cylinder', 'gas', 'lift'],
+        text: 'If the paddle no longer raises the seat, the gas cylinder has lost its pressure completely. Confirm the lever actually pushes the valve pin; if it does, replace the gas lift. Highlighted is the gas cylinder.',
+      },
+      {
+        symptoms: ['Backrest won\'t lock', 'wont lock', 'recline', 'wont hold', 'flops back', 'no lock'],
+        match: ['tilt'],
+        text: 'A back that will not stay upright is the tilt lock not engaging — the side lever is not catching the ratchet. Free the lever and check its linkage into the tilt mechanism. Highlighted is the tilt mechanism.',
+      },
+      {
+        symptoms: ['Reclines too easily', 'too easy', 'too loose', 'tips back', 'tension', 'springs back'],
+        match: ['tilt'],
+        text: 'A back that snaps forward or leans too freely is the tilt tension wound too loose. Turn the knob under the front of the seat clockwise to add resistance. Highlighted is the tilt mechanism.',
+      },
+      {
+        symptoms: ['Chair wobbles', 'wobble', 'wobbles', 'unstable', 'rocking', 'shaky'],
+        match: ['star'],
+        text: 'Side-to-side wobble usually means a cracked or flexing star base, or one arm not sitting flat. Set it on hard floor and press each arm to find the give. Highlighted is the star base.',
+      },
+      {
+        symptoms: ['Cracked base', 'crack', 'cracked', 'split base', 'broken base', 'snapped'],
+        match: ['star'],
+        text: 'A visible crack in the star base is a safety risk. Markus bases are metal and can sometimes be re-welded, but replacement is safer. Highlighted is the star base.',
+      },
+      {
+        symptoms: ['Won\'t roll', 'jammed', 'stuck wheel', 'dragging', 'hard to move', 'wont roll'],
+        match: ['caster', 'wheel', 'roller'],
+        text: 'A chair that drags has a jammed caster — usually hair and carpet fibre wound around the axle. Pop the caster out, clear it, or swap in a new one. Highlighted is the caster set.',
+      },
+      {
+        symptoms: ['Rolls away', 'rolls away', 'drifts', 'slides', 'wont stay put'],
+        match: ['caster', 'wheel', 'roller'],
+        text: 'A chair that rolls on its own has worn casters or the wrong wheel for the floor — fit braked casters, or the correct hard-floor or carpet type. Highlighted is the caster set.',
+      },
+      {
+        symptoms: ['Squeaks and creaks', 'squeak', 'squeaks', 'creak', 'noise', 'clicking', 'grinding'],
+        match: ['tilt'],
+        text: 'Squeaks and creaks come from the tilt mechanism and swivel — dry springs, loose seat-plate bolts, or the cylinder top bearing. Tighten the under-seat bolts and grease the pivot. Highlighted is the tilt mechanism.',
+      },
+      {
+        symptoms: ['Headrest slips', 'headrest', 'head rest', 'wont stay up', 'slides down', 'wont adjust'],
+        match: ['headrest'],
+        text: 'A headrest that sinks or will not hold its angle has a worn friction joint at its stem. Tighten the headrest bracket; if the ratchet is stripped, the headrest is replaced as a unit. Highlighted is the headrest.',
+      },
+      {
+        symptoms: ['Loose armrest', 'armrest', 'arm wobbles', 'arm loose', 'broken arm'],
+        match: ['armrest', 'arm'],
+        text: 'A wobbly armrest is almost always loose bolts under the seat pan where the arm mounts. Tighten them; if the arm itself is cracked, replace it. Highlighted is the armrest.',
+      },
+      {
+        symptoms: ['Mesh sagging', 'mesh', 'saggy', 'stretched', 'baggy back', 'worn mesh'],
+        match: ['mesh'],
+        text: 'A sagging or stretched mesh back has lost its tension and cannot be re-tightened — the mesh is bonded to the frame. Replace the back assembly. Highlighted is the mesh back.',
+      },
+    ],
+    quiz: [
+      { match: ['cylinder', 'gas', 'lift'], question: 'What part lets you raise and lower the seat?', answer: 'the gas cylinder (pneumatic lift)' },
+      { match: ['star'], question: 'What is the five-armed part on the floor called?', answer: 'the star base' },
+      { match: ['caster', 'wheel', 'roller'], question: 'What are the rolling parts called?', answer: 'casters' },
+      { match: ['headrest'], question: 'What supports your head at the very top of the chair?', answer: 'the headrest' },
+      { match: ['mesh'], question: 'What is the breathable part your back rests against?', answer: 'the mesh back' },
+    ],
+  },
+
   // Placeholder for the radial engine — tune keywords once the GLB is in.
   engine: {
     fix: {
@@ -194,15 +312,21 @@ const CONTENT = {
 // Assemble order by semantic group, bottom-up, for models we have names for.
 const ASSEMBLE_ORDER = {
   'office-chair': ['Star base', 'Caster', 'Base hub', 'Gas cylinder', 'Seat', 'Backrest', 'Armrest', 'Height lever'],
+  // Every semantic group must appear here — in Assemble, a part in no step stays
+  // hidden. Bottom-up build order.
+  'markus-chair': ['Star base', 'Caster', 'Gas cylinder', 'Tilt mechanism', 'Height lever', 'Seat', 'Armrest', 'Backrest', 'Mesh back', 'Headrest'],
 };
 const ASSEMBLE_TEXT = {
   'Star base': 'Lay out the five-armed star base.',
   'Caster': 'Press a caster into the end of each base arm.',
   'Base hub': 'Fit the central hub into the base.',
   'Gas cylinder': 'Drop the gas cylinder into the base cone.',
+  'Tilt mechanism': 'Bolt the tilt mechanism onto the top of the gas cylinder.',
   'Seat': 'Lower the seat onto the cylinder and press to seat the taper.',
-  'Backrest': 'Bolt the backrest to the seat mechanism.',
+  'Backrest': 'Bolt the tall backrest frame to the tilt mechanism.',
+  'Mesh back': 'Stretch the breathable mesh onto the backrest frame.',
   'Armrest': 'Attach the left and right armrests.',
+  'Headrest': 'Clip the headrest onto the top of the backrest.',
   'Height lever': 'Clip on the height-adjust lever. Done!',
 };
 
