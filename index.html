@@ -2,23 +2,54 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>AR Repair Tutor</title>
     <style>
+      /* ---- Theme tokens ------------------------------------------------------
+         Light is the default (bare :root). Dark overrides only what changes,
+         under [data-theme="dark"] set by main.js. We deliberately do NOT key off
+         prefers-color-scheme — the product default is light regardless of OS. */
       :root {
+        --bg: #e9ecf1;                       /* body + 3D scene backdrop */
+        --panel: rgba(255, 255, 255, 0.82);  /* frosted panels / cards / fabs */
+        --panel-solid: #ffffff;
+        --border: #d3d8e0;
+        --text: #1b1f27;
+        --muted: #5c6472;
+        --accent: #2fbfb3;        /* fills & focus rings (paired with --accent-ink) */
+        --accent-ink: #06322d;    /* text/icon sitting on an --accent fill */
+        --accent-text: #0c8379;   /* accent used as text on a panel (needs contrast) */
+        --input-bg: #ffffff;
+        --input-hover: #eef1f5;
+        --danger: #e0524f;
+        --shadow: 0 10px 40px rgba(20, 30, 50, 0.18);
+      }
+      :root[data-theme='dark'] {
         --bg: #14161c;
         --panel: rgba(26, 29, 38, 0.92);
+        --panel-solid: #21252f;
         --border: #2a2e3a;
         --text: #e6e8ee;
         --muted: #9aa0ad;
         --accent: #4ecdc4;
+        --accent-ink: #0b0d12;
+        --accent-text: #4ecdc4;
+        --input-bg: #21252f;
+        --input-hover: #2a2f3b;
+        --danger: #ff6b6b;
+        --shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
       }
+
       * { box-sizing: border-box; }
       html, body { margin: 0; height: 100%; overflow: hidden; }
       body {
         font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        background: var(--bg);
+        background-color: var(--bg);
         color: var(--text);
+        /* No CSS transition here: Chrome won't re-evaluate a var()-based
+           background/color through a transition when the custom property flips,
+           so the body would stick on the old theme. The swap is instant, matching
+           the panels (which also flip instantly). */
       }
       #view { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
 
@@ -34,11 +65,12 @@
         border-radius: 14px;
         padding: 18px;
         backdrop-filter: blur(10px);
-        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+        box-shadow: var(--shadow);
+        z-index: 15;
       }
       .panel h1 { font-size: 16px; margin: 0 0 2px; letter-spacing: 0.2px; }
       .panel .sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
-      .panel .sub a { color: var(--accent); text-decoration: none; }
+      .panel .sub a { color: var(--accent-text); text-decoration: none; }
 
       .field { margin-bottom: 16px; }
       .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 7px; }
@@ -49,13 +81,13 @@
         padding: 8px 10px;
         border: 1px solid var(--border);
         border-radius: 9px;
-        background: #21252f;
+        background: var(--input-bg);
         color: var(--text);
         font-size: 13px;
         cursor: pointer;
       }
       select:hover { border-color: var(--accent); }
-      .val { font-variant-numeric: tabular-nums; color: var(--accent); font-size: 12px; }
+      .val { font-variant-numeric: tabular-nums; color: var(--accent-text); font-size: 12px; }
 
       .toggles { display: flex; flex-direction: column; gap: 9px; }
       .toggle { display: flex; align-items: center; gap: 9px; font-size: 13px; cursor: pointer; }
@@ -67,33 +99,25 @@
         padding: 9px;
         border: 1px solid var(--border);
         border-radius: 9px;
-        background: #21252f;
+        background: var(--input-bg);
         color: var(--text);
         font-size: 13px;
         cursor: pointer;
       }
-      button:hover { background: #2a2f3b; border-color: var(--accent); }
+      button:hover { background: var(--input-hover); border-color: var(--accent); }
 
       hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 
       .stat { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
-      .stat b { color: var(--accent); font-variant-numeric: tabular-nums; }
+      .stat b { color: var(--accent-text); font-variant-numeric: tabular-nums; }
 
       .legend { margin-top: 10px; max-height: 220px; overflow-y: auto; }
       .legend-row {
         display: flex; align-items: center; gap: 9px;
         font-size: 12px; padding: 4px 6px; border-radius: 6px; cursor: default;
       }
-      .legend-row:hover { background: #252a35; }
-      .swatch { width: 13px; height: 13px; border-radius: 3px; flex: none; border: 1px solid rgba(255,255,255,0.15); }
-
-      .status {
-        position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
-        font-size: 12px; color: var(--muted);
-        background: var(--panel); border: 1px solid var(--border);
-        padding: 7px 14px; border-radius: 20px;
-        transition: opacity 0.3s;
-      }
+      .legend-row:hover { background: var(--input-hover); }
+      .swatch { width: 13px; height: 13px; border-radius: 3px; flex: none; border: 1px solid rgba(128,128,128,0.3); }
 
       /* ---- Mode bar (top-centre) ---- */
       .modebar {
@@ -101,80 +125,101 @@
         display: flex; gap: 6px; padding: 6px;
         background: var(--panel); border: 1px solid var(--border);
         border-radius: 14px; backdrop-filter: blur(10px);
-        box-shadow: 0 10px 40px rgba(0,0,0,0.4); z-index: 20;
+        box-shadow: var(--shadow); z-index: 20; max-width: calc(100vw - 32px); overflow-x: auto;
       }
       .modebtn {
         width: auto; margin: 0; padding: 8px 12px; font-size: 13px;
         white-space: nowrap; border-radius: 9px; background: transparent;
         border: 1px solid transparent;
       }
-      .modebtn.active { background: var(--accent); color: #0b0d12; border-color: var(--accent); font-weight: 600; }
+      .modebtn.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
 
-      /* ---- Bottom card: steps / part info / quiz ---- */
+      /* ---- Bottom dock: stacks the card + fabs + captions so nothing overlaps.
+         The dock itself is click-through (pointer-events:none); only its real
+         children capture input, so you can still orbit the model in the gaps. */
+      .dock {
+        position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+        display: flex; flex-direction: column; align-items: center; gap: 10px;
+        padding: 0 16px 16px;
+        padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+        pointer-events: none;
+      }
+      .dock > * { pointer-events: auto; }
+
+      /* ---- Step / part-info / quiz card ---- */
       .card {
-        position: fixed; bottom: 54px; left: 50%; transform: translateX(-50%);
-        width: min(560px, calc(100vw - 32px));
+        width: min(560px, 100%);
         background: var(--panel); border: 1px solid var(--border);
         border-radius: 14px; padding: 16px 18px; backdrop-filter: blur(10px);
-        box-shadow: 0 10px 40px rgba(0,0,0,0.4); z-index: 20; display: none;
+        box-shadow: var(--shadow); display: none;
       }
       .card.show { display: block; }
-      .card .kicker { font-size: 11px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; }
+      .card .kicker { font-size: 11px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--accent-text); margin-bottom: 6px; }
       .card .body { font-size: 15px; line-height: 1.5; margin-bottom: 4px; }
       .card .meta { font-size: 12px; color: var(--muted); }
       .stepnav { display: flex; gap: 8px; margin-top: 14px; }
       .stepnav button { margin: 0; }
-      .stepnav .primary { background: var(--accent); color: #0b0d12; border-color: var(--accent); font-weight: 600; }
+      .stepnav .primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
       .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
       .chip {
         width: auto; margin: 0; padding: 7px 12px; font-size: 12px; border-radius: 999px;
-        background: #21252f; border: 1px solid var(--border);
+        background: var(--input-bg); border: 1px solid var(--border);
       }
       .chip:hover { border-color: var(--accent); }
 
-      /* ---- Floating action buttons (AR + mic) ---- */
+      /* ---- Floating action buttons (AR + mic), right-aligned above the card ---- */
       .fab-cluster {
-        position: fixed; right: 16px; bottom: 100px; z-index: 30;
+        align-self: flex-end;
         display: flex; flex-direction: column; gap: 10px; align-items: flex-end;
       }
       .fab {
-        width: auto; margin: 0; display: flex; align-items: center; gap: 8px;
+        width: auto; margin: 0; display: inline-flex; align-items: center; gap: 8px;
         padding: 12px 16px; border-radius: 999px; font-size: 14px; font-weight: 600;
         border: 1px solid var(--border); background: var(--panel); color: var(--text);
-        backdrop-filter: blur(10px); box-shadow: 0 6px 24px rgba(0,0,0,0.4); cursor: pointer;
+        backdrop-filter: blur(10px); box-shadow: var(--shadow); cursor: pointer;
       }
-      .fab.primary { background: var(--accent); color: #0b0d12; border-color: var(--accent); }
-      .fab.mic.listening { background: #ff6b6b; color: #fff; border-color: #ff6b6b; animation: pulse 1.2s infinite; }
-      @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,107,107,0.5); } 50% { box-shadow: 0 0 0 10px rgba(255,107,107,0); } }
+      .fab.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+      .fab.mic.listening { background: var(--danger); color: #fff; border-color: var(--danger); animation: pulse 1.2s infinite; }
+      @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(224,82,79,0.5); } 50% { box-shadow: 0 0 0 10px rgba(224,82,79,0); } }
       .fab:disabled { opacity: 0.4; cursor: not-allowed; }
 
-      #exitAR {
-        position: fixed; top: 16px; left: 16px; z-index: 40; display: none;
-      }
-      #moveBtn {
-        position: fixed; bottom: 24px; left: 16px; z-index: 40; display: none;
-      }
-      #moveBtn.active { background: var(--accent); color: #0b0d12; border-color: var(--accent); }
-      .voice-caption {
-        position: fixed; bottom: 44px; left: 50%; transform: translateX(-50%);
-        max-width: min(560px, calc(100vw - 32px)); z-index: 25;
-        font-size: 13px; color: var(--text); text-align: center;
+      /* ---- Status pill + live voice caption (dock children, centred) ---- */
+      .status {
+        font-size: 12px; color: var(--muted);
         background: var(--panel); border: 1px solid var(--border);
-        padding: 8px 14px; border-radius: 12px; display: none;
+        padding: 7px 14px; border-radius: 20px; transition: opacity 0.3s;
+        backdrop-filter: blur(10px); text-align: center;
+      }
+      .voice-caption {
+        max-width: min(560px, 100%); font-size: 13px; color: var(--text); text-align: center;
+        background: var(--panel); border: 1px solid var(--border);
+        padding: 8px 14px; border-radius: 12px; display: none; backdrop-filter: blur(10px);
       }
       .voice-caption.show { display: block; }
-      .voice-caption b { color: var(--accent); }
+      .voice-caption b { color: var(--accent-text); }
 
-      /* Panel collapse toggle */
+      /* ---- Corner controls (independent of the dock) ---- */
+      #exitAR { position: fixed; top: 16px; left: 16px; z-index: 40; display: none; }
+      #moveBtn { position: fixed; bottom: 24px; left: 16px; z-index: 40; display: none; }
+      #moveBtn.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
       #panelToggle {
         position: fixed; top: 16px; left: 16px; z-index: 25; width: auto; margin: 0;
         padding: 9px 12px; border-radius: 10px; display: none;
+        background: var(--panel); border: 1px solid var(--border); box-shadow: var(--shadow); backdrop-filter: blur(10px);
       }
       .panel.collapsed { display: none; }
 
-      /* ---- AR mode: hide the dev chrome, show exit ---- */
+      #themeToggle {
+        position: fixed; top: 16px; right: 16px; z-index: 25; width: auto; margin: 0;
+        padding: 9px 12px; border-radius: 10px;
+        background: var(--panel); border: 1px solid var(--border); box-shadow: var(--shadow); backdrop-filter: blur(10px);
+      }
+
+      /* ---- AR mode: hide the dev chrome, show exit/move ---- */
       body.ar-active .panel,
       body.ar-active #panelToggle,
+      body.ar-active #themeToggle,
       body.ar-active .status,
       body.ar-active .fab.ar { display: none !important; }
       body.ar-active #exitAR,
@@ -186,10 +231,8 @@
         .panel.collapsed { display: none; }
         .panel:not(.collapsed).open { display: block; width: calc(100vw - 32px); max-width: 340px; }
         #panelToggle { display: block; }
-        .modebar { top: 64px; gap: 4px; padding: 5px; max-width: calc(100vw - 24px); overflow-x: auto; }
+        .modebar { top: 64px; gap: 4px; padding: 5px; }
         .modebtn { padding: 7px 9px; font-size: 12px; }
-        .card { bottom: 96px; }
-        .fab-cluster { bottom: 88px; }
         .fab { padding: 11px 14px; font-size: 13px; }
       }
     </style>
@@ -238,30 +281,35 @@
 
     <div class="modebar" id="modebar"></div>
 
-    <div class="card" id="card">
-      <div class="kicker" id="cardKicker">Fix</div>
-      <div class="body" id="cardBody">…</div>
-      <div class="meta" id="cardMeta"></div>
-      <div class="chips" id="cardChips"></div>
-      <div class="stepnav" id="cardNav">
-        <button id="stepPrev">◀ Back</button>
-        <button id="stepNext" class="primary">Next ▶</button>
+    <!-- Bottom dock: voice caption → fabs → card → status, stacked so they never
+         collide on narrow screens. -->
+    <div class="dock">
+      <div class="voice-caption" id="voiceCaption"></div>
+
+      <div class="fab-cluster">
+        <button class="fab ar primary" id="startAR">📱 View in AR</button>
+        <button class="fab mic" id="micBtn">🎤 Ask</button>
       </div>
+
+      <div class="card" id="card">
+        <div class="kicker" id="cardKicker">Fix</div>
+        <div class="body" id="cardBody">…</div>
+        <div class="meta" id="cardMeta"></div>
+        <div class="chips" id="cardChips"></div>
+        <div class="stepnav" id="cardNav">
+          <button id="stepPrev">◀ Back</button>
+          <button id="stepNext" class="primary">Next ▶</button>
+        </div>
+      </div>
+
+      <div class="status" id="status">Initialising…</div>
     </div>
 
     <button id="panelToggle">⚙︎ Controls</button>
-
-    <div class="fab-cluster">
-      <button class="fab ar primary" id="startAR">📱 View in AR</button>
-      <button class="fab mic" id="micBtn">🎤 Ask</button>
-    </div>
+    <button id="themeToggle" title="Toggle light / dark theme">🌙 Dark</button>
 
     <button class="fab" id="exitAR">✕ Exit AR</button>
     <button class="fab" id="moveBtn">✋ Move</button>
-
-    <div class="voice-caption" id="voiceCaption"></div>
-
-    <div class="status" id="status">Initialising…</div>
 
     <script type="module" src="/src/main.js"></script>
   </body>

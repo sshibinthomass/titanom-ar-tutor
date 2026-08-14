@@ -52,7 +52,10 @@ renderer.toneMappingExposure = 1.35;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x14161c);
+// Scene backdrop tracks the UI theme (set for real by applyTheme() below);
+// this light default just avoids a first-frame flash before that runs.
+const SCENE_BG = { light: 0xe9ecf1, dark: 0x14161c };
+scene.background = new THREE.Color(SCENE_BG.light);
 
 const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 5000);
 camera.position.set(3, 2.2, 3.5);
@@ -114,6 +117,7 @@ const ui = {
   moveBtn: document.getElementById('moveBtn'),
   voiceCaption: document.getElementById('voiceCaption'),
   panelToggle: document.getElementById('panelToggle'),
+  themeToggle: document.getElementById('themeToggle'),
   panel: document.querySelector('.panel'),
 };
 
@@ -755,6 +759,23 @@ ui.moveBtn.addEventListener('click', moveARFlow);
 
 // Mobile: gear toggles the dev panel.
 ui.panelToggle.addEventListener('click', () => ui.panel.classList.toggle('open'));
+
+// ---- Theme (light default; persisted) --------------------------------------
+// Light is the product default — we only flip to dark on an explicit choice,
+// so a first-time visitor always lands on light regardless of their OS setting.
+function applyTheme(theme) {
+  const dark = theme === 'dark';
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  scene.background = new THREE.Color(dark ? SCENE_BG.dark : SCENE_BG.light);
+  ui.themeToggle.textContent = dark ? '☀️ Light' : '🌙 Dark';
+  try { localStorage.setItem('theme', theme); } catch {}
+}
+applyTheme(
+  (() => { try { return localStorage.getItem('theme'); } catch { return null; } })() || 'light'
+);
+ui.themeToggle.addEventListener('click', () => {
+  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+});
 
 // ---- Render loop -----------------------------------------------------------
 
