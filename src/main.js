@@ -17,20 +17,27 @@ import { initTelemetry, track } from './telemetry.js';
 // '/models/…' would wrongly point at the domain root on Pages.
 const BASE_URL = import.meta.env.BASE_URL;
 
+// Single source of truth for "which model does the app boot into".
+const DEFAULT_MODEL = 'markus-chair';
+
+// The IKEA Markus is the hero: every mode's content is authored against it and
+// grounded in the official manual, so it is listed first, selected on boot, and
+// is the only model fetched at startup. The rest are secondary demos, loaded
+// lazily only if the user picks one.
 const MODELS = {
-  'office-chair': {
-    label: 'Office Chair',
-    url: `${BASE_URL}models/office-chair/scene.gltf`,
-    credit: 'Office Chair Modern — thethieme, CC-BY-4.0',
-    creditUrl: 'https://sketchfab.com/3d-models/office-chair-modern-675f34f7304e4d92812a41e9750539aa',
-    defaultMode: 'component', // single fused mesh → must split by connected pieces
-  },
   'markus-chair': {
     label: 'IKEA Markus Chair',
     url: `${BASE_URL}models/markus-chair/scene.gltf`,
     credit: 'IKEA Markus Office Chair — Graham Rust, Sketchfab Standard',
     creditUrl: 'https://sketchfab.com/3d-models/ikea-markus-office-chair-cee12c29ebda4bcdb91b84a6f126a971',
     defaultMode: 'group', // already 47 separate meshes → one clean part per mesh
+  },
+  'office-chair': {
+    label: 'Office Chair',
+    url: `${BASE_URL}models/office-chair/scene.gltf`,
+    credit: 'Office Chair Modern — thethieme, CC-BY-4.0',
+    creditUrl: 'https://sketchfab.com/3d-models/office-chair-modern-675f34f7304e4d92812a41e9750539aa',
+    defaultMode: 'component', // single fused mesh → must split by connected pieces
   },
   bicycle: {
     label: 'Bicycle',
@@ -149,7 +156,7 @@ for (const [key, m] of Object.entries(MODELS)) {
   opt.textContent = m.label;
   ui.model.appendChild(opt);
 }
-ui.model.value = 'markus-chair'; // hero model: richest authored content (parts, specs, official-manual grounding)
+ui.model.value = DEFAULT_MODEL; // hero model: richest authored content (parts, specs, official-manual grounding)
 
 // Telemetry: one Langfuse session per page load. Tracks voice, AI, modes, AR,
 // TTS and errors. No-op (and never throws) when Langfuse isn't configured.
@@ -713,8 +720,11 @@ function selectPartByName(text) {
 }
 
 // Switch the active model when the user names one out loud. Returns true if handled.
+// Order matters: the first key whose keyword appears wins, so the secondary
+// office chair claims its multi-word phrases before the hero takes bare "chair".
 const MODEL_KEYWORDS = {
-  'office-chair': ['office chair', 'the chair', 'chair', 'office'],
+  'office-chair': ['office chair', 'other chair', 'modern chair'],
+  'markus-chair': ['markus', 'ikea', 'the chair', 'chair'],
   bicycle: ['bicycle', 'bike', 'cycle'],
   bed: ['bed'],
 };
@@ -956,4 +966,7 @@ renderer.setAnimationLoop((time, frame) => {
 
 // ---- Go --------------------------------------------------------------------
 
-loadModel(ui.model.value); // boot with the dropdown's default so UI and model never desync
+// Boot straight into the hero IKEA Markus and fetch nothing else — the other
+// models are only loaded when the user actually selects one. Read the value off
+// the dropdown (not DEFAULT_MODEL) so UI and loaded model can never desync.
+loadModel(ui.model.value);
