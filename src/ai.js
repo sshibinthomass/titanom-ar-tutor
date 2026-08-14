@@ -25,9 +25,15 @@ export function aiAvailable() {
 /**
  * Send chat messages, return the assistant's text.
  * messages: [{ role: 'system'|'user'|'assistant', content }]
+ *
+ * Pass a Langfuse trace handle (from telemetry.startTrace) as `trace` to record
+ * this call as a generation — model, I/O, token usage and latency all land in
+ * Langfuse. It's optional; without it the call is untraced but identical.
  */
-export async function chat(messages, { temperature = 0.4, maxTokens = 320 } = {}) {
+export async function chat(messages, { temperature = 0.4, maxTokens = 320, trace = null, name = 'deutschlandgpt' } = {}) {
   if (!aiAvailable()) throw new Error('DeutschlandGPT not configured (set VITE_DGPT_API_KEY)');
+  const startTime = new Date().toISOString();
+  const modelParameters = { temperature, max_completion_tokens: maxTokens };
   const res = await fetch(`${BASE}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -39,8 +45,12 @@ export async function chat(messages, { temperature = 0.4, maxTokens = 320 } = {}
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`DeutschlandGPT ${res.status}: ${body.slice(0, 200)}`);
+    const msg = `DeutschlandGPT ${res.status}: ${body.slice(0, 200)}`;
+    trace?.generation({ name, model: MODEL, modelParameters, input: messages, startTime, level: 'ERROR', statusMessage: msg });
+    throw new Error(msg);
   }
   const data = await res.json();
-  return (data.choices?.[0]?.message?.content || '').trim();
+  const text = (data.choices?.[0]?.message?.content || '').trim();
+  trace?.generation({ name, model: MODEL, modelParameters, input: messages, output: text, usage: data.usage, startTime });
+  return text;
 }

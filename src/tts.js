@@ -8,6 +8,8 @@
  * NOTE: audio playback needs a prior user gesture (a tap). Our UI is tap-driven,
  * so the first spoken line always follows a button press.
  */
+import { track } from './telemetry.js';
+
 const KEY = import.meta.env.VITE_ELEVENLABS_API_KEY;
 const VOICE = import.meta.env.VITE_ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM';
 const MODEL = import.meta.env.VITE_ELEVENLABS_MODEL || 'eleven_turbo_v2_5';
@@ -48,9 +50,11 @@ export async function speak(text) {
       currentAudio = new Audio(url);
       currentAudio.onended = () => URL.revokeObjectURL(url);
       await currentAudio.play().catch((e) => console.warn('audio play blocked', e));
+      track('tts', { output: text, metadata: { provider: 'elevenlabs', voice: VOICE, chars: text.length } });
       return;
     } catch (e) {
       console.warn('ElevenLabs TTS failed, falling back to browser speech:', e.message);
+      track('tts-error', { metadata: { provider: 'elevenlabs', error: e.message }, level: 'ERROR' });
     }
   }
 
@@ -59,5 +63,6 @@ export async function speak(text) {
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 1.0;
     window.speechSynthesis.speak(u);
+    track('tts', { output: text, metadata: { provider: 'browser', chars: text.length } });
   }
 }

@@ -8,6 +8,7 @@ import { isARSupported, startAR, updateAR, endAR, requestMove } from './ar.js';
 import { speak, stop as stopSpeaking } from './tts.js';
 import { createRecognizer, speechRecognitionAvailable } from './voice.js';
 import { classifyCommand, answerQuestion } from './tutor.js';
+import { initTelemetry, track } from './telemetry.js';
 
 // ---- Model registry --------------------------------------------------------
 
@@ -142,6 +143,10 @@ for (const [key, m] of Object.entries(MODELS)) {
   ui.model.appendChild(opt);
 }
 ui.model.value = 'office-chair';
+
+// Telemetry: one Langfuse session per page load. Tracks voice, AI, modes, AR,
+// TTS and errors. No-op (and never throws) when Langfuse isn't configured.
+initTelemetry({ initialModel: ui.model.value });
 
 // ---- Load + build ----------------------------------------------------------
 
@@ -284,7 +289,7 @@ function onExplodeChange() {
 }
 ui.explode.addEventListener('input', onExplodeChange);
 
-ui.model.addEventListener('change', () => loadModel(ui.model.value));
+ui.model.addEventListener('change', () => { track('model-load', { metadata: { model: ui.model.value } }); loadModel(ui.model.value); });
 ui.mode.addEventListener('change', () => { if (originalScene) rebuild(); });
 ui.tint.addEventListener('change', () => { if (originalScene) rebuild(); });
 
@@ -379,6 +384,7 @@ function mildExplode() {
 }
 
 function enterMode(id) {
+  track('mode-switch', { metadata: { mode: id, model: ui.model.value } });
   currentMode = id;
   setModeButtons(id);
   resetParts();
@@ -676,15 +682,20 @@ async function runCommand(cmd) {
 
 async function handleSpeech(text) {
   const cmd = classifyCommand(text);
-  if (cmd.type === 'command') { showCaption(`“${text}”`); await runCommand(cmd); return; }
+  if (cmd.type === 'command') {
+    showCaption(`“${text}”`);
+    track('voice-command', { input: text, metadata: { action: cmd.action || null, mode: cmd.mode || null } });
+    await runCommand(cmd);
+    return;
+  }
 
   // Not a global command — try the data-driven intents that need the live
   // model/part/symptom lists, in order of specificity, before falling back to AI.
-  if (pickSymptomByVoice(text)) { showCaption(`“${text}”`); return; }
-  if (answerQuizByVoice(text)) { showCaption(`“${text}”`); return; }
-  if (switchModelByVoice(text)) return;
+  if (pickSymptomByVoice(text)) { showCaption(`“${text}”`); track('voice-intent', { input: text, metadata: { kind: 'symptom' } }); return; }
+  if (answerQuizByVoice(text)) { showCaption(`“${text}”`); track('voice-intent', { input: text, metadata: { kind: 'quiz-answer' } }); return; }
+  if (switchModelByVoice(text)) { track('voice-intent', { input: text, metadata: { kind: 'model-switch' } }); return; }
   const wantsPart = /(show|highlight|select|isolate|where|find|point to|light up|take me to|look at|focus on|which is)/.test(text.toLowerCase());
-  if ((wantsPart || currentMode === 'explore') && selectPartByName(text)) { showCaption(`“${text}”`); return; }
+  if ((wantsPart || currentMode === 'explore') && selectPartByName(text)) { showCaption(`“${text}”`); track('voice-intent', { input: text, metadata: { kind: 'part-select', part: focusedPart } }); return; }
 
   showCaption(`“${text}” · …thinking`);
   const ans = await answerQuestion(getContext(), cmd.text);
@@ -714,7 +725,9 @@ ui.micBtn.addEventListener('click', () => {
 
 // AR availability + start/exit.
 (async () => {
-  if (!(await isARSupported())) {
+  const supported = await isARSupported();
+  track('ar-support', { metadata: { supported } });
+  if (!supported) {
     ui.startAR.textContent = '📱 AR needs Android';
     ui.startAR.disabled = true;
     ui.startAR.title = 'WebXR AR runs on Android Chrome. The 3D view works everywhere.';
@@ -729,20 +742,23 @@ async function startARFlow() {
   if (ui.startAR.disabled) { showCaption('AR needs an Android phone. Tap 📱 for details.'); return; }
   try {
     document.body.classList.add('ar-active');
+    track('ar-start', { metadata: { model: ui.model.value } });
     await startAR({
       renderer, scene, camera, group: explodedGroup, controls,
       overlay: document.body,
       onPlaced: () => {
         ui.moveBtn.classList.remove('active');
+        track('ar-placed', { metadata: { model: ui.model.value } });
         showCaption('Placed! Drag to rotate · pinch to scale · ✋ Move to reposition.');
         say('Placed. Drag with one finger to rotate, or pinch to resize.');
       },
-      onEnd: () => { document.body.classList.remove('ar-active'); ui.moveBtn.classList.remove('active'); },
+      onEnd: () => { document.body.classList.remove('ar-active'); ui.moveBtn.classList.remove('active'); track('ar-exit'); },
     });
     showCaption('Point at the floor, then tap to place the chair.');
   } catch (e) {
     console.error('AR failed', e);
     document.body.classList.remove('ar-active');
+    track('ar-error', { metadata: { error: e.message }, level: 'ERROR' });
     showCaption('Could not start AR — tap the ▶ AR button to launch it.');
   }
 }

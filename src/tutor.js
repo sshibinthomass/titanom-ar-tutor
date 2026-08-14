@@ -4,6 +4,7 @@
  * DeutschlandGPT with context about what the user is currently looking at.
  */
 import { aiAvailable, chat } from './ai.js';
+import { startTrace } from './telemetry.js';
 
 /**
  * Classify a spoken phrase into an app command or a free-form question.
@@ -103,8 +104,17 @@ export function classifyCommand(raw) {
  * Returns a short spoken answer, or a graceful fallback if AI is unavailable.
  */
 export async function answerQuestion(context, question) {
+  // One trace per answer — carries the question, the context the tutor saw, and
+  // (when AI is reached) a child generation with the model call + token usage.
+  const trace = startTrace('ai-answer', {
+    input: question,
+    metadata: { model: context.modelLabel, mode: context.mode, focusedPart: context.focusedPart, partCount: (context.parts || []).length },
+  });
+
   if (!aiAvailable()) {
-    return `I can't reach the AI tutor right now, but you're looking at the ${context.focusedPart || context.modelLabel}.`;
+    const fallback = `I can't reach the AI tutor right now, but you're looking at the ${context.focusedPart || context.modelLabel}.`;
+    trace.end({ output: fallback, metadata: { aiAvailable: false } });
+    return fallback;
   }
   const parts = [...new Set(context.parts || [])].join(', ');
   const system = [
@@ -117,15 +127,19 @@ export async function answerQuestion(context, question) {
   ].filter(Boolean).join(' ');
 
   try {
-    return await chat(
+    const answer = await chat(
       [
         { role: 'system', content: system },
         { role: 'user', content: question },
       ],
-      { temperature: 0.4, maxTokens: 160 }
+      { temperature: 0.4, maxTokens: 160, trace, name: 'tutor-answer' }
     );
+    trace.end({ output: answer });
+    return answer;
   } catch (e) {
     console.warn('answerQuestion failed:', e.message);
-    return `Sorry, I couldn't reach the tutor. That part is the ${context.focusedPart || 'one you tapped'}.`;
+    const fallback = `Sorry, I couldn't reach the tutor. That part is the ${context.focusedPart || 'one you tapped'}.`;
+    trace.end({ output: fallback, metadata: { error: e.message } });
+    return fallback;
   }
 }
