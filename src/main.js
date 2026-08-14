@@ -149,7 +149,7 @@ for (const [key, m] of Object.entries(MODELS)) {
   opt.textContent = m.label;
   ui.model.appendChild(opt);
 }
-ui.model.value = 'office-chair';
+ui.model.value = 'markus-chair'; // hero model: richest authored content (parts, specs, official-manual grounding)
 
 // Telemetry: one Langfuse session per page load. Tracks voice, AI, modes, AR,
 // TTS and errors. No-op (and never throws) when Langfuse isn't configured.
@@ -956,4 +956,4 @@ renderer.setAnimationLoop((time, frame) => {
 
 // ---- Go --------------------------------------------------------------------
 
-loadModel('office-chair');
+loadModel(ui.model.value); // boot with the dropdown's default so UI and model never desync
