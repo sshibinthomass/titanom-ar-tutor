@@ -30,7 +30,8 @@ export const SEMANTIC_NAMES = {
   // middle; gas lift, star base and 5 casters (each caster = wheel + housing +
   // stem, so 3 islands apiece → 15 caster parts) at the bottom. Several tiny
   // 1-triangle slivers at the recline pivot (37–46) are folded into 'Tilt
-  // mechanism' so no group is left hidden in Assemble. Re-export ⇒ re-run the
+  // mechanism' so no group is left hidden in Assemble. Every group here was
+  // confirmed visually by highlighting it in Blender. Re-export ⇒ re-run the
   // split (window.__parts) and re-map.
   'markus-chair': {
     0: 'Backrest',
@@ -199,6 +200,10 @@ const CONTENT = {
   },
 
   'markus-chair': {
+    // Verified product facts (IKEA Markus, Vissle dark grey, art. 702.611.50).
+    // Grounds the AI tutor so free-form questions about materials, capacity and
+    // adjustments are answered from the real chair, not generic guesses.
+    about: 'The IKEA Markus (designer Henrik Preutz) is a high-back swivel office chair. Its backrest is a breathable Vissle dark-grey mesh of recycled polyester over a powder-coated steel frame, with built-in lumbar support and a fixed headrest at the top. The armrests are fixed, padded in polypropylene and synthetic rubber. The seat is polyurethane foam over a laminated wood base, raised and lowered by a pneumatic gas lift. The five-star foot is powder-coated aluminium on self-braking casters that lock when you stand up. It has a synchronised tilt that locks in three positions with a manual tension knob under the seat, a seat-height range of 46–57 cm, and a rated capacity of 110 kg.',
     fix: {
       title: 'Fix a sinking Markus — replace the gas lift',
       steps: [
@@ -384,6 +389,7 @@ export function knowledgeDigest(modelKey) {
   if (!c) return '';
   const clean = (s) => s.replace(/\s*Highlighted is[^.]*\.\s*$/i, '').trim();
   const lines = [];
+  if (c.about) lines.push(c.about);
   if (c.fix?.title) {
     lines.push(`Repair procedure — ${c.fix.title}: ${c.fix.steps.map((s) => clean(s.text)).join(' ')}`);
   }
