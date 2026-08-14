@@ -7,7 +7,7 @@ import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, a
 import { isARSupported, startAR, updateAR, endAR, requestMove } from './ar.js';
 import { speak, stop as stopSpeaking } from './tts.js';
 import { createRecognizer, speechRecognitionAvailable } from './voice.js';
-import { classifyCommand, answerQuestion } from './tutor.js';
+import { classifyCommand, answerQuestion, looksLikeQuestion } from './tutor.js';
 import { initTelemetry, track } from './telemetry.js';
 
 // ---- Model registry --------------------------------------------------------
@@ -401,7 +401,7 @@ function enterMode(id) {
 
 // --- Explore: tap a part, isolate + name it ---
 function enterExplore() {
-  showCard('Explore', 'Tap any part to isolate it and read its name.', `${parts.length} parts`);
+  showCard('Explore', 'Tap any part to isolate it, then tap 🎤 and ask about it.', `${parts.length} parts`);
 }
 
 // --- Fix / Assemble: ordered steps ---
@@ -519,11 +519,11 @@ attachPicker(renderer, camera, () => parts, (index) => {
     isolateParts(parts, index >= 0 ? [index] : []);
     if (index >= 0) {
       focusedPart = parts[index].name;
-      showCard('Explore', `<b>${parts[index].name}</b>`, `${parts[index].triangleCount.toLocaleString()} triangles · tap empty space to clear`);
+      showCard('Explore', `<b>${parts[index].name}</b>`, `${parts[index].triangleCount.toLocaleString()} triangles · ask 🎤 about this part`);
       say(parts[index].name);
     } else {
       focusedPart = null;
-      showCard('Explore', 'Tap any part to isolate it and read its name.', `${parts.length} parts`);
+      showCard('Explore', 'Tap any part to isolate it, then tap 🎤 and ask about it.', `${parts.length} parts`);
     }
   } else if (currentMode === 'quiz' && index >= 0) {
     // Tapping a part in quiz mode is a shortcut to reveal.
@@ -552,9 +552,45 @@ function showCaption(html) {
 async function explainFocused() {
   const q = focusedPart ? `What is the ${focusedPart} and how do I service it?` : 'What am I looking at?';
   showCaption('…thinking');
-  const ans = await answerQuestion(getContext(), q);
+  // In Explore, keep "explain this" scoped to the one selected part.
+  const ans = await answerQuestion(getContext(), q, { focusOnly: currentMode === 'explore' });
   showCaption(ans);
   say(ans);
+}
+
+/**
+ * Explore mode is the "ask about a part" flow: a spoken phrase either selects a
+ * part (a bare name or "show me the seat") or asks a question about the part
+ * already selected — answered by DeutschlandGPT constrained to that part only,
+ * then spoken via ElevenLabs. A question is never swallowed as a re-select.
+ */
+async function handleExploreSpeech(text) {
+  const asking = looksLikeQuestion(text);
+
+  // Not a question → treat as a selection ("gas cylinder", "show me the seat").
+  if (!asking && selectPartByName(text)) {
+    showCaption(`“${text}”`);
+    track('voice-intent', { input: text, metadata: { kind: 'part-select', part: focusedPart } });
+    return;
+  }
+
+  // A question, but nothing selected yet: if it names a part, select that one so
+  // we have something to answer about; otherwise nudge the user to pick a part.
+  if (!(selectedPart >= 0 && focusedPart)) {
+    if (!selectPartByName(text)) {
+      const hint = 'Tap a part first, then ask me anything about it.';
+      showCaption(hint);
+      say(hint);
+      return;
+    }
+  }
+
+  // Answer strictly about the selected part — and nothing else.
+  showCaption(`“${text}” · …thinking`);
+  const ans = await answerQuestion(getContext(), text, { focusOnly: true });
+  showCaption(ans);
+  say(ans);
+  track('voice-question', { input: text, metadata: { kind: 'part-question', part: focusedPart } });
 }
 
 // Flip a checkbox and fire its change listeners (so wireframe/tint/autorotate
@@ -695,8 +731,15 @@ async function handleSpeech(text) {
   if (pickSymptomByVoice(text)) { showCaption(`“${text}”`); track('voice-intent', { input: text, metadata: { kind: 'symptom' } }); return; }
   if (answerQuizByVoice(text)) { showCaption(`“${text}”`); track('voice-intent', { input: text, metadata: { kind: 'quiz-answer' } }); return; }
   if (switchModelByVoice(text)) { track('voice-intent', { input: text, metadata: { kind: 'model-switch' } }); return; }
+
+  // Explore is the dedicated "ask about a part" mode — select vs. ask is decided
+  // there, and answers are pinned to the selected part.
+  if (currentMode === 'explore') { await handleExploreSpeech(text); return; }
+
+  // Other modes: an explicit "show me X" navigation phrase can still highlight a
+  // part; anything else is a general question about the whole object.
   const wantsPart = /(show|highlight|select|isolate|where|find|point to|light up|take me to|look at|focus on|which is)/.test(text.toLowerCase());
-  if ((wantsPart || currentMode === 'explore') && selectPartByName(text)) { showCaption(`“${text}”`); track('voice-intent', { input: text, metadata: { kind: 'part-select', part: focusedPart } }); return; }
+  if (wantsPart && selectPartByName(text)) { showCaption(`“${text}”`); track('voice-intent', { input: text, metadata: { kind: 'part-select', part: focusedPart } }); return; }
 
   showCaption(`“${text}” · …thinking`);
   const ans = await answerQuestion(getContext(), cmd.text);

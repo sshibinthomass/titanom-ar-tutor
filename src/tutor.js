@@ -99,32 +99,74 @@ export function classifyCommand(raw) {
 }
 
 /**
+ * Heuristic: does a phrase read as a *question* rather than a part name or a
+ * "show me X" navigation request? Explore mode uses this to decide between
+ * selecting a part and answering about the one already selected — so that
+ * "what is the seat made of?" is answered instead of merely re-selecting it.
+ *
+ * Deliberately excludes the navigational interrogatives "where"/"which" — those
+ * ("where is the seat", "which is the backrest") should highlight the part, not
+ * trigger a spoken lecture.
+ */
+export function looksLikeQuestion(text) {
+  const t = text.toLowerCase().trim();
+  if (t.endsWith('?')) return true;
+  // Starts with an interrogative / auxiliary (question grammar).
+  if (/^(what|why|how|when|who|whose|can|could|should|would|does|do|is|are|will|tell|explain|describe)\b/.test(t)) return true;
+  // Contains a clearly informational phrase anywhere in the utterance.
+  if (/\b(made of|material|used for|use for|purpose|function|difference between|is it made|how (do|does)|does it (do|work))\b/.test(t)) return true;
+  return false;
+}
+
+/**
  * Answer a free-form question about the current object via DeutschlandGPT.
  * context: { modelLabel, parts:[names], mode, focusedPart }
+ * opts.focusOnly: constrain the answer to `context.focusedPart` alone — used by
+ *   Explore mode, where the user selects one part and asks about *that part only*.
  * Returns a short spoken answer, or a graceful fallback if AI is unavailable.
  */
-export async function answerQuestion(context, question) {
+export async function answerQuestion(context, question, { focusOnly = false } = {}) {
+  const focusPart = context.focusedPart;
+  // Scope the answer to a single part only when we actually have one selected.
+  const scoped = focusOnly && !!focusPart;
+
   // One trace per answer — carries the question, the context the tutor saw, and
   // (when AI is reached) a child generation with the model call + token usage.
   const trace = startTrace('ai-answer', {
     input: question,
-    metadata: { model: context.modelLabel, mode: context.mode, focusedPart: context.focusedPart, partCount: (context.parts || []).length },
+    metadata: { model: context.modelLabel, mode: context.mode, focusedPart: focusPart, partCount: (context.parts || []).length, scoped },
   });
 
   if (!aiAvailable()) {
-    const fallback = `I can't reach the AI tutor right now, but you're looking at the ${context.focusedPart || context.modelLabel}.`;
+    const fallback = scoped
+      ? `I can't reach the AI tutor right now, but you have the ${focusPart} selected.`
+      : `I can't reach the AI tutor right now, but you're looking at the ${focusPart || context.modelLabel}.`;
     trace.end({ output: fallback, metadata: { aiAvailable: false } });
     return fallback;
   }
-  const parts = [...new Set(context.parts || [])].join(', ');
-  const system = [
-    'You are an augmented-reality repair and assembly tutor speaking out loud to a user.',
-    `The user is looking at a ${context.modelLabel} through their phone camera.`,
-    parts && `Its parts are: ${parts}.`,
-    context.focusedPart && `They currently have the "${context.focusedPart}" highlighted.`,
-    'Answer in at most two short sentences, plain spoken language, practical and friendly.',
-    'If they ask how to fix or replace a part, give the key step. Do not use markdown or lists.',
-  ].filter(Boolean).join(' ');
+
+  let system;
+  if (scoped) {
+    // Explore: pin the tutor to the one selected part. It must not wander onto
+    // other parts, and must decline (briefly) anything that isn't about it.
+    system = [
+      'You are an augmented-reality repair and assembly tutor speaking out loud to a user.',
+      `The user is looking at a ${context.modelLabel} and has selected exactly one part: the "${focusPart}".`,
+      `Answer ONLY about the "${focusPart}". Do not describe, compare, or mention any other part of the ${context.modelLabel}.`,
+      `If the question is not about the "${focusPart}", reply in one sentence that you can only talk about the selected ${focusPart} right now, and suggest they select the part they mean.`,
+      'Answer in at most two short sentences, plain spoken language, practical and friendly. No markdown, no lists.',
+    ].join(' ');
+  } else {
+    const parts = [...new Set(context.parts || [])].join(', ');
+    system = [
+      'You are an augmented-reality repair and assembly tutor speaking out loud to a user.',
+      `The user is looking at a ${context.modelLabel} through their phone camera.`,
+      parts && `Its parts are: ${parts}.`,
+      focusPart && `They currently have the "${focusPart}" highlighted.`,
+      'Answer in at most two short sentences, plain spoken language, practical and friendly.',
+      'If they ask how to fix or replace a part, give the key step. Do not use markdown or lists.',
+    ].filter(Boolean).join(' ');
+  }
 
   try {
     const answer = await chat(
