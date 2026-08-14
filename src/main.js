@@ -285,7 +285,24 @@ function highlight(index, on) {
 function onExplodeChange() {
   const amount = parseFloat(ui.explode.value);
   setExplode(parts, amount);
+  groundExploded(); // exploding pushes parts every direction incl. down — keep them above the floor
   ui.explodeVal.textContent = amount.toFixed(2);
+}
+
+// Lift the whole exploded group so its lowest point rests on the ground plane
+// (never sinks below it — the complaint in Diagnose, where parts fan out downward).
+// Works in the group's PARENT frame, so it's correct both on the desktop scene
+// (parent = scene, ground = world y0) and in AR (parent = pivot, ground = the
+// floor anchor at pivot y0). Yaw + uniform scale preserve the vertical axis, so
+// the parent-local box bottom is the real lowest point.
+function groundExploded() {
+  if (!explodedGroup || !explodedGroup.parent) return;
+  const parent = explodedGroup.parent;
+  parent.updateWorldMatrix(true, false);
+  const invParent = new THREE.Matrix4().copy(parent.matrixWorld).invert();
+  const box = new THREE.Box3().setFromObject(explodedGroup).applyMatrix4(invParent);
+  if (box.isEmpty()) return;
+  explodedGroup.position.y -= box.min.y; // shift so the parent-local bottom sits at 0
 }
 ui.explode.addEventListener('input', onExplodeChange);
 
