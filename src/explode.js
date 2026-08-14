@@ -330,13 +330,19 @@ export function setDimmed(part, on, opacity = 0.07) {
  * Spotlight a set of parts (by index) and dim all others. Accepts a single
  * index or an array; pass -1 or [] to clear. Clears any previous spotlight
  * first, so it is safe to call every step.
+ *
+ * opts.highlight (default true): glow the spotlit parts with an emissive tint.
+ * Pass `false` to leave them at their original material so their real texture
+ * shows through — the parts still stand out because everything else is dimmed.
+ * Explore uses this so a tapped part reads as "fully textured, rest ghosted".
  */
-export function isolateParts(parts, indices) {
+export function isolateParts(parts, indices, opts = {}) {
+  const highlight = opts.highlight ?? true;
   const set = new Set((Array.isArray(indices) ? indices : [indices]).filter((i) => i >= 0));
   parts.forEach((p) => { setDimmed(p, false); setHighlight(p, false); });
   if (set.size === 0) return;
   parts.forEach((p, i) => {
-    if (set.has(i)) setHighlight(p, true);
+    if (set.has(i)) { if (highlight) setHighlight(p, true); }
     else setDimmed(p, true);
   });
 }

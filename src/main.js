@@ -292,7 +292,29 @@ function highlight(index, on) {
 function onExplodeChange() {
   const amount = parseFloat(ui.explode.value);
   setExplode(parts, amount);
+  groundExploded(); // exploding pushes parts every direction incl. down — keep them above the floor
   ui.explodeVal.textContent = amount.toFixed(2);
+  // Keep the Explore card's inline slider in step with the panel slider.
+  if (cardExplode) {
+    cardExplode.slider.value = ui.explode.value;
+    cardExplode.val.textContent = amount.toFixed(2);
+  }
+}
+
+// Lift the whole exploded group so its lowest point rests on the ground plane
+// (never sinks below it — the complaint in Diagnose, where parts fan out downward).
+// Works in the group's PARENT frame, so it's correct both on the desktop scene
+// (parent = scene, ground = world y0) and in AR (parent = pivot, ground = the
+// floor anchor at pivot y0). Yaw + uniform scale preserve the vertical axis, so
+// the parent-local box bottom is the real lowest point.
+function groundExploded() {
+  if (!explodedGroup || !explodedGroup.parent) return;
+  const parent = explodedGroup.parent;
+  parent.updateWorldMatrix(true, false);
+  const invParent = new THREE.Matrix4().copy(parent.matrixWorld).invert();
+  const box = new THREE.Box3().setFromObject(explodedGroup).applyMatrix4(invParent);
+  if (box.isEmpty()) return;
+  explodedGroup.position.y -= box.min.y; // shift so the parent-local bottom sits at 0
 }
 ui.explode.addEventListener('input', onExplodeChange);
 
@@ -333,6 +355,7 @@ let quizIndex = 0;
 let quizRevealed = false;
 let focusedPart = null; // name of the currently highlighted part (for the tutor)
 let lastSpoken = '';    // for the "repeat" voice command
+let cardExplode = null; // Explore card's inline explode slider { slider, val }, or null
 
 function currentKey() { return ui.model.value; }
 
@@ -395,6 +418,7 @@ function enterMode(id) {
   track('mode-switch', { metadata: { mode: id, model: ui.model.value } });
   currentMode = id;
   setModeButtons(id);
+  cardExplode = null; // drop any stale inline slider before the card is rebuilt
   resetParts();
   selectedPart = -1;
   if (!parts.length) { hideCard(); return; }
@@ -408,7 +432,34 @@ function enterMode(id) {
 
 // --- Explore: tap a part, isolate + name it ---
 function enterExplore() {
-  showCard('Explore', 'Tap any part to isolate it, then tap 🎤 and ask about it.', `${parts.length} parts`);
+  showCard('Explore', 'Tap any part to isolate it, then tap 🎤 and ask about it. Drag the slider to spread the parts apart.', `${parts.length} parts`);
+  addCardExplodeSlider();
+}
+
+// An explode slider right inside the Explore card, so parts can be spread apart
+// without opening the Controls sheet (hidden on mobile and during AR). It mirrors
+// the panel slider — both drive onExplodeChange, which keeps the two in sync.
+function addCardExplodeSlider() {
+  const wrap = document.createElement('div');
+  wrap.className = 'card-explode';
+  const label = document.createElement('label');
+  label.textContent = 'Explode';
+  const slider = document.createElement('input');
+  slider.type = 'range';
+  slider.min = ui.explode.min;
+  slider.max = ui.explode.max;
+  slider.step = ui.explode.step;
+  slider.value = ui.explode.value;
+  const val = document.createElement('span');
+  val.className = 'val';
+  val.textContent = parseFloat(ui.explode.value).toFixed(2);
+  slider.addEventListener('input', () => {
+    ui.explode.value = slider.value;
+    onExplodeChange();
+  });
+  wrap.append(label, slider, val);
+  ui.cardBody.appendChild(wrap);
+  cardExplode = { slider, val };
 }
 
 // --- Fix / Assemble: ordered steps ---
@@ -530,7 +581,9 @@ function nextQuiz() {
 attachPicker(renderer, camera, () => parts, (index) => {
   if (currentMode === 'explore') {
     selectedPart = index;
-    isolateParts(parts, index >= 0 ? [index] : []);
+    // No emissive glow here: keep the tapped part fully textured and just dim
+    // the rest, so the real material reads instead of a teal wash.
+    isolateParts(parts, index >= 0 ? [index] : [], { highlight: false });
     if (index >= 0) {
       const name = parts[index].name;
       focusedPart = name;
@@ -543,9 +596,11 @@ attachPicker(renderer, camera, () => parts, (index) => {
       say(desc ? `${name}. ${desc}` : name);
     } else {
       focusedPart = null;
-      showCard('Explore', 'Tap any part to isolate it, then tap 🎤 and ask about it.', `${parts.length} parts`);
+      showCard('Explore', 'Tap any part to isolate it, then tap 🎤 and ask about it. Drag the slider to spread the parts apart.', `${parts.length} parts`);
     }
-  } else if (currentMode === 'quiz' && index >= 0) {
+    addCardExplodeSlider(); // showCard rebuilt the body — re-add the inline explode slider
+  }
+  else if (currentMode === 'quiz' && index >= 0) {
     // Tapping a part in quiz mode is a shortcut to reveal.
     revealQuiz();
   }
@@ -650,7 +705,7 @@ function selectPartByName(text) {
   const indices = findParts(parts, [best.name]);
   if (!indices.length) return false;
   selectedPart = indices[0];
-  isolateParts(parts, indices);
+  isolateParts(parts, indices, { highlight: false }); // match the tap: fully textured, rest ghosted
   focusedPart = parts[indices[0]].name;
   showCard('Explore', `<b>${parts[indices[0]].name}</b>`, `${indices.length > 1 ? indices.length + ' pieces' : parts[indices[0]].triangleCount.toLocaleString() + ' triangles'} · say “explain this” for detail`);
   say(parts[indices[0]].name);
