@@ -40,7 +40,7 @@ modules are focused, mostly-pure helpers it calls.
 | [src/explode.js](src/explode.js) | The **core**. Splits a glTF into parts and drives the exploded view + per-part highlight/dim/isolate. |
 | [src/modes.js](src/modes.js) | The 5 modes + **authored per-model content** (fix steps, diagnoses, quizzes) and semantic part names. |
 | [src/select.js](src/select.js) | Raycast tap/click part-picking (drag threshold so orbiting ≠ tapping). |
-| [src/ar.js](src/ar.js) | WebXR `immersive-ar` session: hit-test reticle, tap-to-place, one-finger rotate / pinch scale / Move-to-reposition. |
+| [src/ar.js](src/ar.js) | WebXR `immersive-ar` session: hit-test reticle, tap-to-place, long-press to select then one-finger rotate / pinch scale, Move-to-reposition. |
 | [src/tts.js](src/tts.js) | Text-to-speech. ElevenLabs primary, browser `speechSynthesis` fallback. |
 | [src/voice.js](src/voice.js) | Speech-to-text via Web Speech API (`SpeechRecognition`), auto-restarting recognizer. |
 | [src/ai.js](src/ai.js) | DeutschlandGPT chat client (OpenAI-compatible `/chat/completions`). |
@@ -135,12 +135,36 @@ voice commands, modes, model loads and AR; `tts.js` tracks the spoken provider.
 
 ### AR (`ar.js`)
 
-Scene graph once placed: `anchor` (hit-test pose, on the floor) → `pivot` (user
+Scene graph once placed: `anchor` (world pose, on the floor) → `pivot` (user
 rotate/scale about the floor contact) → `group` (the model, fit to ~0.7 m). HTML
 UI is kept as a `dom-overlay` so the mode bar/cards/mic render over the camera
 feed. `renderer.setAnimationLoop` handles both normal rAF and the XRFrame (Three
 passes the frame as the 2nd arg during a session). `onSessionEnd` fully restores
 the desktop scene (parent, transform, background, controls).
+
+**Stability** (why the placed object stays put) rests on three things — don't
+regress them:
+
+1. **Real WebXR anchors.** On placement we call `frame.createAnchor()` at the
+   floor pose and then re-read that anchor's pose (`frame.getPose(anchorSpace,
+   refSpace)`) into `anchor.matrix` **every frame**. The runtime keeps refining
+   anchor poses as it maps the room, so the model tracks the real world instead
+   of drifting. Requires the `anchors` optional feature; if the device lacks it
+   we fall back to a one-shot frozen matrix (the old, less-stable behaviour).
+2. **PoseStabilizer** on the reticle — exponential-damped smoothing + an
+   N-consecutive-still-frames gate + a big-jump reject. The reticle only appears
+   (and only then is a tap accepted) once the surface estimate has converged, so
+   we never anchor to a garbage first-frame pose.
+3. **One reference space.** Hit-test poses, anchor poses and rendering all use
+   `renderer.xr.getReferenceSpace()`, so nothing disagrees about the world
+   origin. (Reading poses in a separately-requested `local` space, as before,
+   could silently offset placement.)
+
+User yaw/scale live on `pivot`, never baked into the anchor, so per-frame anchor
+refinement never fights the user's manipulation — only **Move** creates a new
+anchor (a new floor spot). Ported from the reference
+[Web-AR](https://github.com/sshibinthomass/Web-AR) project's
+`AnchorManager` / `PoseStabilizer` / `HitTestManager`.
 
 ## Configuration & secrets
 

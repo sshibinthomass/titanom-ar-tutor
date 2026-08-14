@@ -2,19 +2,46 @@ import * as THREE from 'three';
 
 /**
  * Markerless WebXR AR (Android Chrome). Same approach as the reference Web-AR
- * project: immersive-ar + hit-test for floor placement, HTML kept as a
- * dom-overlay so the mode bar / cards / mic button render over the camera feed.
+ * project, ported to plain JS: immersive-ar + hit-test for floor placement,
+ * HTML kept as a dom-overlay so the mode bar / cards / mic button render over
+ * the camera feed.
  *
- * Flow: start session → a reticle tracks real surfaces → tap to place the
- * exploded model → then manipulate it:
- *   • one-finger drag  → rotate around the vertical axis
- *   • two-finger pinch → scale
+ * What makes the placed object *stable* (three things the naive version lacks):
+ *
+ *   1. Real WebXR **anchors**. On placement we ask the runtime for an
+ *      `XRAnchor` at the floor pose and then re-read that anchor's pose *every
+ *      frame*. The AR system continuously refines anchor poses as it learns the
+ *      environment, so the model stays locked to the real world instead of
+ *      sliding/floating when tracking drifts. (Copying the hit-test matrix once
+ *      and never updating it — the old behaviour — is exactly what caused the
+ *      instability.) If the device doesn't support anchors we fall back to the
+ *      one-shot frozen matrix, which is still improved by (2) and (3).
+ *
+ *   2. A **PoseStabilizer** on the reticle: exponential-damped smoothing plus a
+ *      "must be still for N frames" gate and a big-jump reject. You can't place
+ *      until the surface estimate has actually converged, so you never anchor to
+ *      a garbage first-frame pose.
+ *
+ *   3. **One** reference space for everything. Hit-test poses, anchor poses and
+ *      three.js rendering all use `renderer.xr.getReferenceSpace()`, so they
+ *      can't disagree about where the floor is.
+ *
+ * Flow: start session → a reticle tracks real surfaces (only shown once stable)
+ * → tap to place the exploded model → then manipulate it:
+ *   • long-press       → select the object (a turquoise floor ring appears);
+ *                        rotate/scale only act on a *selected* object, so a
+ *                        stray touch never nudges it. A tap deselects.
+ *   • one-finger drag  → rotate around the vertical axis (when selected)
+ *   • two-finger pinch → scale (when selected)
  *   • "Move" button    → tap a new spot to re-place it
  *
  * Scene graph once placed:
- *   anchor (matrix from the hit-test pose, on the floor)
+ *   anchor (matrix driven by the live XRAnchor pose, on the floor)
  *     └─ pivot (user rotation + scale, about the floor contact point)
  *          └─ group (the exploded model, fit to ~0.7 m, base at y=0)
+ *
+ * User yaw/scale live on `pivot`, never baked into the anchor, so anchor-pose
+ * refinement each frame never fights the user's manipulation.
  */
 
 let session = null;
@@ -22,10 +49,17 @@ let reticle = null;
 let anchor = null;
 let pivot = null;
 let hitTestSource = null;
-let localSpace = null;
 let viewerSpace = null;
 let placed = false;
 let moveMode = false;
+
+// WebXR anchor state.
+let xrAnchor = null;          // the live XRAnchor, or null (unsupported / not yet placed)
+let anchorsSupported = false;
+let pendingAnchorMatrix = null; // world-space Matrix4 to spawn an anchor at, consumed on the next active frame
+let anchorGen = 0;              // bumped on every (re)placement so stale async anchors are discarded
+
+let lastTime = 0;              // for the stabilizer's dt
 
 let saved = null;
 let refs = null;
@@ -34,6 +68,19 @@ let refs = null;
 let gesture = null;
 let overlayEl = null;
 
+// Selection: the placed object must be long-pressed to "select" it before any
+// rotate/zoom takes effect, so a stray touch never nudges it. A tap deselects.
+let selected = false;
+let selectionRing = null;
+let pressTimer = null;      // fires selection after a still long-press
+let pressStart = null;      // { x, y, t } of the active one-finger press
+let pressMovedFar = false;  // the press turned into a drag → not a long-press/tap
+let longPressFired = false; // this press was consumed to select → don't also rotate/deselect
+
+const LONG_PRESS_MS = 450;
+const MOVE_CANCEL_PX = 12;  // finger travel that turns a press into a drag
+const TAP_MAX_MS = 250;
+
 export async function isARSupported() {
   if (!('xr' in navigator)) return false;
   try {
@@ -41,6 +88,80 @@ export async function isARSupported() {
   } catch {
     return false;
   }
+}
+
+// ---- Pose stabilizer -------------------------------------------------------
+// Ported from the reference PoseStabilizer. Smooths the raw hit-test pose and
+// only reports "stable" once it's been still for a run of frames, so placement
+// waits for the surface estimate to converge.
+
+const MIN_STABLE_FRAMES = 8;
+const POSITION_TOLERANCE_METERS = 0.025;
+const MAX_JUMP_METERS = 0.35;
+const DAMPING_LAMBDA = 18;
+
+function makeStabilizer() {
+  return {
+    isStable: false,
+    stableFrames: 0,
+    lastRaw: null,
+    smoothedPos: null,
+    smoothedQuat: null,
+  };
+}
+let stabilizer = makeStabilizer();
+
+function resetStabilizer() {
+  stabilizer.isStable = false;
+  stabilizer.stableFrames = 0;
+  stabilizer.lastRaw = null;
+  stabilizer.smoothedPos = null;
+  stabilizer.smoothedQuat = null;
+}
+
+function stabilizerStart(pos, quat) {
+  stabilizer.isStable = false;
+  stabilizer.stableFrames = 1;
+  stabilizer.lastRaw = pos.clone();
+  stabilizer.smoothedPos = pos.clone();
+  stabilizer.smoothedQuat = quat.clone();
+}
+
+const _p = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const _s = new THREE.Vector3();
+
+/** Feed a raw hit-test matrix; returns a smoothed Matrix4 once stable, else null. */
+function stabilizerUpdate(rawMatrix, dt) {
+  rawMatrix.decompose(_p, _q, _s);
+
+  if (!stabilizer.lastRaw) {
+    stabilizerStart(_p, _q);
+    return null;
+  }
+
+  const movement = _p.distanceTo(stabilizer.lastRaw);
+  if (movement > MAX_JUMP_METERS) {
+    // Teleport-sized jump: the tracker relocalised. Restart the sequence.
+    stabilizerStart(_p, _q);
+    return null;
+  }
+
+  stabilizer.stableFrames = movement <= POSITION_TOLERANCE_METERS ? stabilizer.stableFrames + 1 : 1;
+  stabilizer.isStable = stabilizer.stableFrames >= MIN_STABLE_FRAMES;
+  stabilizer.lastRaw.copy(_p);
+
+  const alpha = 1 - Math.exp(-DAMPING_LAMBDA * Math.max(0, dt));
+  stabilizer.smoothedPos.lerp(_p, alpha);
+  stabilizer.smoothedQuat.slerp(_q, alpha);
+
+  if (!stabilizer.isStable) return null;
+
+  return new THREE.Matrix4().compose(
+    stabilizer.smoothedPos,
+    stabilizer.smoothedQuat,
+    new THREE.Vector3(1, 1, 1),
+  );
 }
 
 /**
@@ -53,9 +174,15 @@ export async function startAR(opts) {
 
   session = await navigator.xr.requestSession('immersive-ar', {
     requiredFeatures: ['hit-test'],
-    optionalFeatures: ['dom-overlay', 'local-floor'],
+    // 'anchors' is what buys us world-locked stability; the others degrade
+    // gracefully if the device doesn't offer them.
+    optionalFeatures: ['dom-overlay', 'anchors', 'local-floor', 'light-estimation'],
     domOverlay: overlay ? { root: overlay } : undefined,
   });
+
+  anchorsSupported = !!(session.enabledFeatures
+    ? session.enabledFeatures.includes('anchors')
+    : true); // older UAs don't expose enabledFeatures — assume yes and feature-detect per-frame
 
   saved = {
     background: scene.background,
@@ -73,7 +200,9 @@ export async function startAR(opts) {
   renderer.xr.enabled = true;
   await renderer.xr.setSession(session);
 
-  localSpace = await session.requestReferenceSpace('local');
+  // Hit-test rays are cast from the viewer; the resulting poses (and anchor
+  // poses, and rendering) are all read in renderer.xr.getReferenceSpace() so
+  // nothing disagrees about the world origin.
   viewerSpace = await session.requestReferenceSpace('viewer');
   hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
 
@@ -85,12 +214,23 @@ export async function startAR(opts) {
   reticle.visible = false;
   scene.add(reticle);
 
-  // anchor (from hit-test) → pivot (user transform) → group (model).
+  // anchor (world pose) → pivot (user transform) → group (model).
   anchor = new THREE.Group();
   anchor.matrixAutoUpdate = false;
   scene.add(anchor);
   pivot = new THREE.Group();
   anchor.add(pivot);
+
+  // A turquoise ring on the floor under the object that shows it's selected.
+  // Under `pivot`, so it rotates/scales with the object — a clear affordance.
+  selectionRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.3, 0.345, 48).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0x4ecdc4, transparent: true, opacity: 0.85, depthTest: false })
+  );
+  selectionRing.position.y = 0.001;
+  selectionRing.renderOrder = 999;
+  selectionRing.visible = false;
+  pivot.add(selectionRing);
 
   const box = new THREE.Box3().setFromObject(group);
   const size = box.getSize(new THREE.Vector3());
@@ -105,6 +245,11 @@ export async function startAR(opts) {
   placed = false;
   moveMode = false;
   gesture = null;
+  xrAnchor = null;
+  pendingAnchorMatrix = null;
+  anchorGen = 0;
+  lastTime = 0;
+  resetStabilizer();
 
   session.addEventListener('select', onSelect);
   session.addEventListener('end', onSessionEnd);
@@ -116,39 +261,114 @@ export async function startAR(opts) {
   overlayEl.addEventListener('touchend', onTouchEnd, { passive: false });
 }
 
-function placeAtReticle() {
-  anchor.matrix.copy(reticle.matrix);
+/** Commit the current stable reticle pose as the model's floor anchor. */
+function placeAtReticle(stableMatrix) {
+  // Show it immediately at the stable pose so there's no gap while the async
+  // anchor request resolves…
+  anchor.matrix.copy(stableMatrix);
+  anchor.matrixWorldNeedsUpdate = true;
+  // …then hand the same pose to the runtime to become a tracked anchor.
+  anchorGen += 1;
+  if (xrAnchor) { try { xrAnchor.delete(); } catch {} xrAnchor = null; }
+  pendingAnchorMatrix = stableMatrix.clone();
+
   refs.group.visible = true;
   placed = true;
   moveMode = false;
   reticle.visible = false;
+  resetStabilizer();
+  setSelected(false); // start unselected — a long-press is needed to manipulate
   refs.onPlaced?.();
 }
 
+/** Toggle the "selected" state and its visual ring, and notify the app. */
+function setSelected(sel) {
+  selected = sel;
+  if (selectionRing) selectionRing.visible = sel;
+  refs?.onSelectedChange?.(sel);
+}
+
 function onSelect() {
-  if (!reticle || !reticle.visible) return;
-  if (!placed || moveMode) placeAtReticle();
+  // Only place off a *stable* reticle — never a jittery first estimate.
+  if (!reticle || !reticle.visible || !stabilizer.isStable) return;
+  if (!placed || moveMode) {
+    placeAtReticle(reticle.matrix.clone());
+  }
 }
 
 /** Re-enter placement: the next floor tap moves the model. */
 export function requestMove() {
-  if (placed) moveMode = true;
+  if (placed) {
+    moveMode = true;
+    resetStabilizer();
+    setSelected(false); // re-placing; drop the current selection
+  }
 }
 
 /** Call every animation frame with the XRFrame. */
 export function updateAR(frame) {
-  if (!frame || !hitTestSource) return;
-  if (placed && !moveMode) { if (reticle) reticle.visible = false; return; }
+  if (!frame || !refs) return;
+  const refSpace = refs.renderer.xr.getReferenceSpace();
+  if (!refSpace) return;
+
+  const now = frame.predictedDisplayTime ?? performance.now();
+  const dt = lastTime ? Math.min(0.1, Math.max(0, (now - lastTime) / 1000)) : 0;
+  lastTime = now;
+
+  // 1) Spawn a pending anchor now that we have an active frame + ref space.
+  if (pendingAnchorMatrix && anchorsSupported && typeof frame.createAnchor === 'function') {
+    const gen = anchorGen;
+    const m = pendingAnchorMatrix;
+    pendingAnchorMatrix = null;
+    m.decompose(_p, _q, _s);
+    const xform = new XRRigidTransform(
+      { x: _p.x, y: _p.y, z: _p.z, w: 1 },
+      { x: _q.x, y: _q.y, z: _q.z, w: _q.w },
+    );
+    Promise.resolve(frame.createAnchor(xform, refSpace)).then((a) => {
+      // Discard if a newer placement happened while we were awaiting.
+      if (gen !== anchorGen || !a) { try { a && a.delete(); } catch {} return; }
+      xrAnchor = a;
+    }).catch(() => { /* anchors unavailable — keep the frozen matrix */ });
+  }
+
+  // 2) Drive the placed model from the live anchor pose (this is the stability
+  //    win: the runtime keeps refining this pose, we follow it every frame).
+  if (xrAnchor) {
+    const pose = frame.getPose(xrAnchor.anchorSpace, refSpace);
+    if (pose) {
+      anchor.matrix.fromArray(pose.transform.matrix);
+      anchor.matrixWorldNeedsUpdate = true;
+    }
+  }
+
+  // 3) Reticle / hit-test only while we still need to place (or re-place).
+  if (placed && !moveMode) {
+    if (reticle) reticle.visible = false;
+    return;
+  }
+  if (!hitTestSource) return;
+
   const results = frame.getHitTestResults(hitTestSource);
   if (results.length) {
-    const pose = results[0].getPose(localSpace);
+    const pose = results[0].getPose(refSpace);
     if (pose) {
-      reticle.visible = true;
-      reticle.matrix.fromArray(pose.transform.matrix);
+      const raw = new THREE.Matrix4().fromArray(pose.transform.matrix);
+      const stable = stabilizerUpdate(raw, dt);
+      if (stable) {
+        reticle.visible = true;
+        reticle.matrix.copy(stable);
+        reticle.matrixWorldNeedsUpdate = true;
+      } else {
+        // Converging: hide the ring until the pose settles so the user isn't
+        // invited to tap on a wobbling target.
+        reticle.visible = false;
+      }
+      return;
     }
-  } else {
-    reticle.visible = false;
   }
+  reticle.visible = false;
+  resetStabilizer();
 }
 
 export function isPlaced() {
@@ -167,27 +387,60 @@ function touchAngle(t) {
   return Math.atan2(t[1].clientY - t[0].clientY, t[1].clientX - t[0].clientX);
 }
 
+function cancelPressTimer() {
+  if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+}
+
 function onTouchStart(e) {
   if (!placed || moveMode) return;
   if (isUI(e.target)) return;
+
   if (e.touches.length === 1) {
-    gesture = { mode: 'rotate', x: e.touches[0].clientX, startRotY: pivot.rotation.y };
+    const t = e.touches[0];
+    pressStart = { x: t.clientX, y: t.clientY, t: performance.now() };
+    pressMovedFar = false;
+    longPressFired = false;
+    // A one-finger press only rotates once the object is already selected.
+    gesture = selected
+      ? { mode: 'rotate', x: t.clientX, startRotY: pivot.rotation.y, moved: false }
+      : null;
+    // Hold still long enough → select (only meaningful while unselected).
+    cancelPressTimer();
+    if (!selected) {
+      pressTimer = setTimeout(() => {
+        pressTimer = null;
+        if (!pressMovedFar) { longPressFired = true; gesture = null; setSelected(true); }
+      }, LONG_PRESS_MS);
+    }
   } else if (e.touches.length === 2) {
-    gesture = {
+    cancelPressTimer();
+    // Pinch/twist also requires a prior selection.
+    gesture = selected ? {
       mode: 'pinch',
       startDist: touchDist(e.touches),
       startAngle: touchAngle(e.touches),
       startScale: pivot.scale.x,
       startRotY: pivot.rotation.y,
-    };
+    } : null;
   }
 }
 
 function onTouchMove(e) {
-  if (!gesture || !placed) return;
+  if (!placed || moveMode) return;
+
+  if (e.touches.length === 1 && pressStart) {
+    const t = e.touches[0];
+    if (Math.hypot(t.clientX - pressStart.x, t.clientY - pressStart.y) > MOVE_CANCEL_PX) {
+      pressMovedFar = true;      // it's a drag, not a long-press / tap
+      cancelPressTimer();
+    }
+  }
+
+  if (!gesture) return;
   if (gesture.mode === 'rotate' && e.touches.length === 1) {
     const dx = e.touches[0].clientX - gesture.x;
     pivot.rotation.y = gesture.startRotY + dx * 0.01;
+    gesture.moved = true;
     e.preventDefault();
   } else if (gesture.mode === 'pinch' && e.touches.length === 2) {
     const scale = gesture.startScale * (touchDist(e.touches) / gesture.startDist);
@@ -198,7 +451,20 @@ function onTouchMove(e) {
 }
 
 function onTouchEnd(e) {
-  if (e.touches.length === 0) gesture = null;
+  if (e.touches.length > 0) return; // wait until all fingers are up
+  cancelPressTimer();
+
+  // A quick, still, single-finger tap (that neither selected nor rotated)
+  // deselects — the way to "let go" of the object.
+  const wasTap = pressStart && !pressMovedFar && !longPressFired
+    && (performance.now() - pressStart.t) < LONG_PRESS_MS
+    && !(gesture && gesture.moved);
+  if (wasTap && selected) setSelected(false);
+
+  gesture = null;
+  pressStart = null;
+  pressMovedFar = false;
+  longPressFired = false;
 }
 
 // ---- Teardown --------------------------------------------------------------
@@ -217,6 +483,15 @@ function onSessionEnd() {
     overlayEl = null;
   }
 
+  cancelPressTimer();
+  selected = false;
+  pressStart = null;
+  gesture = null;
+  if (selectionRing) { selectionRing.geometry.dispose(); selectionRing.material.dispose(); selectionRing = null; }
+
+  if (xrAnchor) { try { xrAnchor.delete(); } catch {} xrAnchor = null; }
+  pendingAnchorMatrix = null;
+
   // Restore the model to the desktop scene.
   if (saved.groupParent) saved.groupParent.add(group);
   group.position.copy(saved.groupPos);
@@ -233,10 +508,12 @@ function onSessionEnd() {
   camera.position.copy(saved.cameraPos);
 
   renderer.xr.enabled = false;
-  hitTestSource = null;
+  if (hitTestSource) { try { hitTestSource.cancel(); } catch {} hitTestSource = null; }
+  viewerSpace = null;
   session = null;
   placed = false;
   moveMode = false;
+  resetStabilizer();
 
   refs.onEnd?.();
   refs = null;
