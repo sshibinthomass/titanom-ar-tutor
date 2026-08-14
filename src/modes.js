@@ -400,6 +400,32 @@ export function knowledgeDigest(modelKey) {
   return lines.join(' ');
 }
 
+/**
+ * Per-part descriptions for Explore mode, keyed by model id then semantic part
+ * name (the names from SEMANTIC_NAMES / findParts). Optional — a model with no
+ * entry, or a part with no entry, just shows the bare part name as before. Kept
+ * short: one or two sentences, spoken aloud on tap, so they must read naturally.
+ */
+const PART_INFO = {
+  'markus-chair': {
+    'Backrest': 'The powder-coated steel backrest frame. It holds the mesh under tension and carries the recline load through to the tilt mechanism.',
+    'Mesh back': 'The breathable Vissle mesh panel — recycled polyester that flexes to support your back and stays cool over a long day.',
+    'Headrest': 'The fixed head support at the very top. It cradles your neck and head when you lean back into the high backrest.',
+    'Seat': 'Polyurethane foam over a laminated wood base. It bolts to the tilt mechanism and is rated to carry up to 110 kilograms.',
+    'Tilt mechanism': 'The synchronised tilt under the seat. It reclines with you, locks in three positions, and a knob sets how hard it resists leaning.',
+    'Height lever': 'The paddle under the seat. Lift it to release the gas lift and raise or lower the seat between 46 and 57 centimetres.',
+    'Armrest': 'A fixed armrest, padded in polypropylene and synthetic rubber. It bolts under the seat to support your forearm and ease shoulder strain.',
+    'Gas cylinder': 'The pneumatic gas lift. Compressed gas raises and lowers the seat; when a chair keeps sinking, this whole cylinder is replaced.',
+    'Star base': 'The five-armed foot of powder-coated aluminium. It spreads your weight out to the five casters for a stable, tip-resistant stance.',
+    'Caster': 'A self-braking wheel. It rolls freely when you sit down and locks when you stand up, so the chair will not drift away from you.',
+  },
+};
+
+/** One-line description for a part in Explore mode, or '' if none authored. */
+export function describePart(modelKey, name) {
+  return PART_INFO[modelKey]?.[name] || '';
+}
+
 /** Quiz entries → [{ indices, question, answer }] (only those that matched parts). */
 export function resolveQuiz(modelKey, parts) {
   const entries = CONTENT[modelKey]?.quiz ?? [];

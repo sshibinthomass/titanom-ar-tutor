@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { buildExplodedView, setExplode, isolateParts, clearPartStates, setHighlight, findParts } from './explode.js';
 import { attachPicker } from './select.js';
-import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames, knowledgeDigest } from './modes.js';
+import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames, knowledgeDigest, describePart } from './modes.js';
 import { isARSupported, startAR, updateAR, endAR, requestMove } from './ar.js';
 import { speak, stop as stopSpeaking } from './tts.js';
 import { createRecognizer, speechRecognitionAvailable } from './voice.js';
@@ -532,9 +532,15 @@ attachPicker(renderer, camera, () => parts, (index) => {
     selectedPart = index;
     isolateParts(parts, index >= 0 ? [index] : []);
     if (index >= 0) {
-      focusedPart = parts[index].name;
-      showCard('Explore', `<b>${parts[index].name}</b>`, `${parts[index].triangleCount.toLocaleString()} triangles · ask 🎤 about this part`);
-      say(parts[index].name);
+      const name = parts[index].name;
+      focusedPart = name;
+      const desc = describePart(currentKey(), name);
+      showCard(
+        'Explore',
+        `<b>${name}</b>${desc ? `<span class="partdesc">${desc}</span>` : ''}`,
+        `${parts[index].triangleCount.toLocaleString()} triangles · ask 🎤 about this part`
+      );
+      say(desc ? `${name}. ${desc}` : name);
     } else {
       focusedPart = null;
       showCard('Explore', 'Tap any part to isolate it, then tap 🎤 and ask about it.', `${parts.length} parts`);
