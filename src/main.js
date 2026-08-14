@@ -574,7 +574,9 @@ function nextQuiz() {
 attachPicker(renderer, camera, () => parts, (index) => {
   if (currentMode === 'explore') {
     selectedPart = index;
-    isolateParts(parts, index >= 0 ? [index] : []);
+    // No emissive glow here: keep the tapped part fully textured and just dim
+    // the rest, so the real material reads instead of a teal wash.
+    isolateParts(parts, index >= 0 ? [index] : [], { highlight: false });
     if (index >= 0) {
       focusedPart = parts[index].name;
       showCard('Explore', `<b>${parts[index].name}</b>`, `${parts[index].triangleCount.toLocaleString()} triangles · ask 🎤 about this part`);
@@ -690,7 +692,7 @@ function selectPartByName(text) {
   const indices = findParts(parts, [best.name]);
   if (!indices.length) return false;
   selectedPart = indices[0];
-  isolateParts(parts, indices);
+  isolateParts(parts, indices, { highlight: false }); // match the tap: fully textured, rest ghosted
   focusedPart = parts[indices[0]].name;
   showCard('Explore', `<b>${parts[indices[0]].name}</b>`, `${indices.length > 1 ? indices.length + ' pieces' : parts[indices[0]].triangleCount.toLocaleString() + ' triangles'} · say “explain this” for detail`);
   say(parts[indices[0]].name);
