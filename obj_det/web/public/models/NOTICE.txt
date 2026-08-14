@@ -1,0 +1,10 @@
+Titanom Vision includes an Ultralytics YOLO26n model exported to ONNX.
+
+Model: yolo26n-416-fp32.onnx
+Source model: models/yolo26n.pt
+Ultralytics version used for export: 8.4.120
+Model license: GNU Affero General Public License v3.0 (AGPL-3.0)
+License information: https://www.ultralytics.com/license
+
+The ONNX model uses a fixed 416 x 416 input and an end-to-end detection output
+with up to 300 rows of [x1, y1, x2, y2, confidence, class_id].
