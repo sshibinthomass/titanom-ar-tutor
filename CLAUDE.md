@@ -10,6 +10,9 @@ place an **exploded 3D object**, and an AI voice tutor teaches, repairs, and
 diagnoses it hands-free. The desktop 3D view works everywhere; markerless AR is
 **Android Chrome only** (iOS/desktop fall back to the orbit viewer).
 
+The app runs in **English or German** — one at a time, everywhere (see
+"Language" below). Content authored for a new feature needs both.
+
 **The object is the IKEA Markus chair.** It is the default selection, the only
 model fetched on boot, and the one every mode's content is authored for. The
 office chair, bicycle and bed are secondary demos that prove the splitter is
@@ -61,6 +64,7 @@ modules are focused, mostly-pure helpers it calls.
 | [src/stt.js](src/stt.js) | Transcription provider chain: ElevenLabs **Scribe v2** primary (browser-direct, no proxy hop) → DGPT Whisper fallback. |
 | [src/ai.js](src/ai.js) | DeutschlandGPT chat client (OpenAI-compatible `/chat/completions`). |
 | [src/tutor.js](src/tutor.js) | "Brain" glue: classify a spoken phrase into an app command vs. a free-form question, then answer via AI with context. |
+| [src/i18n.js](src/i18n.js) | **Language.** The selected language (`en`/`de`), the UI dictionary, the authored-content resolver `tr()`, and the locale codes the speech stack needs. One switch flips chrome, content, voice, transcription and every LLM prompt. |
 | [src/telemetry.js](src/telemetry.js) | Langfuse tracing. Batches ingestion events to a credential-free proxy (Vite in dev, Worker in prod). No-op when unconfigured. |
 
 ### The part-splitting core (`explode.js`)
@@ -374,6 +378,89 @@ TTS, STT and AI all **degrade gracefully**: no ElevenLabs key → browser
 speech + Whisper STT; no DeutschlandGPT → Web Speech recognition + a canned
 local answer.
 
+### Language (`i18n.js`)
+
+The app is **English or German, and strictly one at a time**. The rule the whole
+codebase obeys: when German is selected, *every* surface is German — the
+chrome, the cards, the authored content, the part names, the tutor's spoken
+answers — and the mic is told to transcribe German. A user who speaks the other
+language does **not** flip the app: STT is pinned to the selected language and
+every LLM prompt is told to reply in it regardless of what language the question
+arrived in. (A tutor that silently changes language mid-session is worse than
+one that answers in the language you chose.)
+
+Chosen with the 🌐 corner toggle or the panel's Language select, persisted in
+`localStorage`, defaulting to the browser locale on a first visit.
+
+Three layers, and the split between them is what keeps it maintainable:
+
+- **UI strings** live in `i18n.js`'s `STRINGS` as `{ en, de }` pairs, read with
+  `t('key', vars)`. Static markup carries `data-i18n` / `data-i18n-title`
+  attributes and is repainted by `applyStaticTranslations()`.
+- **Authored content** stays in `modes.js`, bilingual **in place**: every
+  user-facing string is a `{ en, de }` pair resolved by `tr()` at read time.
+  Duplicating the whole `CONTENT` tree per language was the obvious alternative
+  and is the wrong one — the `match` keyword lists, the part indices and the
+  step order must stay single-sourced, or a translation drifts out of step with
+  the structure it describes. **`match` keywords stay English**: they resolve
+  against canonical part names, never against what the user sees.
+- **Part names** are two things at once. `p.name` is **always the canonical
+  English name** — it is the matching key for every `match: [...]`, every
+  `ASSEMBLE_STEPS` group and every `SEMANTIC_NAMES` index, and translating it in
+  place would break all three. The German name is a *display* layer:
+  `partLabel(part)` / `localizeName(name)` (from `PART_NAMES_DE`) is what the
+  legend, the cards, the spoken lines **and the LLM** get. `canonicalName()`
+  walks a display name back, which is how `resolvePlanParts()` and
+  `highlightPartByName()` turn a German name the LLM echoed into part indices.
+
+What each downstream module does with it — don't regress these:
+
+1. **Every LLM system prompt opens with `languageRule()`** (tutor.js), which
+   names the output language *and* forbids mirroring the user's. The
+   model-facing instructions stay English (that is what these models follow most
+   reliably); only the output language is named. German additionally gets
+   `germanStyle()` — informal "du", spoken not written register, units spelled
+   out — because the default drifts into stiff Amtsdeutsch that TTS reads badly.
+2. **The machine-read headers are explicitly exempt.** `PART:` / `ACTION:` and
+   the `FIX_ACTIONS` verbs are fixed English identifiers, as are the Fix plan's
+   JSON keys; the prompts say so. The parser *also* accepts `TEIL:` / `AKTION:`,
+   because a model deep in a German answer translates them anyway now and then
+   and losing the highlight over that would be a silly way to fail.
+3. **The grounding digests are localised too** — `knowledgeDigest()` and
+   `partInfoDigest()` return German text keyed by German part names, so the
+   facts, the parts list and the answer are all one language. (An English header
+   on German facts invites the model to answer in English.)
+4. **STT is pinned, not auto-detected**: `language_code` for Scribe,
+   `language` for Whisper, `rec.lang` for Web Speech. On short or noisy audio
+   auto-detect mistakes German for English or Dutch, so the hint is strictly
+   more accurate. It is a *hint*, though, not a gate — verified against the live
+   API, Scribe v2 still returns German text for clearly-German audio even when
+   told `language_code: en`. So the pin buys accuracy; the guarantee that the
+   user is always *answered* in the selected language comes from `languageRule()`
+   below, not from here.
+5. **TTS gets `language_code`** so a bare part name ("Sitz") isn't read with an
+   English accent — with a one-shot retry that drops the field and remembers,
+   since only the v2.5 models accept it and a custom `VITE_ELEVENLABS_MODEL`
+   must never cost the app its voice. The `speechSynthesis` fallback sets `lang`
+   **and picks a matching voice**, or an English-locale laptop reads German
+   lines with an English voice.
+6. **Switching language re-enters the current mode.** The chrome and labels are
+   repainted in place, but the card is not: half its content is LLM output that
+   exists only in the language it was generated in. Re-resolving the mode is the
+   honest way to get a fully-one-language screen.
+7. **The two voice exceptions accept both languages at once** (`MUTE_RE`,
+   `MOVE_RE` in main.js), deliberately. They are the utterances that must work
+   under stress — you say "stop" *while* the tutor is talking over you — and a
+   German speaker reaching for "stop" shouldn't be met with silence because of a
+   setting. It can't misfire: MUTE_RE anchors the whole utterance and MOVE_RE
+   only applies inside AR to phrases of four words or fewer.
+
+Adding a language means adding an id to `LANGS`, a third key to every `{ en, de }`
+pair, a name map beside `PART_NAMES_DE`, and a `LANG_NAME` entry in tutor.js.
+Adding a *string* means adding it to `STRINGS` — never inline a user-facing
+literal in `main.js`; `t()` returns the key itself when it's missing, so a
+forgotten string shows up loudly in testing instead of rendering blank.
+
 ### Telemetry (`telemetry.js`)
 
 Everything is traced to **Langfuse**: a session per page load, a trace per voice
@@ -491,6 +578,10 @@ Then the site is at `https://<owner>.github.io/titanom_hack_2026/`.
   answers to its multi-word phrases.
 - Refer to parts by **keyword match**, never by hard-coded index in content —
   indices are only pinned in `SEMANTIC_NAMES` for the fused hero model.
+- **No user-facing string literals outside the dictionaries.** UI text goes in
+  `STRINGS` (i18n.js) behind `t()`; authored model content goes in `modes.js` as
+  an `{ en, de }` pair behind `tr()`. Display a part with `partLabel(p)`, match
+  it on `p.name`.
 - Always clone materials before mutating per-part visual state.
 - Model paths must use `import.meta.env.BASE_URL` (never a leading `/`) so they
   resolve under the Pages sub-path.

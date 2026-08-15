@@ -4,7 +4,8 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { buildExplodedView, setExplode, setPartExplode, isolateParts, clearPartStates, setHighlight, setGhostStyle, findParts } from './explode.js';
 import { updateTweens, tweenTo, cancelTween, isTweening, easeInOutCubic, flyToParts, moveCamera } from './animate.js';
 import { attachPicker, attachDragger } from './select.js';
-import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest, fixSuggestions, resolvePlanParts } from './modes.js';
+import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest, fixSuggestions, resolvePlanParts, partLabel, canonicalName } from './modes.js';
+import { LANGS, getLang, setLang, onLangChange, t, locale, applyStaticTranslations } from './i18n.js';
 import { isARSupported, startAR, updateAR, endAR, requestMove, setInteractor, setManipulationEnabled, setPivotScale, getFitScale } from './ar.js';
 import { startPuzzle, stopPuzzle, updatePuzzle, puzzleInteractor, isPuzzleActive, puzzleAutoPlace, puzzleHintIndices, puzzleStatus } from './puzzle.js';
 import { speak, stop as stopSpeaking, isSpeaking } from './tts.js';
@@ -34,9 +35,14 @@ const DEFAULT_MODEL = 'markus-chair';
 // to a ~0.7 m tabletop size, which is fine for looking at but wrong for
 // learning: the point of the Assemble puzzle is that reaching for a part in the
 // room rehearses the real thing, so the puzzle asks AR for life-size instead.
+// `label` is the English name; `labelDe` the German one. The label is not just
+// a dropdown caption — it is `modelLabel` in every LLM prompt ("the user is
+// looking at a …"), so leaving it English in a German session would put one
+// English noun in the middle of every German answer.
 const MODELS = {
   'markus-chair': {
     label: 'IKEA Markus Chair',
+    labelDe: 'IKEA MARKUS Bürostuhl',
     url: `${BASE_URL}models/markus-chair/scene.gltf`,
     credit: 'IKEA Markus Office Chair — Graham Rust, Sketchfab Standard',
     creditUrl: 'https://sketchfab.com/3d-models/ikea-markus-office-chair-cee12c29ebda4bcdb91b84a6f126a971',
@@ -45,6 +51,7 @@ const MODELS = {
   },
   'office-chair': {
     label: 'Office Chair',
+    labelDe: 'Bürostuhl',
     url: `${BASE_URL}models/office-chair/scene.gltf`,
     credit: 'Office Chair Modern — thethieme, CC-BY-4.0',
     creditUrl: 'https://sketchfab.com/3d-models/office-chair-modern-675f34f7304e4d92812a41e9750539aa',
@@ -52,6 +59,7 @@ const MODELS = {
   },
   bicycle: {
     label: 'Bicycle',
+    labelDe: 'Fahrrad',
     url: `${BASE_URL}models/bicycle/scene.gltf`,
     credit: 'bicycle — local.yany, CC-BY-4.0',
     creditUrl: 'https://sketchfab.com/3d-models/bicycle-8db2d442b58045baac2edfc5e9ee11e3',
@@ -60,6 +68,7 @@ const MODELS = {
   },
   bed: {
     label: 'Bed Low Poly',
+    labelDe: 'Bett (Low Poly)',
     url: `${BASE_URL}models/bed/scene.gltf`,
     credit: 'Bed Low Poly — LinNacume, CC-BY-4.0',
     creditUrl: 'https://sketchfab.com/3d-models/bed-low-poly-b19855811635449288827767b45d4b38',
@@ -166,7 +175,13 @@ const ui = {
   themeToggle: document.getElementById('themeToggle'),
   panel: document.querySelector('.panel'),
   sheetBackdrop: document.getElementById('sheetBackdrop'),
+  lang: document.getElementById('lang'),
+  langToggle: document.getElementById('langToggle'),
 };
+
+// Paint the static chrome in the selected language before anything else runs,
+// so the first frame is never English-then-German.
+applyStaticTranslations();
 
 // ---- State -----------------------------------------------------------------
 
@@ -182,18 +197,28 @@ function currentModel() {
   return MODELS[ui.model.value];
 }
 
+/** A model's name in the selected language (dropdown, cards and LLM prompts). */
+function modelLabel(m = currentModel()) {
+  return (getLang() === 'de' && m?.labelDe) || m?.label || '';
+}
+
 // Populate model dropdown.
 for (const [key, m] of Object.entries(MODELS)) {
   const opt = document.createElement('option');
   opt.value = key;
-  opt.textContent = m.label;
+  opt.textContent = modelLabel(m);
   ui.model.appendChild(opt);
+}
+// The <option> captions are re-read on a language switch; the selected value is
+// untouched, so the loaded model can never desync from the dropdown.
+function relabelModels() {
+  for (const opt of ui.model.options) opt.textContent = modelLabel(MODELS[opt.value]);
 }
 ui.model.value = DEFAULT_MODEL; // hero model: richest authored content (parts, specs, official-manual grounding)
 
 // Telemetry: one Langfuse session per page load. Tracks voice, AI, modes, AR,
 // TTS and errors. No-op (and never throws) when Langfuse isn't configured.
-initTelemetry({ initialModel: ui.model.value });
+initTelemetry({ initialModel: ui.model.value, initialLang: getLang() });
 
 // Generate the puzzle's ElevenLabs sound cues now, not when Assemble opens:
 // generation takes seconds, and they'd miss the moment they punctuate. Cached
@@ -210,28 +235,38 @@ function loadModel(key) {
   if (gltfCache.has(key)) {
     originalScene = gltfCache.get(key);
     rebuild();
-    ui.status.textContent = 'Ready — drag to orbit, use the slider to explode.';
+    setStatus('status.ready');
     return;
   }
 
-  ui.status.textContent = 'Loading model…';
+  setStatus('status.loading');
   loader.load(
     m.url,
     (gltf) => {
       gltfCache.set(key, gltf.scene);
       originalScene = gltf.scene;
-      ui.status.textContent = 'Splitting into component parts…';
+      setStatus('status.splitting');
       rebuild();
-      ui.status.textContent = 'Ready — drag to orbit, use the slider to explode.';
+      setStatus('status.ready');
     },
     (evt) => {
-      if (evt.total) ui.status.textContent = `Loading model… ${Math.round((evt.loaded / evt.total) * 100)}%`;
+      if (evt.total) setStatus('status.loadingPct', { pct: Math.round((evt.loaded / evt.total) * 100) });
     },
     (err) => {
       console.error(err);
-      ui.status.textContent = 'Failed to load model. Check the console.';
+      setStatus('status.failed');
     }
   );
+}
+
+// The status line is written from a dozen places and has to survive a language
+// switch, so it remembers its key (and vars) rather than its rendered text.
+let statusKey = 'status.init';
+let statusVars = null;
+function setStatus(key, vars = null) {
+  statusKey = key;
+  statusVars = vars;
+  ui.status.textContent = t(key, vars);
 }
 
 function rebuild() {
@@ -354,7 +389,7 @@ function buildLegend() {
     const mat = Array.isArray(p.mesh.material) ? p.mesh.material[0] : p.mesh.material;
     swatch.style.background = mat && mat.color ? '#' + mat.color.getHexString() : '#8a8f9a';
     const label = document.createElement('span');
-    label.textContent = p.label;
+    label.textContent = partLabel(p);
     row.append(swatch, label);
     row.addEventListener('mouseenter', () => highlight(i, true));
     row.addEventListener('mouseleave', () => highlight(i, false));
@@ -541,14 +576,19 @@ function say(text) {
   speak(text);
 }
 
-// Build the mode-switch bar once.
+// Build the mode-switch bar once. The captions come from the dictionary and are
+// re-read on a language switch (relabelModes), so the bar itself is built once
+// and never rebuilt — the buttons keep their listeners and their active state.
 for (const m of MODE_LIST) {
   const btn = document.createElement('button');
   btn.className = 'modebtn';
   btn.dataset.mode = m.id;
-  btn.textContent = m.label;
+  btn.textContent = t(`mode.${m.id}`);
   btn.addEventListener('click', () => enterMode(m.id));
   ui.modebar.appendChild(btn);
+}
+function relabelModes() {
+  for (const b of ui.modebar.children) b.textContent = t(`mode.${b.dataset.mode}`);
 }
 
 function setModeButtons(active) {
@@ -629,9 +669,14 @@ function enterMode(id) {
   if (id === 'quiz') return enterQuiz();
 }
 
+// The card header for a mode. `stepKicker` holds the mode **id**, never this
+// label — every branch that asks "is this the Fix walkthrough?" compares ids,
+// so translating the header can't change control flow.
+const kicker = (id) => t(`kicker.${id}`);
+
 // --- Explore: tap a part, isolate + name it ---
 function enterExplore() {
-  showCard('Explore', 'Tap any part to isolate it, then tap 🎤 and ask about it. Drag the slider to spread the parts apart.', `${parts.length} parts`);
+  showCard(kicker('explore'), t('explore.intro'), t('explore.partCount', { count: parts.length }));
   addCardExplodeSlider();
 }
 
@@ -642,7 +687,7 @@ function addCardExplodeSlider() {
   const wrap = document.createElement('div');
   wrap.className = 'card-explode';
   const label = document.createElement('label');
-  label.textContent = 'Explode';
+  label.textContent = t('card.explode');
   const slider = document.createElement('input');
   slider.type = 'range';
   slider.min = ui.explode.min;
@@ -685,7 +730,7 @@ function runAuthoredFix() {
     beats: [{ indices: s.indices, action: s.action || 'inspect', text: s.text }],
     indices: s.indices,
   }));
-  stepIndex = 0; stepTitle = proc.title; stepKicker = 'Fix';
+  stepIndex = 0; stepTitle = proc.title; stepKicker = 'fix';
   fixState = 'guided';
   mildExplode();
   renderStep();
@@ -707,21 +752,21 @@ function showFixAsk(lead = '') {
     onClick: () => startFixRequest(label),
   }));
   showCard(
-    'Fix',
-    `<b>${lead || 'What should we fix?'}</b><span class="partdesc">Tap 🎤 and describe the problem — or pick one below.</span>`,
+    kicker('fix'),
+    `<b>${esc(lead || t('fix.ask'))}</b><span class="partdesc">${t('fix.askHint')}</span>`,
     '',
     { chips }
   );
-  say(lead || 'What should we fix? Describe the problem, or pick a suggestion.');
+  say(lead || t('fix.askSpoken'));
 }
 
 /** A problem arrived (spoken or tapped): plan it with DGPT and start the walkthrough. */
 async function startFixRequest(request) {
   const my = ++fixSeq;
   fixState = 'planning';
-  track('fix-request', { input: request, metadata: { model: ui.model.value } });
-  showCard('Fix', `<b>“${request}”</b><span class="partdesc">…planning the repair</span>`);
-  showCaption(`“${request}” · …planning`);
+  track('fix-request', { input: request, metadata: { model: ui.model.value, lang: getLang() } });
+  showCard(kicker('fix'), `<b>“${esc(request)}”</b><span class="partdesc">${t('fix.planning')}</span>`);
+  showCaption(esc(t('fix.planningCaption', { request })));
 
   const plan = await generateFixPlan(getContext(), request);
   if (my !== fixSeq || currentMode !== 'fix') return; // superseded, or the mode was left
@@ -736,12 +781,12 @@ async function startFixRequest(request) {
 
   steps = plan.steps.map(toStep);
   stepIndex = 0;
-  stepTitle = plan.title || `Fix: ${request}`;
-  stepKicker = 'Fix';
+  stepTitle = plan.title || t('fix.titleFor', { request });
+  stepKicker = 'fix';
   fixState = 'guided';
-  track('fix-plan', { metadata: { model: ui.model.value, steps: steps.length, request } });
+  track('fix-plan', { metadata: { model: ui.model.value, lang: getLang(), steps: steps.length, request } });
   mildExplode();
-  if (plan.intro) showCaption(plan.intro);
+  if (plan.intro) showCaption(esc(plan.intro));
   renderStep(plan.intro);
 }
 
@@ -855,7 +900,7 @@ async function playBeats(preface) {
     if (isObjectAction(b.action)) clearPartStates(parts);
     else isolateParts(parts, b.indices.length ? b.indices : s.indices, { highlight: false });
     if (b.indices.length) {
-      focusedPart = parts[b.indices[0]].name; // "what is this?" follows the narration
+      focusedPart = partLabel(parts[b.indices[0]]); // "what is this?" follows the narration
       flyTo(b.indices);
     }
     await narrate(b.text, () => {
@@ -877,9 +922,9 @@ async function playBeats(preface) {
 
 // `preface` is the plan's intro sentence, spoken once ahead of the first step.
 function renderStep(preface = '') {
-  const title = stepTitle, kicker = stepKicker;
+  const title = stepTitle, modeId = stepKicker;
   cancelBeats(); // stop the previous step's narration + restore its parts first
-  if (!steps.length) { showCard(kicker, 'No procedure for this model yet.'); return; }
+  if (!steps.length) { showCard(kicker(modeId), t('step.none')); return; }
   const s = steps[stepIndex];
   const stepIndices = s.indices || [];
 
@@ -887,32 +932,32 @@ function renderStep(preface = '') {
   isolateParts(parts, stepIndices, { highlight: false });
   flyTo(stepIndices); // and bring it to the user rather than making them orbit for it
 
-  const partName = stepIndices.length ? parts[stepIndices[0]].name : null;
+  const partName = stepIndices.length ? partLabel(parts[stepIndices[0]]) : null;
   focusedPart = partName;
-  const chips = kicker === 'Fix' && aiAvailable()
+  const chips = modeId === 'fix' && aiAvailable()
     ? [
-        { label: '🔊 Say it again', onClick: () => renderStep() },
-        { label: '🎤 Fix something else', onClick: () => { stopSpeaking(); showFixAsk(); } },
+        { label: t('fix.sayAgain'), onClick: () => renderStep() },
+        { label: t('fix.somethingElse'), onClick: () => { stopSpeaking(); showFixAsk(); } },
       ]
     : null;
   // The spoken script is on the card, one line per beat, and lights up as it is
   // said — so the user can read along, or catch up after looking away.
   const script = s.beats.map((b) => `<div class="beat">${esc(b.text)}</div>`).join('');
   showCard(
-    kicker,
+    kicker(modeId),
     `<b>${esc(title)}</b><div class="beats">${script}</div>`,
-    `Step ${stepIndex + 1} of ${steps.length}` + (partName ? ` · ${partName}` : ''),
+    t('step.counter', { index: stepIndex + 1, total: steps.length }) + (partName ? ` · ${partName}` : ''),
     { nav: true, chips }
   );
   ui.stepPrev.disabled = stepIndex === 0;
-  ui.stepNext.textContent = stepIndex === steps.length - 1 ? 'Done ✔' : 'Next ▶';
+  ui.stepNext.textContent = stepIndex === steps.length - 1 ? t('btn.done') : t('btn.next');
   playBeats(preface);
 }
 function goStep(delta) {
   if (!steps.length) return;
   // 'Done ✔' on the last Fix step closes the plan and asks for the next problem.
   if (delta > 0 && stepIndex === steps.length - 1) {
-    if (stepKicker === 'Fix' && aiAvailable()) showFixAsk('Done — that should sort it. Anything else to fix?');
+    if (stepKicker === 'fix' && aiAvailable()) showFixAsk(t('fix.done'));
     return;
   }
   stepIndex = Math.max(0, Math.min(steps.length - 1, stepIndex + delta));
@@ -932,9 +977,9 @@ let arLifeSize = false;
 
 function enterAssemble() {
   const proc = resolveAssemble(currentKey(), parts);
-  steps = proc.steps; stepIndex = 0; stepTitle = proc.title; stepKicker = 'Assemble';
+  steps = proc.steps; stepIndex = 0; stepTitle = proc.title; stepKicker = 'assemble';
   setExplodeAmount(0); // collapse to rest *before* the puzzle takes over positions
-  if (!steps.length) { showCard('Assemble', 'No procedure for this model yet.'); return; }
+  if (!steps.length) { showCard(kicker('assemble'), t('assemble.none')); return; }
 
   startPuzzle({
     group: explodedGroup, parts, steps, radius: modelRadius,
@@ -980,33 +1025,37 @@ function renderPuzzleCard(bodyHtml, meta, done) {
   const st = puzzleStatus();
   if (!st) return;
   const pct = Math.round(((done ?? st.stepIndex) / st.total) * 100);
-  showCard('Assemble',
+  showCard(kicker('assemble'),
     `${bodyHtml}<div class="progress"><i style="width:${pct}%"></i></div>`,
     meta,
     { chips: [
-      { label: '💡 Hint', onClick: puzzleHint },
-      { label: '✋ Place it for me', onClick: () => { track('puzzle-assist'); puzzleAutoPlace(); } },
+      { label: t('assemble.hint'), onClick: puzzleHint },
+      { label: t('assemble.placeForMe'), onClick: () => { track('puzzle-assist'); puzzleAutoPlace(); } },
     ] });
+}
+
+// "3 wrong tries" / "3 Fehlversuche" — pluralised through the dictionary so a
+// language that inflects differently only needs its own two strings.
+function wrongTries(n) {
+  return t(n === 1 ? 'assemble.wrongTry' : 'assemble.wrongTries', { count: n });
 }
 
 function puzzleMeta() {
   const st = puzzleStatus();
-  const misses = st.mistakes ? ` · ${st.mistakes} wrong ${st.mistakes === 1 ? 'try' : 'tries'}` : '';
-  return `Step ${st.stepIndex + 1} of ${st.total}${misses}`;
+  const misses = st.mistakes ? ` · ${wrongTries(st.mistakes)}` : '';
+  return t('step.counter', { index: st.stepIndex + 1, total: st.total }) + misses;
 }
 
 // A new step is armed: ask which part comes next — and do NOT name it. The
 // naming line is the reward for getting it right (see onPuzzleCorrect).
 function onPuzzleStep({ index, step }) {
   focusedPart = null; // don't leak the answer into the tutor's context
-  const how = index === 0
-    ? 'Drag the right piece into the glowing outline.'
-    : '';
+  const how = index === 0 ? t('assemble.dragHint') : '';
   renderPuzzleCard(
-    `<b>${step.prompt}</b>${how ? `<span class="partdesc">${how}</span>` : ''}`,
+    `<b>${esc(step.prompt)}</b>${how ? `<span class="partdesc">${how}</span>` : ''}`,
     puzzleMeta()
   );
-  say(index === 0 ? `${step.prompt} Drag the right piece into the glowing outline.` : step.prompt);
+  say(index === 0 ? `${step.prompt} ${how}` : step.prompt);
 }
 
 /**
@@ -1017,15 +1066,16 @@ function onPuzzleStep({ index, step }) {
  * tells the learner what to do next.
  */
 function onPuzzleCorrect({ step, assisted }) {
-  focusedPart = step.name || null;
+  const shown = step.label || step.name;
+  focusedPart = shown || null;
   playSfx('snap'); // the whole audible reward for a correct drop
   renderPuzzleCard(
-    `<b>${assisted ? '' : '✅ '}${step.name}</b><span class="partdesc">${step.text}</span>`,
+    `<b>${assisted ? '' : '✅ '}${esc(shown)}</b><span class="partdesc">${esc(step.text)}</span>`,
     puzzleMeta(),
     puzzleStatus().stepIndex + 1
   );
   track(assisted ? 'puzzle-assist-placed' : 'puzzle-correct', {
-    metadata: { model: ui.model.value, part: step.name },
+    metadata: { model: ui.model.value, part: step.name },  // canonical name: comparable across languages
   });
 }
 
@@ -1036,41 +1086,56 @@ function onPuzzleCorrect({ step, assisted }) {
  * come first. Falls back to the step's own instruction line whenever
  * DeutschlandGPT is unreachable, so the guidance is never silent.
  */
-async function onPuzzleWrong({ step, attempted, expected }) {
+async function onPuzzleWrong({ step, attempted, expected, expectedLabel }) {
   const seq = ++wrongSeq;
   playSfx('reject'); // immediate, unlike the AI line below
-  const next = `The ${expected} goes on next.`;
-  renderPuzzleCard(`<b>${next}</b><span class="partdesc">${step.text}</span>`, puzzleMeta());
-  showCaption(next);
-  track('puzzle-wrong', { metadata: { model: ui.model.value, attempted, expected } });
+  // The tutor is prompted with the *display* name so its sentence names the
+  // part the same way the card does; telemetry keeps the canonical one.
+  const shown = expectedLabel || expected;
+  const next = t('assemble.nextPart', { part: shown });
+  renderPuzzleCard(`<b>${esc(next)}</b><span class="partdesc">${esc(step.text)}</span>`, puzzleMeta());
+  showCaption(esc(next));
+  track('puzzle-wrong', { metadata: { model: ui.model.value, attempted, expected, lang: getLang() } });
 
-  const why = await explainNextPart(getContext(), { attempted, expected, stepText: step.text });
+  const why = await explainNextPart(getContext(), {
+    attempted: partLabelByName(attempted),
+    expected: shown,
+    stepText: step.text,
+  });
   if (seq !== wrongSeq || !isPuzzleActive()) return; // superseded, or the mode changed
-  renderPuzzleCard(`<b>${next}</b><span class="partdesc">${why}</span>`, puzzleMeta());
-  showCaption(why);
+  renderPuzzleCard(`<b>${esc(next)}</b><span class="partdesc">${esc(why)}</span>`, puzzleMeta());
+  showCaption(esc(why));
   say(why);
+}
+
+// The display name for a bare canonical part name (what puzzle.js reports).
+function partLabelByName(name) {
+  const p = parts.find((q) => q.name === name);
+  return p ? partLabel(p) : name;
 }
 
 // Picking a part up focuses it for the tutor, so "what is this?" works mid-drag
 // without naming it on screen — the question stays the user's to answer.
 function onPuzzleCarry(index) {
-  focusedPart = index >= 0 ? parts[index].name : null;
+  focusedPart = index >= 0 ? partLabel(parts[index]) : null;
 }
 
 function onPuzzleComplete({ mistakes, assists }) {
   focusedPart = null;
   const clean = mistakes === 0 && assists === 0;
-  const line = clean
-    ? 'Built it start to finish without a single wrong piece. That is the real assembly order.'
-    : `Built. ${mistakes} wrong ${mistakes === 1 ? 'try' : 'tries'}${assists ? `, ${assists} placed for you` : ''} — run it again and see if you can go clean.`;
-  showCard('Assemble', `<b>🎉 ${currentModel().label} assembled</b><span class="partdesc">${line}</span>`, 'Complete', {
-    chips: [
-      { label: '🔁 Build it again', onClick: () => enterMode('assemble') },
-      { label: '🔍 Explore it', onClick: () => enterMode('explore') },
-    ],
-  });
+  const tally = wrongTries(mistakes) + (assists ? t('assemble.assists', { count: assists }) : '');
+  const line = clean ? t('assemble.clean') : t('assemble.scored', { mistakes: tally });
+  showCard(
+    kicker('assemble'),
+    `<b>${esc(t('assemble.complete', { model: modelLabel() }))}</b><span class="partdesc">${esc(line)}</span>`,
+    t('assemble.completeMeta'),
+    { chips: [
+      { label: t('assemble.again'), onClick: () => enterMode('assemble') },
+      { label: t('assemble.explore'), onClick: () => enterMode('explore') },
+    ] }
+  );
   say(line);
-  track('puzzle-complete', { metadata: { model: ui.model.value, mistakes, assists } });
+  track('puzzle-complete', { metadata: { model: ui.model.value, lang: getLang(), mistakes, assists } });
 }
 
 // Hint: glow the piece the step wants, briefly. Deliberately a separate act from
@@ -1084,7 +1149,7 @@ function puzzleHint() {
     if (!isPuzzleActive()) return;
     for (const i of indices) setHighlight(parts[i], false);
   }, 2600);
-  showCaption('That one — drag it into the outline.');
+  showCaption(t('assemble.hintCaption'));
   track('puzzle-hint');
 }
 
@@ -1093,30 +1158,30 @@ function enterDiagnose() {
   diagnoses = resolveDiagnose(currentKey(), parts);
   mildExplode();
   if (!diagnoses.length) {
-    showCard('Diagnose', 'No symptoms authored for this model yet.');
+    showCard(kicker('diagnose'), t('diagnose.none'));
     return;
   }
   const chips = diagnoses.map((d, i) => ({
-    label: d.symptoms[0],
+    label: d.label,
     onClick: () => showDiagnosis(i),
   }));
-  showCard('Diagnose', 'What is the symptom? Pick one:', '', { chips });
+  showCard(kicker('diagnose'), t('diagnose.pick'), '', { chips });
 }
 async function showDiagnosis(i) {
   const d = diagnoses[i];
   const myReq = ++diagnoseSeq;               // newest pick wins if answers race
   isolateParts(parts, d.indices);
   flyTo(d.indices);
-  const chips = diagnoses.map((dd, j) => ({ label: dd.symptoms[0], onClick: () => showDiagnosis(j) }));
-  const partName = d.indices.length ? parts[d.indices[0]].name : '';
+  const chips = diagnoses.map((dd, j) => ({ label: dd.label, onClick: () => showDiagnosis(j) }));
+  const partName = d.indices.length ? partLabel(parts[d.indices[0]]) : '';
   focusedPart = partName || focusedPart;
-  const kicker = partName ? `Likely part: ${partName}` : '';
+  const meta = partName ? t('diagnose.likely', { part: partName }) : '';
   // Highlight the part immediately, then let dGPT explain the fault — grounded in
   // the authored diagnosis (d.text) so it stays on this part and can't invent.
-  showCard('Diagnose', '…diagnosing', kicker, { chips });
-  const ans = await answerDiagnosis(getContext(), { symptom: d.symptoms[0], part: partName, reference: d.text });
+  showCard(kicker('diagnose'), t('diagnose.working'), meta, { chips });
+  const ans = await answerDiagnosis(getContext(), { symptom: d.label, part: partName, reference: d.text });
   if (myReq !== diagnoseSeq) return;         // a newer symptom was picked meanwhile
-  showCard('Diagnose', ans, kicker, { chips });
+  showCard(kicker('diagnose'), esc(ans), meta, { chips });
   say(ans);
 }
 
@@ -1125,19 +1190,22 @@ function enterQuiz() {
   quizItems = resolveQuiz(currentKey(), parts);
   quizIndex = 0;
   mildExplode();
-  if (!quizItems.length) { showCard('Quiz', 'No quiz authored for this model yet.'); return; }
+  if (!quizItems.length) { showCard(kicker('quiz'), t('quiz.none')); return; }
   renderQuiz();
+}
+function quizMeta() {
+  return t('quiz.counter', { index: quizIndex + 1, total: quizItems.length });
 }
 function renderQuiz() {
   const q = quizItems[quizIndex];
   quizRevealed = false;
   isolateParts(parts, q.indices);
   flyTo(q.indices); // the part being asked about has to be visible to be answerable
-  focusedPart = q.indices.length ? parts[q.indices[0]].name : focusedPart;
-  showCard('Quiz', q.question, `Question ${quizIndex + 1} of ${quizItems.length}`, {
+  focusedPart = q.indices.length ? partLabel(parts[q.indices[0]]) : focusedPart;
+  showCard(kicker('quiz'), esc(q.question), quizMeta(), {
     chips: [
-      { label: 'Reveal answer', onClick: revealQuiz },
-      { label: 'Next question ▶', onClick: nextQuiz },
+      { label: t('quiz.reveal'), onClick: revealQuiz },
+      { label: t('quiz.next'), onClick: nextQuiz },
     ],
   });
   say(q.question);
@@ -1146,8 +1214,8 @@ function revealQuiz() {
   if (quizRevealed) return;
   quizRevealed = true;
   const q = quizItems[quizIndex];
-  showCard('Quiz', `${q.question}<br><b>Answer: ${q.answer}</b>`, `Question ${quizIndex + 1} of ${quizItems.length}`, {
-    chips: [{ label: 'Next question ▶', onClick: nextQuiz }],
+  showCard(kicker('quiz'), `${esc(q.question)}<br><b>${esc(t('quiz.answer', { answer: q.answer }))}</b>`, quizMeta(), {
+    chips: [{ label: t('quiz.next'), onClick: nextQuiz }],
   });
 }
 function nextQuiz() {
@@ -1163,20 +1231,20 @@ attachPicker(renderer, camera, () => parts, (index) => {
     // the rest, so the real material reads instead of a teal wash.
     isolateParts(parts, index >= 0 ? [index] : [], { highlight: false });
     if (index >= 0) {
-      const name = parts[index].name;
+      const name = partLabel(parts[index]);
       focusedPart = name;
       // Just the name — the authored part facts (partInfoDigest) are deliberately
       // NOT shown or spoken here. They go to the LLM as grounding (getContext),
       // so the detail surfaces only when the user actually asks about the part.
       showCard(
-        'Explore',
-        `<b>${name}</b>`,
-        `${parts[index].triangleCount.toLocaleString()} triangles · ask 🎤 about this part`
+        kicker('explore'),
+        `<b>${esc(name)}</b>`,
+        t('explore.partMeta', { tris: parts[index].triangleCount.toLocaleString(locale()) })
       );
       say(name);
     } else {
       focusedPart = null;
-      showCard('Explore', 'Tap any part to isolate it, then tap 🎤 and ask about it. Drag the slider to spread the parts apart.', `${parts.length} parts`);
+      showCard(kicker('explore'), t('explore.intro'), t('explore.partCount', { count: parts.length }));
     }
     addCardExplodeSlider(); // showCard rebuilt the body — re-add the inline explode slider
   }
@@ -1195,8 +1263,11 @@ attachDragger(renderer, camera, controls, puzzleInteractor);
 
 function getContext() {
   return {
-    modelLabel: currentModel().label,
-    parts: parts.map((p) => p.name).filter(Boolean),
+    modelLabel: modelLabel(),
+    // Display names, not canonical ones: the LLM answers in the selected
+    // language, so the parts it is allowed to name must be spelled the way the
+    // user hears them. resolvePlanParts/highlightPartByName walk them back.
+    parts: parts.map((p) => partLabel(p)).filter(Boolean),
     mode: currentMode,
     focusedPart,
     // ALL authored per-part facts (MARKUS_INFO). Never shown or spoken directly
@@ -1215,27 +1286,35 @@ function showCaption(html) {
   showCaption._t = setTimeout(() => ui.voiceCaption.classList.remove('show'), 7000);
 }
 
-const ASK_HINT = 'Ask me anything about it — I answer out loud. Start talking to interrupt an answer.';
-
 // The mic is a **question channel, nothing else**: a spoken phrase never drives
 // the app (no mode switches, no "next", no part selection). Misheard noise used
 // to turn into commands and the app would "act on its own" — that's gone. Two
 // deliberate, strictly-matched exceptions survive because they have no button
 // equivalent: silencing the tutor mid-answer, and re-placing the model in AR.
-const MUTE_RE = /^\s*(stop|stopp|be quiet|quiet|shut up|silence|stop talking|stop speaking)[.!\s]*$/i;
-const MOVE_RE = /\b(move|reposition)\b/i;
+//
+// Both patterns accept BOTH languages at once, on purpose. They are the only
+// utterances that must work under stress — you say "stop" when the tutor is
+// talking over you — and a German speaker reaching for "stop" (or an English
+// speaker for "halt") should not be met with silence because of a setting.
+// Recognising an extra half-dozen fixed words costs nothing and can't misfire:
+// MUTE_RE anchors the whole utterance, and MOVE_RE only applies inside AR to
+// phrases of four words or fewer.
+const MUTE_RE = /^\s*(stop|stopp|be quiet|quiet|shut up|silence|stop talking|stop speaking|halt|halt stopp|sei (?:mal )?(?:still|leise)|ruhe|schweig|hör auf|hor auf|aufhören|aufhoren)[.!\s]*$/i;
+const MOVE_RE = /\b(move|reposition|verschieb\w*|versetz\w*|beweg\w*|umstellen|woanders)\b/i;
 
 let askSeq = 0; // newest question wins: older in-flight answers are dropped
 
+// `phrase`, not `t` — `t` is the translation function at module scope, and a
+// local of that name would shadow it for this whole function.
 async function handleSpeech(text) {
-  const t = text.trim();
-  if (!t) return;
+  const phrase = text.trim();
+  if (!phrase) return;
 
-  if (MUTE_RE.test(t)) { stopSpeaking(); showCaption('Okay — ask away.'); track('voice-mute', { input: t }); return; }
+  if (MUTE_RE.test(phrase)) { stopSpeaking(); showCaption(t('voice.muted')); track('voice-mute', { input: phrase }); return; }
   // AR-only: "move it" re-enters placement — voice is the only way (see moveARFlow).
-  if (renderer.xr.isPresenting && t.split(/\s+/).length <= 4 && MOVE_RE.test(t)) {
+  if (renderer.xr.isPresenting && phrase.split(/\s+/).length <= 4 && MOVE_RE.test(phrase)) {
     moveARFlow();
-    track('voice-move', { input: t });
+    track('voice-move', { input: phrase });
     return;
   }
 
@@ -1244,7 +1323,7 @@ async function handleSpeech(text) {
   // command; it never navigates or switches modes. Speaking again while a plan
   // is still being drafted simply replaces it (fixSeq — newest request wins).
   if (currentMode === 'fix' && (fixState === 'ask' || fixState === 'planning') && aiAvailable()) {
-    startFixRequest(t);
+    startFixRequest(phrase);
     return;
   }
 
@@ -1254,14 +1333,14 @@ async function handleSpeech(text) {
   // transcript can also arrive without it (the Web Speech fallback fires no
   // speech-start), and then the step would talk over its own answer.
   cancelBeats();
-  showCaption(`“${t}” · …thinking`);
-  track('voice-question', { input: t, metadata: { mode: currentMode, part: focusedPart } });
+  showCaption(esc(t('voice.thinking', { text: phrase })));
+  track('voice-question', { input: phrase, metadata: { mode: currentMode, lang: getLang(), part: focusedPart } });
   // The LLM answers about whichever part the question concerns and names it —
   // the app then spotlights that part, so asking about the gas lift while the
   // seat is selected highlights the gas lift and answers about it. When the
   // answer describes a physical motion, the LLM also picks the ACTION verb and
   // the part *acts it out* (a few loops, then it settles back).
-  const { part, action, answer } = await answerQuestion(getContext(), t);
+  const { part, action, answer } = await answerQuestion(getContext(), phrase);
   if (my !== askSeq) return;             // a newer question superseded this answer
   // If the mic is mid-capture, hold the answer until the utterance resolves
   // instead of discarding it: if that capture turns out to be a new question,
@@ -1276,7 +1355,7 @@ async function handleSpeech(text) {
   if (my !== askSeq) return;
   if (recognizer?.isCapturing()) return; // still talking after 8 s — stay quiet
   const indices = part ? highlightPartByName(part) : [];
-  showCaption(answer);
+  showCaption(esc(answer));
   // Act the answer out while it is being spoken, and stop when it stops — the
   // same start/end signals the Fix walkthrough runs on. The beat token owns the
   // model, so a step starting meanwhile takes the gesture over cleanly.
@@ -1304,17 +1383,23 @@ async function handleSpeech(text) {
 function highlightPartByName(name) {
   const target = (name || '').toLowerCase().trim();
   if (!target) return [];
-  const exact = parts.find((p) => (p.name || '').toLowerCase() === target);
-  const indices = exact ? findParts(parts, [exact.name]) : findParts(parts, [target]);
+  // The LLM copies from the parts list it was given, which is in the *display*
+  // language — so match the display name first, then the canonical one, and
+  // only then fall back to keywords (which are English, hence canonicalName).
+  const exact = parts.find((p) => partLabel(p).toLowerCase() === target)
+             || parts.find((p) => (p.name || '').toLowerCase() === target);
+  const indices = exact ? findParts(parts, [exact.name]) : findParts(parts, [canonicalName(target)]);
   if (!indices.length) return [];
-  focusedPart = parts[indices[0]].name;
+  focusedPart = partLabel(parts[indices[0]]);
   if (currentMode === 'explore') {
     selectedPart = indices[0];
     isolateParts(parts, indices, { highlight: false }); // match the tap look: textured part, rest ghosted
     showCard(
-      'Explore',
-      `<b>${focusedPart}</b>`,
-      `${indices.length > 1 ? indices.length + ' pieces' : parts[indices[0]].triangleCount.toLocaleString() + ' triangles'} · ask 🎤 about this part`
+      kicker('explore'),
+      `<b>${esc(focusedPart)}</b>`,
+      indices.length > 1
+        ? t('explore.groupMeta', { count: indices.length })
+        : t('explore.partMeta', { tris: parts[indices[0]].triangleCount.toLocaleString(locale()) })
     );
     addCardExplodeSlider();
   }
@@ -1349,6 +1434,10 @@ window.__gesture = (action, indices = []) => {
   return { action, indices };
 };
 
+// Mirrored from onStateChange so a language switch can relabel the mic button
+// without asking the recognizer (which may not exist) what state it is in.
+let micListening = false;
+
 const recognizer = createRecognizer({
   onResult: handleSpeech,
   // Barge-in: the instant the user starts talking, the tutor yields — their next
@@ -1358,16 +1447,17 @@ const recognizer = createRecognizer({
   // Lets the VAD demand more sustained energy while the tutor is audible, so
   // speaker bleed the echo canceller misses can't trigger a false barge-in.
   isTtsSpeaking: isSpeaking,
-  onStatus: (phase) => { if (phase === 'transcribing') showCaption('🎧 …'); },
-  onError: (msg) => showCaption(msg),
+  onStatus: (phase) => { if (phase === 'transcribing') showCaption(t('voice.transcribing')); },
+  onError: (msg) => showCaption(esc(msg)),
   onStateChange: (listening) => {
+    micListening = listening;
     ui.micBtn.classList.toggle('listening', listening);
-    ui.micBtn.textContent = listening ? '🎤 Listening…' : '🎤 Ask';
+    ui.micBtn.textContent = t(listening ? 'btn.micListening' : 'btn.mic');
   },
 });
 if (!recognizer) {
   ui.micBtn.disabled = true;
-  ui.micBtn.title = 'Voice needs a microphone plus an ElevenLabs or DeutschlandGPT key (or Chrome).';
+  ui.micBtn.title = t('btn.micTitle');
 }
 ui.micBtn.addEventListener('click', () => {
   if (!recognizer) return;
@@ -1376,18 +1466,21 @@ ui.micBtn.addEventListener('click', () => {
     recognizer.stop();
   } else {
     recognizer.start();
-    showCaption(ASK_HINT);
+    showCaption(t('voice.askHint'));
   }
 });
 
-// AR availability + start/exit.
+// AR availability + start/exit. `arSupported` is kept so a language switch
+// knows which of the two AR-button captions applies.
+let arSupported = true;
 (async () => {
   const supported = await isARSupported();
   track('ar-support', { metadata: { supported } });
   if (!supported) {
-    ui.startAR.textContent = '📱 AR needs Android';
+    arSupported = false;
+    ui.startAR.textContent = t('btn.arUnsupported');
     ui.startAR.disabled = true;
-    ui.startAR.title = 'WebXR AR runs on Android Chrome. The 3D view works everywhere.';
+    ui.startAR.title = t('btn.arTitle');
   }
 })();
 
@@ -1396,11 +1489,11 @@ ui.micBtn.addEventListener('click', () => {
 // start may be rejected — we catch that and tell the user to tap the button.
 async function startARFlow() {
   if (renderer.xr.isPresenting) return;
-  if (ui.startAR.disabled) { showCaption('AR needs an Android phone. Tap 📱 for details.'); return; }
+  if (ui.startAR.disabled) { showCaption(t('ar.needsAndroid')); return; }
   cancelTween('camera'); // ar.js saves + owns the camera pose from here on
   try {
     document.body.classList.add('ar-active');
-    track('ar-start', { metadata: { model: ui.model.value } });
+    track('ar-start', { metadata: { model: ui.model.value, lang: getLang() } });
     await startAR({
       renderer, scene, camera, group: explodedGroup, controls,
       overlay: document.body,
@@ -1409,18 +1502,16 @@ async function startARFlow() {
         track('ar-placed', { metadata: { model: ui.model.value } });
         applyARInteraction(); // pivot exists only once placed — size + lock it now
         if (isPuzzleActive()) {
-          showCaption('Placed at full size. Drag each part into the glowing outline. Say “move it” to re-place the build.');
-          say('Placed, at full size. Drag each part into the glowing outline.');
+          showCaption(t('ar.placedPuzzle'));
+          say(t('ar.placedPuzzleSpoken'));
         } else {
-          showCaption('Placed! Long-press to grab it, then drag to move · pinch to zoom · twist to rotate.');
-          say('Placed. Press and hold the object to grab it, then drag to move it, or pinch to resize.');
+          showCaption(t('ar.placed'));
+          say(t('ar.placedSpoken'));
         }
       },
       onSelectedChange: (sel) => {
         track(sel ? 'ar-select' : 'ar-deselect');
-        showCaption(sel
-          ? 'Grabbed — drag to move · pinch to zoom · twist to rotate · tap to release.'
-          : 'Released. Long-press the object again to move or resize it.');
+        showCaption(t(sel ? 'ar.grabbed' : 'ar.released'));
       },
       onEnd: () => {
         document.body.classList.remove('ar-active');
@@ -1431,21 +1522,21 @@ async function startARFlow() {
     });
     applyGhostTheme(); // the session is live now → the AR ghost colour
     setInteractor(puzzleInteractor); // the finger's target ray drives part dragging
-    showCaption('Point at the floor, then tap to place the chair.');
+    showCaption(t('ar.pointAtFloor'));
   } catch (e) {
     console.error('AR failed', e);
     document.body.classList.remove('ar-active');
     track('ar-error', { metadata: { error: e.message }, level: 'ERROR' });
-    showCaption('Could not start AR — tap the ▶ AR button to launch it.');
+    showCaption(t('ar.failed'));
   }
 }
 // Voice-only ("move it"): re-enter placement so the next floor tap re-places
 // the model on a fresh anchor — hands-free reposition to a new spot/surface.
 // Everyday nudging is just long-press + drag, so there's no on-screen button.
 function moveARFlow() {
-  if (!renderer.xr.isPresenting) { showCaption('Start AR first, then say “move it”.'); return; }
+  if (!renderer.xr.isPresenting) { showCaption(t('ar.moveFirst')); return; }
   requestMove();
-  showCaption('Tap the floor where you want the chair.');
+  showCaption(t('ar.tapToMove'));
 }
 
 ui.startAR.addEventListener('click', startARFlow);
@@ -1469,15 +1560,69 @@ function applyTheme(theme) {
   const dark = theme === 'dark';
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   scene.background = new THREE.Color(dark ? SCENE_BG.dark : SCENE_BG.light);
-  ui.themeToggle.textContent = dark ? '☀️ Light' : '🌙 Dark';
+  ui.themeToggle.textContent = t(dark ? 'btn.light' : 'btn.dark');
   applyGhostTheme();
   try { localStorage.setItem('theme', theme); } catch {}
 }
+const isDark = () => document.documentElement.dataset.theme === 'dark';
 applyTheme(
   (() => { try { return localStorage.getItem('theme'); } catch { return null; } })() || 'light'
 );
 ui.themeToggle.addEventListener('click', () => {
-  applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+  applyTheme(isDark() ? 'light' : 'dark');
+});
+
+// ---- Language --------------------------------------------------------------
+// One control, everything follows: chrome, cards, authored content, part names,
+// the tutor's prompts, the TTS voice and the STT language hint.
+
+// Populate the panel's language <select> and label the corner toggle.
+for (const l of LANGS) {
+  const opt = document.createElement('option');
+  opt.value = l.id;
+  opt.textContent = l.label;
+  ui.lang.appendChild(opt);
+}
+ui.lang.value = getLang();
+
+// The corner button shows the language you'd switch TO, which is what a
+// one-tap toggle has to say to be predictable.
+function labelLangToggle() {
+  const other = LANGS.find((l) => l.id !== getLang()) || LANGS[0];
+  ui.langToggle.textContent = `🌐 ${other.short}`;
+  ui.langToggle.dataset.next = other.id;
+}
+labelLangToggle();
+
+ui.lang.addEventListener('change', () => setLang(ui.lang.value));
+ui.langToggle.addEventListener('click', () => setLang(ui.langToggle.dataset.next));
+
+/**
+ * Re-render everything after a language switch.
+ *
+ * The chrome and the labels are re-read in place, but the *card* is not: its
+ * content is authored text resolved when the mode was entered, and half of it
+ * (a generated Fix plan, a diagnosis the LLM wrote) exists only in the language
+ * it was produced in. Re-entering the mode is the honest way to get a fully
+ * German (or fully English) screen — the alternative is a card that stays half
+ * translated, which is exactly what this feature exists to prevent.
+ */
+onLangChange((next) => {
+  track('language-switch', { metadata: { lang: next, model: ui.model.value, mode: currentMode } });
+  stopSpeaking();                    // an English sentence mid-flight would finish in English
+  recognizer?.setLang();             // Web Speech needs a bounce; the VAD path re-reads per utterance
+  applyStaticTranslations();
+  relabelModes();
+  labelLangToggle();
+  relabelModels();
+  ui.lang.value = next;
+  applyTheme(isDark() ? 'dark' : 'light');   // re-label the theme button
+  ui.micBtn.textContent = t(micListening ? 'btn.micListening' : 'btn.mic');
+  ui.micBtn.title = recognizer ? '' : t('btn.micTitle');
+  if (!arSupported) { ui.startAR.textContent = t('btn.arUnsupported'); ui.startAR.title = t('btn.arTitle'); }
+  ui.status.textContent = t(statusKey, statusVars);
+  buildLegend();                     // part names are display names
+  enterMode(currentMode);            // re-resolve the mode's content in the new language
 });
 
 // ---- Render loop -----------------------------------------------------------

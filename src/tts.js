@@ -21,6 +21,7 @@
  * so the first spoken line always follows a button press.
  */
 import { track } from './telemetry.js';
+import { ttsLang, speechLang } from './i18n.js';
 
 const KEY = import.meta.env.VITE_ELEVENLABS_API_KEY;
 const VOICE = import.meta.env.VITE_ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM';
@@ -31,6 +32,56 @@ const MODEL = import.meta.env.VITE_ELEVENLABS_MODEL || 'eleven_flash_v2_5';
 
 export function elevenLabsAvailable() {
   return !!KEY;
+}
+
+// `language_code` pins the voice's pronunciation to the selected language
+// instead of letting ElevenLabs guess from the text. It matters most for the
+// short lines — a bare part name like "Sitz" or a two-word caption gives the
+// auto-detector almost nothing to go on, and an English-accented German part
+// name is exactly the kind of thing that makes a tutor sound wrong.
+//
+// Only the v2.5 flash/turbo models accept it; other models 400 on the extra
+// field. Rather than hard-code a model list that will age, we send it, and on
+// the first rejection drop it for the session and retry — so a custom
+// VITE_ELEVENLABS_MODEL can never cost the app its voice.
+let languageCodeSupported = true;
+
+function ttsBody(text) {
+  return JSON.stringify({
+    text,
+    model_id: MODEL,
+    ...(languageCodeSupported ? { language_code: ttsLang() } : {}),
+    voice_settings: { stability: 0.45, similarity_boost: 0.75 },
+  });
+}
+
+async function requestSpeech(text) {
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${VOICE}/stream`;
+  const headers = { 'xi-api-key': KEY, 'Content-Type': 'application/json' };
+  let res = await fetch(url, { method: 'POST', headers, body: ttsBody(text) });
+  // 400/422 with language_code in play: almost certainly the model not taking
+  // the field. Retire it and try again plain before giving up on ElevenLabs.
+  if (!res.ok && languageCodeSupported && (res.status === 400 || res.status === 422)) {
+    console.warn(`ElevenLabs rejected language_code (${res.status}) — retrying without it for this session`);
+    languageCodeSupported = false;
+    res = await fetch(url, { method: 'POST', headers, body: ttsBody(text) });
+  }
+  return res;
+}
+
+/**
+ * Pick a speechSynthesis voice for the selected language. The browser default
+ * follows the OS locale, so on an English laptop a German line would be read
+ * with an English voice — intelligible at best, comic at worst. Prefer an exact
+ * locale match, then any voice for the language, then leave it to the browser.
+ */
+function pickVoice(tag) {
+  const voices = window.speechSynthesis?.getVoices?.() || [];
+  if (!voices.length) return null;
+  const base = tag.split('-')[0].toLowerCase();
+  return voices.find((v) => v.lang?.toLowerCase() === tag.toLowerCase())
+      || voices.find((v) => v.lang?.toLowerCase().startsWith(base))
+      || null;
 }
 
 let seq = 0;             // generation token: any stop()/speak() invalidates older ones
@@ -135,20 +186,12 @@ export async function speak(text, { onStart = null, onEnd = null } = {}) {
 
   if (elevenLabsAvailable()) {
     try {
-      const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE}/stream`, {
-        method: 'POST',
-        headers: { 'xi-api-key': KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          model_id: MODEL,
-          voice_settings: { stability: 0.45, similarity_boost: 0.75 },
-        }),
-      });
+      const res = await requestSpeech(text);
       if (!res.ok) throw new Error(`ElevenLabs ${res.status}: ${await res.text().catch(() => '')}`);
       if (my !== seq) { res.body?.cancel().catch(() => {}); return; } // superseded during generation
       if (mseSupported() && res.body) {
         await playStreaming(res, my);
-        track('tts', { output: text, metadata: { provider: 'elevenlabs', voice: VOICE, chars: text.length, streamed: true } });
+        track('tts', { output: text, metadata: { provider: 'elevenlabs', voice: VOICE, lang: ttsLang(), chars: text.length, streamed: true } });
         return;
       }
       const blob = await res.blob();
@@ -169,7 +212,7 @@ export async function speak(text, { onStart = null, onEnd = null } = {}) {
         if (my === seq) { speaking = false; fireEnd(); }
       });
       if (my === seq && !blocked) fireStart(); // audio is audible from here
-      track('tts', { output: text, metadata: { provider: 'elevenlabs', voice: VOICE, chars: text.length } });
+      track('tts', { output: text, metadata: { provider: 'elevenlabs', voice: VOICE, lang: ttsLang(), chars: text.length } });
       return;
     } catch (e) {
       if (my !== seq) return; // superseded — the failure no longer matters
@@ -180,14 +223,18 @@ export async function speak(text, { onStart = null, onEnd = null } = {}) {
 
   // Fallback: browser speechSynthesis.
   if ('speechSynthesis' in window && my === seq) {
+    const tag = speechLang();
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 1.0;
+    u.lang = tag;
+    const voice = pickVoice(tag);
+    if (voice) u.voice = voice;
     u.onstart = () => { if (my === seq) fireStart(); };
     u.onend = () => { if (my === seq) { speaking = false; fireEnd(); } };
     u.onerror = () => { if (my === seq) { speaking = false; fireEnd(); } };
     speaking = true;
     window.speechSynthesis.speak(u);
-    track('tts', { output: text, metadata: { provider: 'browser', chars: text.length } });
+    track('tts', { output: text, metadata: { provider: 'browser', lang: tag, voice: voice?.name || null, chars: text.length } });
     return;
   }
   // No voice at all: release the waiter immediately so the visuals still run.

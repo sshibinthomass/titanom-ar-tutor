@@ -445,10 +445,15 @@ function reject(index) {
     shake: state.radius * 0.05,
   });
   state.mistakes += 1;
+  // Both names travel: `expected` is the canonical group name (stable across
+  // languages, so telemetry stays comparable) and `expectedLabel` is what the
+  // user should hear and read. main.js decides which is which.
+  const fallback = step ? state.parts[step.indices[0]] : null;
   state.cb.onWrong?.({
     step,
     attempted: state.parts[index].name,
-    expected: step ? (step.name || state.parts[step.indices[0]].name) : '',
+    expected: step ? (step.name || fallback?.name || '') : '',
+    expectedLabel: step ? (step.label || step.name || fallback?.name || '') : '',
   });
 }
 

@@ -22,6 +22,7 @@
  */
 import { sttAvailable, transcribe } from './stt.js';
 import { track } from './telemetry.js';
+import { speechLang, t, getLang } from './i18n.js';
 
 // ---- VAD tuning (byte-magnitude units from AnalyserNode, 0–255) -------------
 const FRAME_MS = 30;                 // VAD sampling cadence
@@ -54,9 +55,21 @@ export function voiceAvailable() {
 // STT models hallucinate fillers ("you", "thank you") on borderline audio, and
 // a noise burst that slips past the VAD comes back as one of these. A
 // transcript that is ONLY a filler is noise, not a question — drop it silently.
+// Both lists are always active: the filler a model hallucinates is a property
+// of the *model*, not of the selected language — German audio transcribed by a
+// German-pinned Scribe still comes back as "Thank you." on a noise burst,
+// because that phrase dominates its training data. Checking both costs nothing
+// and each list is short.
 const JUNK = new Set([
+  // English
   'you', 'yeah', 'uh', 'um', 'hmm', 'mm', 'huh', 'oh', 'ah', 'so', 'the', 'a',
   'okay', 'ok', 'bye', 'thanks', 'thank you', 'thank you for watching',
+  // German — the same shape of hallucination, plus the subtitle-corpus sign-offs
+  // ('Untertitel von…' / 'Vielen Dank') that German STT emits on empty audio.
+  'ja', 'nein', 'äh', 'ähm', 'hm', 'hmm', 'ach', 'also', 'und', 'der', 'die', 'das',
+  'okay', 'tschüss', 'danke', 'vielen dank', 'danke schön', 'dankeschön',
+  'untertitel', 'untertitel von stephanie geiges', 'untertitelung des zdf',
+  'untertitelung des zdf 2020', 'so weit so gut',
 ]);
 function isJunk(text) {
   const s = (text || '').toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, ' ').replace(/\s+/g, ' ').trim();
@@ -225,12 +238,12 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
         const { text, provider } = await transcribe(blob, { filename: `utterance.${ext}` });
         if (mySession !== session) return;
         if (isJunk(text)) { onStatus?.('listening'); return; }
-        track('stt', { output: text, metadata: { provider, bytes: blob.size } });
+        track('stt', { output: text, metadata: { provider, lang: getLang(), bytes: blob.size } });
         onResult?.(text);
       } catch (e) {
         console.warn('transcription failed:', e.message);
         track('stt-error', { metadata: { error: e.message }, level: 'ERROR' });
-        if (mySession === session) onError?.("Couldn't reach the transcription service — check the connection and try again.");
+        if (mySession === session) onError?.(t('voice.sttFailed'));
       }
     });
   }
@@ -251,7 +264,7 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
     } catch (e) {
       listening = false;
       onStateChange?.(false);
-      onError?.('Microphone blocked — allow mic access for this site and tap 🎤 again.');
+      onError?.(t('voice.micBlocked'));
       track('stt-error', { metadata: { provider: 'whisper', error: e.name || e.message }, level: 'ERROR' });
       return;
     }
@@ -344,7 +357,11 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
   return {
     start,
     stop,
-    setLang() { /* Scribe/Whisper auto-detect the language (German + English both work) */ },
+    // No-op by design: this path reads the app language straight from i18n on
+    // every request (stt.js pins `language_code` per utterance), so a language
+    // switch takes effect on the very next thing the user says — no restart,
+    // no state to keep in sync here.
+    setLang() {},
     isListening: () => listening,
     isCapturing: () => speechActive, // mid-utterance right now?
   };
@@ -352,10 +369,12 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
 
 // ---- Fallback: Web Speech API (Chrome only, no DGPT key needed) --------------
 
-function createWebSpeechRecognizer({ lang = 'en-US', onResult, onStateChange, onSpeechStart } = {}) {
+function createWebSpeechRecognizer({ lang = null, onResult, onStateChange, onSpeechStart } = {}) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const rec = new SR();
-  rec.lang = lang;
+  // Web Speech has no auto-detect worth the name, so it must be told the
+  // language. Default to the app's, not to en-US.
+  rec.lang = lang || speechLang();
   rec.interimResults = false;
   rec.maxAlternatives = 1;
   rec.continuous = false; // one phrase per start; we restart while "listening" is on
@@ -397,7 +416,14 @@ function createWebSpeechRecognizer({ lang = 'en-US', onResult, onStateChange, on
       try { rec.stop(); } catch { /* not running */ }
       onStateChange?.(false);
     },
-    setLang(l) { rec.lang = l; },
+    // A live SpeechRecognition ignores a mid-session `lang` change, so bounce
+    // it: onend's auto-restart picks the new language up on the next phrase.
+    setLang(l) {
+      const next = l || speechLang();
+      if (rec.lang === next) return;
+      rec.lang = next;
+      if (listening) { try { rec.stop(); } catch { /* not running */ } }
+    },
     isListening: () => listening,
     isCapturing: () => capturing,
   };

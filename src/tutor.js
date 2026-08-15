@@ -7,6 +7,37 @@
 import { aiAvailable, chat, PLAN_MODEL } from './ai.js';
 import { startTrace } from './telemetry.js';
 import { FIX_ACTIONS, FIX_ACTION_GUIDE, OBJECT_ACTIONS, isObjectAction } from './fixanim.js';
+import { getLang, t } from './i18n.js';
+
+/**
+ * The language rule, prepended to EVERY system prompt.
+ *
+ * Two jobs, and the second is the one that needed spelling out: the app is
+ * strictly monolingual per selection, so the answer must be in the selected
+ * language *even when the question arrives in a different one*. STT is pinned
+ * to the selected language, but a bilingual speaker still slips through
+ * (Scribe will happily transcribe English words in a German session), and
+ * without this line the model mirrors the user's language and the app ends up
+ * half German, half English mid-sentence. Model-facing instructions stay in
+ * English — that is what these models follow most reliably — while the *output*
+ * language is named explicitly.
+ */
+const LANG_NAME = { en: 'English', de: 'German (Deutsch)' };
+
+function languageRule() {
+  const name = LANG_NAME[getLang()] || LANG_NAME.en;
+  return `CRITICAL LANGUAGE RULE: You MUST write every word the user will read or hear in ${name}. This applies even if the user's question, or any text quoted to you, is in a different language — never mirror the user's language, never translate your answer into it, never mix languages, and never apologise for the language. Reference material below may be in ${name} already; keep it that way. Use natural, idiomatic, spoken ${name}.`;
+}
+
+/**
+ * Extra guidance the German voice needs. Spoken German has choices English
+ * doesn't, and left unspecified the models drift into stiff written
+ * "Sie"-form technical prose that a text-to-speech voice reads badly.
+ */
+function germanStyle() {
+  if (getLang() !== 'de') return null;
+  return 'Address the user informally with "du". Use plain spoken German, no bureaucratic Amtsdeutsch. Write out symbols and units as words where a person would say them (for example "46 bis 57 Zentimeter"), and keep any part designation exactly as it appears in the reference material.';
+}
 
 /**
  * Diagnose-mode answer. The user picked (or spoke) a symptom that maps to one
@@ -32,6 +63,8 @@ export async function answerDiagnosis(ctx, { symptom, part, reference, question 
   }
 
   const system = [
+    languageRule(),
+    germanStyle(),
     'You are an augmented-reality repair tutor speaking out loud to a user.',
     `The user is looking at a ${ctx.modelLabel} through their phone camera.`,
     `They report this symptom: "${symptom}". The relevant part is the ${part}.`,
@@ -91,6 +124,11 @@ export async function generateFixPlan(ctx, request) {
 
   const partNames = [...new Set(ctx.parts || [])].filter(Boolean);
   const system = [
+    languageRule(),
+    germanStyle(),
+    // The JSON keys and the `action` verbs are machine-read and stay English —
+    // only "title", "intro" and each beat's "text" are spoken to the user.
+    'Note on the JSON below: the field names and the "action" values are fixed English identifiers and must be copied exactly. The language rule applies to the "title", "intro" and "text" values, which are the only parts the user ever hears.',
     'You are an augmented-reality repair tutor. Produce a step-by-step repair plan that an app will animate on a 3D exploded model, highlighting the named parts and speaking each step out loud.',
     `The object is a ${ctx.modelLabel}. Its parts, with the EXACT names the app knows them by: ${partNames.join('; ')}.`,
     ctx.diagnostics && `Ground truth about this exact object — prefer it and never contradict it: ${ctx.diagnostics}`,
@@ -182,7 +220,7 @@ function normalizeBeat(b) {
  * ctx: getContext() result. opts: { attempted, expected, stepText }.
  */
 export async function explainNextPart(ctx, { attempted, expected, stepText }) {
-  const fallback = `The ${expected} goes on next. ${stepText}`;
+  const fallback = t('tutor.nextFallback', { part: expected, step: stepText });
 
   const trace = startTrace('ai-assemble-next-part', {
     input: `${attempted} → ${expected}`,
@@ -195,6 +233,8 @@ export async function explainNextPart(ctx, { attempted, expected, stepText }) {
   }
 
   const system = [
+    languageRule(),
+    germanStyle(),
     'You are an augmented-reality assembly tutor speaking out loud to a learner.',
     `They are building a ${ctx.modelLabel}. The part that goes on next is the "${expected}".`,
     `The step is: ${stepText}`,
@@ -245,13 +285,19 @@ export async function answerQuestion(context, question) {
   });
 
   if (!aiAvailable()) {
-    const answer = `I can't reach the AI tutor right now, but you're looking at the ${focusPart || context.modelLabel}.`;
+    const answer = t('tutor.noAi', { subject: focusPart || context.modelLabel });
     trace.end({ output: answer, metadata: { aiAvailable: false } });
     return { part: null, action: null, answer };
   }
 
   const partNames = [...new Set(context.parts || [])];
   const system = [
+    languageRule(),
+    germanStyle(),
+    // PART:/ACTION: are parsed by the app, so they are exempt from the language
+    // rule — without saying so, a German session returns "TEIL:" and the
+    // highlight silently stops working.
+    'Two exceptions to the language rule: the literal header words "PART:" and "ACTION:" below stay in English exactly as written, and the ACTION verb is one of the fixed English identifiers listed. Everything else — the spoken answer — follows the language rule. The part name after PART: is copied verbatim from the parts list, whatever language that list is in.',
     'You are an augmented-reality repair and assembly tutor speaking out loud to a user.',
     `The user is looking at a ${context.modelLabel} through their phone camera.`,
     partNames.length && `Its parts are: ${partNames.join(', ')}.`,
@@ -285,21 +331,24 @@ export async function answerQuestion(context, question) {
     let part = null;
     let action = null;
     let answer = raw.trim();
-    const m = raw.match(/^\s*PART:\s*([^\n]+)\n+(?:ACTION:\s*([^\n]+)\n+)?([\s\S]+)$/i);
+    // TEIL:/AKTION: are accepted as well: the headers are told to stay English,
+    // but a model deep in a German answer occasionally translates them anyway,
+    // and losing the highlight over that would be a silly way to fail.
+    const m = raw.match(/^\s*(?:PART|TEIL):\s*([^\n]+)\n+(?:(?:ACTION|AKTION):\s*([^\n]+)\n+)?([\s\S]+)$/i);
     if (m) {
       const named = m[1].trim();
-      if (!/^none$/i.test(named)) part = named;
+      if (!/^(?:none|keine[sr]?|kein)$/i.test(named)) part = named;
       const verb = (m[2] || '').trim().toLowerCase();
       if (FIX_ACTIONS.includes(verb)) action = verb;
       answer = m[3].trim();
     } else {
-      answer = raw.replace(/^\s*(?:PART|ACTION):\s*[^\n]*\n?/gim, '').trim() || raw.trim();
+      answer = raw.replace(/^\s*(?:PART|TEIL|ACTION|AKTION):\s*[^\n]*\n?/gim, '').trim() || raw.trim();
     }
     trace.end({ output: answer, metadata: { part, action } });
     return { part, action, answer };
   } catch (e) {
     console.warn('answerQuestion failed:', e.message);
-    const answer = `Sorry, I couldn't reach the tutor. That part is the ${context.focusedPart || 'one you tapped'}.`;
+    const answer = t('tutor.failed', { part: context.focusedPart || t('tutor.thatPart') });
     trace.end({ output: answer, metadata: { error: e.message } });
     return { part: null, action: null, answer };
   }
