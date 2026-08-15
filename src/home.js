@@ -15,6 +15,12 @@
  * so a language switch relabels), a `scanMap` from vision label → model key,
  * and `onPick(key)`.
  *
+ * Each view is a page with its own link (`#/`, `#/scan`, `#/objects`), so the
+ * buttons here don't switch view themselves — they **ask** for one
+ * (`onView(name)`), the caller routes, and the route calls `openHome(view)`
+ * back. One direction only: without it, a click would change the view and the
+ * resulting navigation would change it a second time, restarting the camera.
+ *
  * The camera is the one resource here that leaks visibly — a stream left open
  * keeps the phone's camera indicator lit — so every exit from the scan view
  * (capture, back, pick, closing the overlay, a page hide) runs through
@@ -24,7 +30,9 @@ import { t } from './i18n.js';
 import { startCamera, stopCamera, captureFrame, identifyObject } from './vision.js';
 
 let el = null;          // cached DOM refs
-let cfg = null;         // { getOptions, scanMap, onPick }
+let cfg = null;         // { getOptions, scanMap, onPick, onView }
+const VIEWS = ['choose', 'scan', 'pick'];
+let view = 'choose';    // which of VIEWS is on screen — mirrors the route
 let stream = null;      // live camera stream, or null
 let scanSeq = 0;        // newest scan wins: a slow classification can't apply after Back
 let scanPhase = 'live'; // 'live' (aiming) | 'result' (a still on screen) — the
@@ -49,11 +57,13 @@ export function initHome(options) {
     backs: document.querySelectorAll('[data-home-back]'),
   };
 
-  el.scanBtn.addEventListener('click', () => showScan());
-  el.selectBtn.addEventListener('click', () => showView('pick'));
-  for (const b of el.backs) b.addEventListener('click', () => showView('choose'));
+  // These ask for a view rather than showing one — see the module header.
+  el.scanBtn.addEventListener('click', () => cfg.onView('scan'));
+  el.selectBtn.addEventListener('click', () => cfg.onView('pick'));
+  for (const b of el.backs) b.addEventListener('click', () => cfg.onView('choose'));
+  el.scanAlt.addEventListener('click', () => cfg.onView('pick'));
+  // Retake is not a view change — it re-arms the camera on the page we are on.
   el.capture.addEventListener('click', () => (scanPhase === 'live' ? capture() : showScan()));
-  el.scanAlt.addEventListener('click', () => showView('pick'));
 
   // A backgrounded tab keeps the camera on otherwise — on a phone that reads as
   // the app spying while the user is in another app.
@@ -68,12 +78,28 @@ export function isHomeOpen() {
   return el?.root.classList.contains('show') || false;
 }
 
-export function openHome() {
-  if (!el) return;
+/**
+ * Open the home screen on one of its views — the router's entry point, so this
+ * is also what a pasted `#/scan` link runs.
+ *
+ * Re-opening the view already on screen is a no-op: the same route can arrive
+ * twice (a click that navigates, then the `hashchange` it caused) and the
+ * second one must not re-open the camera.
+ */
+export function openHome(next = 'choose') {
+  if (!el || !VIEWS.includes(next)) return;
   renderList();
-  showView('choose');
+  const reopening = el.root.classList.contains('show') && next === view;
   el.root.classList.add('show');
   document.body.classList.add('home-open');
+  if (reopening) return;
+  if (next === 'scan') showScan();
+  else showView(next);
+}
+
+/** Which view is on screen — the module's half of the route. */
+export function homeView() {
+  return view;
 }
 
 export function closeHome() {
@@ -99,6 +125,7 @@ export function refreshHome() {
 function showView(name) {
   scanSeq++;                       // abandon any classification still in flight
   if (name !== 'scan') releaseCamera();
+  view = name;
   el.choose.hidden = name !== 'choose';
   el.pick.hidden = name !== 'pick';
   el.scan.hidden = name !== 'scan';

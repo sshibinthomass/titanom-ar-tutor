@@ -14,8 +14,11 @@ import { createRecognizer } from './voice.js';
 import { answerQuestion, answerDiagnosis, explainNextPart, generateFixPlan, resolveSpokenPart } from './tutor.js';
 import { startFixAnim, stopFixAnim, updateFixAnim, isObjectAction } from './fixanim.js';
 import { aiAvailable } from './ai.js';
-import { initHome, openHome, refreshHome } from './home.js';
+// `homeView` here is the *camera's* default framing; the home screen's current
+// view is aliased so the two can't be confused.
+import { initHome, openHome, closeHome, isHomeOpen, homeView as homeScreenView, refreshHome } from './home.js';
 import { initTelemetry, track } from './telemetry.js';
+import { routePath, currentRoute, navigate, onRouteChange } from './router.js';
 
 // ---- Model registry --------------------------------------------------------
 
@@ -243,8 +246,14 @@ primeSfx();
 
 // ---- Load + build ----------------------------------------------------------
 
+// The model the scene is actually built from (or being built from). ui.model is
+// the *request* — set the instant a route arrives — so the router compares
+// against this to decide whether a route still needs a load.
+let loadedKey = null;
+
 function loadModel(key) {
   const m = MODELS[key];
+  loadedKey = key;
   ui.credit.innerHTML = `<a href="${m.creditUrl}" target="_blank" rel="noopener">${m.credit}</a>`;
   ui.mode.value = m.defaultMode;
 
@@ -541,7 +550,11 @@ function groundExploded() {
 // A direct drag wins over any animation still in flight.
 ui.explode.addEventListener('input', () => { cancelTween('explode'); onExplodeChange(); });
 
-ui.model.addEventListener('change', () => { track('model-load', { metadata: { model: ui.model.value } }); loadModel(ui.model.value); });
+// Picking a model is a navigation, not a load: it goes through the router (which
+// then loads), so the address bar, the Back button and the dropdown can never
+// tell three different stories about which object is on screen. The mode is
+// carried over — changing the object doesn't change what you were doing to it.
+ui.model.addEventListener('change', () => goTo({ kind: 'object', model: ui.model.value, mode: currentMode }));
 ui.mode.addEventListener('change', () => { if (originalScene) rebuild(); });
 ui.tint.addEventListener('change', () => { if (originalScene) rebuild(); });
 
@@ -693,6 +706,7 @@ function enterMode(id) {
   track('mode-switch', { metadata: { mode: id, model: ui.model.value } });
   currentMode = id;
   setModeButtons(id);
+  syncRoute();        // every mode is a page; entering one is arriving at it
   cardExplode = null; // drop any stale inline slider before the card is rebuilt
   stopPuzzle();       // before resetParts, which assumes it owns part positions
   cancelBeats();      // ditto — a gesture writes part positions every frame
@@ -1917,28 +1931,124 @@ const SCAN_MODELS = {
 initHome({
   getOptions: selectableModels,
   scanMap: SCAN_MODELS,
-  onPick: (key) => {
-    if (!MODELS[key] || key === ui.model.value) return; // already loaded: just reveal the scene
-    ui.model.value = key;   // a programmatic set fires no 'change', so load by hand
-    track('model-load', { metadata: { model: key, source: 'home' } });
-    loadModel(key);
-  },
+  // Both of these navigate and let the router do the work — see "Routing".
+  // A pick keeps the mode you were in, exactly as the model dropdown does.
+  onPick: (key) => { if (MODELS[key]) goTo({ kind: 'object', model: key, mode: currentMode }, 'home'); },
+  onView: (view) => goTo({ kind: 'home', view }),
 });
 
-ui.homeBtn.addEventListener('click', () => {
-  stopSpeaking();   // don't let an answer carry on talking over the chooser
-  openHome();
+ui.homeBtn.addEventListener('click', () => goTo({ kind: 'home', view: 'choose' }));
+
+// ---- Routing ---------------------------------------------------------------
+// One link per screen: `#/`, `#/scan`, `#/objects`, `#/<model>/<mode>`. Two
+// directions, and keeping them apart is what stops the URL and the app arguing:
+//
+//  * **state → URL** (`syncRoute`): the app writes its own address after every
+//    change, so however a screen was reached — a mode button, a chip's
+//    `enterMode`, a finished model load — the address bar already describes it.
+//  * **URL → state** (`applyRoute`): a navigation *means* something, and this is
+//    the only place that acts on it. Back/Forward, a pasted link and a cold boot
+//    are then literally the same code path.
+//
+// Everything a user can click that changes screens goes through `goTo`, so the
+// history holds exactly their steps. `applyRoute` is idempotent — it only ever
+// does the part that isn't already true — which is what lets `goTo` apply
+// immediately *and* the `hashchange` it triggers arrive harmlessly afterwards.
+
+// The vocabulary a link is validated against. Only *selectable* models: the
+// dropdown has no <option> for a hidden one, so pointing it at `office-chair`
+// would blank ui.model.value and leave currentModel() undefined.
+const routeVocab = () => ({
+  models: selectableModels().map((o) => o.key),
+  modes: MODE_LIST.map((m) => m.id),
+  defaultMode: 'explore',
 });
+
+let applyingRoute = false;
+
+/** Where the app *is*, derived from state — never read back from the URL. */
+function stateRoute() {
+  return isHomeOpen()
+    ? { kind: 'home', view: homeScreenView() }
+    : { kind: 'object', model: ui.model.value, mode: currentMode };
+}
+
+/** Point the address bar at wherever the app has got to. */
+function syncRoute() {
+  if (applyingRoute) return;   // mid-apply: the URL already says this
+  const route = stateRoute();
+  navigate(routePath(route));  // no-ops when nothing moved, so no junk history
+  setDocumentTitle(route);
+}
+
+/** A user asked for a screen: record it in the history, then go there. */
+function goTo(route, source) {
+  if (!navigate(routePath(route))) return; // already there
+  applyRoute(route, source);
+}
+
+/**
+ * Put the app on `route`. Does only what isn't already true, so it is safe to
+ * call twice for the same navigation (goTo applies eagerly; the hashchange that
+ * follows lands here again).
+ */
+function applyRoute(route, source = 'link') {
+  applyingRoute = true;
+  try {
+    if (route.kind === 'home') {
+      stopSpeaking();          // don't let an answer carry on talking over the chooser
+      openHome(route.view);
+    } else {
+      if (isHomeOpen()) closeHome();
+      if (route.model !== loadedKey) {
+        // The mode is set *before* the load: rebuild() enters `currentMode` when
+        // the glTF lands, so the link's mode is where the new model opens.
+        ui.model.value = route.model;
+        currentMode = route.mode;
+        setModeButtons(route.mode);
+        track('model-load', { metadata: { model: route.model, source } });
+        loadModel(route.model);
+      } else if (route.mode !== currentMode) {
+        enterMode(route.mode);
+      }
+    }
+  } finally {
+    applyingRoute = false;
+  }
+  setDocumentTitle(route);
+}
+
+/**
+ * Name the tab after the screen, so a bookmark or a history entry says which
+ * object and mode it is. Emoji-free `kicker.*` rather than the mode bar's
+ * captions — a tab strip is not the place for 🔍.
+ */
+function setDocumentTitle(route) {
+  const app = t('app.title');
+  if (route.kind === 'home') {
+    const view = route.view === 'scan' ? t('home.scan') : route.view === 'pick' ? t('home.select') : '';
+    document.title = view ? `${view} · ${app}` : app;
+    return;
+  }
+  document.title = `${modelLabel(MODELS[route.model])} · ${t(`kicker.${route.mode}`)} · ${app}`;
+}
+
+onRouteChange(() => applyRoute(currentRoute(routeVocab())));
 
 // ---- Go --------------------------------------------------------------------
 
 // Boot straight into the hero IKEA Markus and fetch nothing else — the other
-// models are only loaded when the user actually selects one. Read the value off
-// the dropdown (not DEFAULT_MODEL) so UI and loaded model can never desync.
+// models are only loaded when the user actually selects one.
 //
-// The load starts *behind* the home screen rather than after a choice: the
-// Markus is both the default and the "chair" the scan resolves to, so by the
-// time the user has framed a photo or read the list it is usually already
-// built. Picking anything else just loads it then, exactly as the dropdown does.
-loadModel(ui.model.value);
-openHome();
+// On the home screen the load starts *behind* the overlay rather than after a
+// choice: the Markus is both the default and the "chair" the scan resolves to,
+// so by the time the user has framed a photo or read the list it is usually
+// already built. A link straight to an object skips the overlay entirely and
+// loads whatever that link names.
+const bootRoute = currentRoute(routeVocab());
+if (bootRoute.kind === 'home') loadModel(ui.model.value);
+applyRoute(bootRoute, 'boot');
+// Normalise what the user pasted (`#`, `#/markus-chair`, an unknown mode) to the
+// canonical path, in place — replaceState fires no hashchange, and applyRoute
+// has already run.
+navigate(routePath(bootRoute), { replace: true });

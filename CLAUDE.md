@@ -53,6 +53,7 @@ modules are focused, mostly-pure helpers it calls.
 | File | Responsibility |
 |------|----------------|
 | [src/main.js](src/main.js) | App shell: renderer/scene/camera/lights, model registry, UI wiring, mode state machine, voice + AR glue, render loop. |
+| [src/router.js](src/router.js) | **Links.** The hash-URL grammar (`#/`, `#/scan`, `#/objects`, `#/<model>/<mode>`), plus navigate/parse/listen. Owns no state and knows no ids — the caller passes the vocabulary in. |
 | [src/home.js](src/home.js) | The **home screen** — the front door. Scan the real object with the camera, or pick from the list. Owns the overlay's views and the camera lifecycle. |
 | [src/vision.js](src/vision.js) | The scan itself: rear camera → one JPEG frame → DGPT vision → one of `chair` / `bicycle` / `bed` / `none`. |
 | [src/explode.js](src/explode.js) | The **core**. Splits a glTF into parts and drives the exploded view + per-part highlight/dim/isolate. |
@@ -71,13 +72,78 @@ modules are focused, mostly-pure helpers it calls.
 | [src/i18n.js](src/i18n.js) | **Language.** The selected language (`en`/`de`), the UI dictionary, the authored-content resolver `tr()`, and the locale codes the speech stack needs. One switch flips chrome, content, voice, transcription and every LLM prompt. |
 | [src/telemetry.js](src/telemetry.js) | Langfuse tracing. Batches ingestion events to a credential-free proxy (Vite in dev, Worker in prod). No-op when unconfigured. |
 
+### Links (`router.js`)
+
+**Every screen has its own address**, so a mode can be bookmarked, shared, or
+opened on the phone from the laptop, and the browser's Back button walks the
+user's steps. The grammar is small enough to read out loud:
+
+```
+#/                      the home screen
+#/scan                  …its camera view
+#/objects               …its object list
+#/<model>               an object, at the default mode (normalised to explore)
+#/<model>/<mode>        e.g. #/markus-chair/fix, #/bicycle/quiz
+```
+
+It routes on the **hash**, not the path. There is no server here — a static
+Vite build on a GitHub Pages *project* sub-path — so `/markus-chair/fix` would
+404 on a cold load unless someone maintains a rewrite rule, and link-building
+would have to know the sub-path. A hash is one document request the host
+already understands, and `base: './'` stays none of its business.
+
+Two directions, and keeping them apart is what stops the URL and the app
+arguing (all three functions live in main.js's *Routing* section):
+
+- **state → URL** (`syncRoute`): the app writes its own address after every
+  change. It hangs off `enterMode`, which every route into a mode already funnels
+  through — a mode button, a card chip's `enterMode('explore')`, the re-entry a
+  language switch does, the one `rebuild()` does when a model finishes loading —
+  so no caller has to remember to navigate. `navigate()` no-ops when the path is
+  unchanged, which is what keeps those re-entries out of the history.
+- **URL → state** (`applyRoute`): a navigation *means* something, and this is
+  the only place that acts on one. Back/Forward, a pasted link and a cold boot
+  are then literally the same code path.
+
+Three rules hold it together — don't regress them:
+
+1. **`applyRoute` is idempotent**: it only does the part that isn't already
+   true. That is what lets `goTo` apply a click immediately *and* the
+   `hashchange` it triggers land harmlessly a tick later (verified: one glTF
+   fetch, one `rebuild()` per model switch).
+2. **Links are validated against the *selectable* models**, not the registry.
+   The dropdown has no `<option>` for a `hidden` model, so a link naming one
+   would blank `ui.model.value` and leave `currentModel()` undefined — an
+   unknown id therefore lands on the home screen, the one screen that always
+   renders. Boot then `replaceState`s the URL to the canonical path, so a typo
+   or a stale bookmark is silently corrected rather than left lying.
+3. **A route's mode is set *before* its model loads.** `rebuild()` enters
+   `currentMode` when the glTF lands, so assigning it up front is what makes
+   `#/bicycle/quiz` open on the quiz instead of flashing through Explore.
+
+The tab is named after the screen (`setDocumentTitle`), in the selected
+language, using the emoji-free `kicker.*` strings rather than the mode bar's
+captions.
+
+Not everything is a page. **Language and theme stay in `localStorage`** — they
+are preferences that should follow the user across links, not properties of the
+screen being linked to. **AR is a session, not a page**: `requestSession` needs
+a user gesture, so a link that "opens in AR" could not honour itself; a mode
+switch inside a session does move the hash, which is harmless (no document
+load, so the session survives).
+
 ### The home screen (`home.js` + `vision.js`)
 
 The app opens on a chooser, not on a model: **Scan an object** or **Select an
-object**. It is an opaque full-screen overlay over the live scene, not a
-separate page or route — the renderer, the modes and the model registry all stay
+object**. It is an opaque full-screen overlay over the live scene rather than a
+separate document — the renderer, the modes and the model registry all stay
 mounted underneath, so choosing costs one `loadModel()` and coming back (the
-`⌂` corner button) costs nothing.
+`⌂` corner button) costs nothing. Its three views are still *pages* in the link
+sense: each has an address, and `home.js` **asks** for a view (`onView(name)`)
+instead of switching to one itself. Main routes, and the route calls
+`openHome(view)` back. One direction only — otherwise a click would change the
+view and the navigation it caused would change it a second time, restarting the
+camera.
 
 - **Scan** opens the rear camera (`facingMode: { ideal: 'environment' }` — not
   `exact`, or a laptop with only a front camera has no scan at all), takes one
@@ -699,6 +765,10 @@ Then the site is at `https://<owner>.github.io/titanom_hack_2026/`.
   preload the other models — one glTF fetch on boot. `selectableModels()` (the
   registry minus anything `hidden`) is the single list behind **both** pickers,
   so the home screen and the dropdown can never disagree about what exists.
+- **Changing screen is a navigation.** Anything a user can click that switches
+  object or mode goes through `goTo()` (main.js), never straight to
+  `loadModel()` / `openHome()` — those are what `applyRoute` calls. A new screen
+  worth linking to means a new arm of the grammar in [src/router.js](src/router.js).
 - Refer to parts by **keyword match**, never by hard-coded index in content —
   indices are only pinned in `SEMANTIC_NAMES` for the fused hero model.
 - **No user-facing string literals outside the dictionaries.** UI text goes in
