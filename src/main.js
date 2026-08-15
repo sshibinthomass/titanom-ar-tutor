@@ -4,13 +4,15 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { buildExplodedView, setExplode, setPartExplode, isolateParts, clearPartStates, setHighlight, findParts } from './explode.js';
 import { updateTweens, tweenTo, cancelTween, isTweening, easeInOutCubic, flyToParts, moveCamera } from './animate.js';
 import { attachPicker, attachDragger } from './select.js';
-import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest } from './modes.js';
+import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest, fixSuggestions, resolvePlanParts } from './modes.js';
 import { isARSupported, startAR, updateAR, endAR, requestMove, setInteractor, setManipulationEnabled, setPivotScale, getFitScale } from './ar.js';
 import { startPuzzle, stopPuzzle, updatePuzzle, puzzleInteractor, isPuzzleActive, puzzleAutoPlace, puzzleHintIndices, puzzleStatus } from './puzzle.js';
 import { speak, stop as stopSpeaking, isSpeaking } from './tts.js';
 import { primeSfx, playSfx } from './sfx.js';
 import { createRecognizer } from './voice.js';
-import { answerQuestion, answerDiagnosis, explainNextPart } from './tutor.js';
+import { answerQuestion, answerDiagnosis, explainNextPart, generateFixPlan } from './tutor.js';
+import { startFixAnim, stopFixAnim, updateFixAnim } from './fixanim.js';
+import { aiAvailable } from './ai.js';
 import { initTelemetry, track } from './telemetry.js';
 
 // ---- Model registry --------------------------------------------------------
@@ -217,7 +219,8 @@ function loadModel(key) {
 }
 
 function rebuild() {
-  stopPuzzle(); // release the ghosts before the geometry they borrow is disposed
+  stopPuzzle();  // release the ghosts before the geometry they borrow is disposed
+  stopFixAnim(); // and the step clip, before its part refs go stale
   // Any tween in flight still points at the outgoing part list — drop them both
   // before the meshes are disposed.
   cancelTween('explode');
@@ -249,7 +252,7 @@ function rebuild() {
     const b = p.mesh.geometry.boundingBox;
     const c = b.getCenter(new THREE.Vector3());
     const s = b.getSize(new THREE.Vector3());
-    return { i, tris: p.triangleCount,
+    return { i, tris: p.triangleCount, mesh: p.mesh, // live mesh ref: lets the console watch animations
       cx: +c.x.toFixed(3), cy: +c.y.toFixed(3), cz: +c.z.toFixed(3),
       sx: +s.x.toFixed(3), sy: +s.y.toFixed(3), sz: +s.z.toFixed(3) };
   });
@@ -591,6 +594,7 @@ function enterMode(id) {
   setModeButtons(id);
   cardExplode = null; // drop any stale inline slider before the card is rebuilt
   stopPuzzle();       // before resetParts, which assumes it owns part positions
+  stopFixAnim();      // ditto — the clip writes part positions every frame
   applyARInteraction();
   resetParts();
   selectedPart = -1;
@@ -635,14 +639,88 @@ function addCardExplodeSlider() {
   cardExplode = { slider, val };
 }
 
-// --- Fix / Assemble: ordered steps ---
+// --- Fix: voice-first, DGPT-planned repair ------------------------------------
+// The user says (or taps a suggested) problem; DeutschlandGPT drafts a step plan
+// grounded in the authored knowledge digest and constrained to the live part
+// names, and the app walks it with the same isolate + camera-flight + TTS
+// pipeline the authored procedure used. Without DGPT the authored procedure
+// runs exactly as before — the fallback, not the feature.
+let fixState = 'ask';   // 'ask' (waiting for a problem) | 'planning' | 'guided'
+let fixSeq = 0;         // newest fix request wins if two plans race
+
 function enterFix() {
-  const proc = resolveFix(currentKey(), parts);
-  steps = proc.steps; stepIndex = 0; stepTitle = proc.title; stepKicker = 'Fix';
-  mildExplode();
-  renderStep();
+  fixSeq++; // drop any plan still in flight from a previous visit / old part list
+  if (!aiAvailable()) {
+    const proc = resolveFix(currentKey(), parts);
+    steps = proc.steps; stepIndex = 0; stepTitle = proc.title; stepKicker = 'Fix';
+    fixState = 'guided';
+    mildExplode();
+    renderStep();
+    return;
+  }
+  showFixAsk();
 }
-function renderStep() {
+
+// The ask-screen: what problem are we solving? The chips are authored symptoms
+// (fixSuggestions) but they are only canned voice inputs — tapping one and
+// speaking a phrase feed the same planner. `lead` lets a finished or failed
+// plan re-ask with its own line instead of the default question.
+function showFixAsk(lead = '') {
+  fixState = 'ask';
+  steps = [];
+  focusedPart = null;
+  stopFixAnim();
+  clearPartStates(parts);
+  setExplodeAmount(0, { animate: true });
+  const chips = fixSuggestions(currentKey()).map((label) => ({
+    label: `🔧 ${label}`,
+    onClick: () => startFixRequest(label),
+  }));
+  showCard(
+    'Fix',
+    `<b>${lead || 'What should we fix?'}</b><span class="partdesc">Tap 🎤 and describe the problem — or pick one below.</span>`,
+    '',
+    { chips }
+  );
+  say(lead || 'What should we fix? Describe the problem, or pick a suggestion.');
+}
+
+/** A problem arrived (spoken or tapped): plan it with DGPT and start the walkthrough. */
+async function startFixRequest(request) {
+  const my = ++fixSeq;
+  fixState = 'planning';
+  track('fix-request', { input: request, metadata: { model: ui.model.value } });
+  showCard('Fix', `<b>“${request}”</b><span class="partdesc">…planning the repair</span>`);
+  showCaption(`“${request}” · …planning`);
+
+  const plan = await generateFixPlan(getContext(), request);
+  if (my !== fixSeq || currentMode !== 'fix') return; // superseded, or the mode was left
+
+  if (!plan || !plan.steps.length) {
+    if (plan?.intro) { showFixAsk(plan.intro); return; } // "that's not fixable here, because…"
+    // AI unreachable mid-request: run the authored procedure so the demo never dead-ends.
+    const proc = resolveFix(currentKey(), parts);
+    steps = proc.steps; stepIndex = 0; stepTitle = proc.title; stepKicker = 'Fix';
+    fixState = 'guided';
+    track('fix-plan-fallback', { metadata: { model: ui.model.value } });
+    mildExplode();
+    renderStep();
+    return;
+  }
+
+  steps = plan.steps.map((s) => ({ indices: resolvePlanParts(parts, s.parts), action: s.action, text: s.text }));
+  stepIndex = 0;
+  stepTitle = plan.title || `Fix: ${request}`;
+  stepKicker = 'Fix';
+  fixState = 'guided';
+  track('fix-plan', { metadata: { model: ui.model.value, steps: steps.length, request } });
+  mildExplode();
+  if (plan.intro) showCaption(plan.intro);
+  renderStep(plan.intro);
+}
+
+// `preface` is the plan's intro sentence, spoken once ahead of the first step.
+function renderStep(preface = '') {
   const title = stepTitle, kicker = stepKicker;
   if (!steps.length) { showCard(kicker, 'No procedure for this model yet.'); return; }
   const s = steps[stepIndex];
@@ -650,21 +728,37 @@ function renderStep() {
 
   isolateParts(parts, stepIndices); // spotlight this step's part(s), dim the rest
   flyTo(stepIndices); // and bring it to the user rather than making them orbit for it
+  // Show the step's physical motion on its parts, looping while the step is up.
+  // Delayed past the mild-explode tween (700 ms) so the clip starts from a
+  // settled pose instead of fighting the staggered spread.
+  startFixAnim(parts, stepIndices, s.action || 'inspect', {
+    scale: modelRadius,
+    amount: parseFloat(ui.explode.value) || 0,
+    delay: 0.85,
+  });
 
   const partName = stepIndices.length ? parts[stepIndices[0]].name : null;
   focusedPart = partName;
+  const chips = kicker === 'Fix' && aiAvailable()
+    ? [{ label: '🎤 Fix something else', onClick: () => { stopSpeaking(); showFixAsk(); } }]
+    : null;
   showCard(
     kicker,
     `<b>${title}</b><br>${s.text}`,
     `Step ${stepIndex + 1} of ${steps.length}` + (partName ? ` · ${partName}` : ' · (part not matched)'),
-    { nav: true }
+    { nav: true, chips }
   );
   ui.stepPrev.disabled = stepIndex === 0;
   ui.stepNext.textContent = stepIndex === steps.length - 1 ? 'Done ✔' : 'Next ▶';
-  say(s.text);
+  say(preface ? `${preface} ${s.text}` : s.text);
 }
 function goStep(delta) {
   if (!steps.length) return;
+  // 'Done ✔' on the last Fix step closes the plan and asks for the next problem.
+  if (delta > 0 && stepIndex === steps.length - 1) {
+    if (stepKicker === 'Fix' && aiAvailable()) showFixAsk('Done — that should sort it. Anything else to fix?');
+    return;
+  }
   stepIndex = Math.max(0, Math.min(steps.length - 1, stepIndex + delta));
   renderStep();
 }
@@ -989,13 +1083,24 @@ async function handleSpeech(text) {
     return;
   }
 
+  // Fix mode, waiting for a problem: the utterance IS the fix request — the
+  // content input this mode exists to receive (a Diagnose chip, spoken), not a
+  // command; it never navigates or switches modes. Speaking again while a plan
+  // is still being drafted simply replaces it (fixSeq — newest request wins).
+  if (currentMode === 'fix' && (fixState === 'ask' || fixState === 'planning') && aiAvailable()) {
+    startFixRequest(t);
+    return;
+  }
+
   const my = ++askSeq;
   showCaption(`“${t}” · …thinking`);
   track('voice-question', { input: t, metadata: { mode: currentMode, part: focusedPart } });
   // The LLM answers about whichever part the question concerns and names it —
   // the app then spotlights that part, so asking about the gas lift while the
-  // seat is selected highlights the gas lift and answers about it.
-  const { part, answer } = await answerQuestion(getContext(), t);
+  // seat is selected highlights the gas lift and answers about it. When the
+  // answer describes a physical motion, the LLM also picks the ACTION verb and
+  // the part *acts it out* (a few loops, then it settles back).
+  const { part, action, answer } = await answerQuestion(getContext(), t);
   if (my !== askSeq) return;             // a newer question superseded this answer
   // If the mic is mid-capture, hold the answer until the utterance resolves
   // instead of discarding it: if that capture turns out to be a new question,
@@ -1009,7 +1114,14 @@ async function handleSpeech(text) {
   }
   if (my !== askSeq) return;
   if (recognizer?.isCapturing()) return; // still talking after 8 s — stay quiet
-  if (part) highlightPartByName(part);
+  const indices = part ? highlightPartByName(part) : [];
+  if (indices.length && action && !isPuzzleActive()) {
+    startFixAnim(parts, indices, action, {
+      scale: modelRadius,
+      amount: parseFloat(ui.explode.value) || 0,
+      loops: 3, // demonstrate, then settle — this is an answer, not a step held on screen
+    });
+  }
   showCaption(answer);
   say(answer);
 }
@@ -1019,13 +1131,14 @@ async function handleSpeech(text) {
  * (the LLM copies names from the parts list), keyword fallback for near
  * misses. Only Explore rewrites the card/selection — the other modes keep
  * their own step/symptom isolation, we just don't fight it mid-flow.
+ * Returns the matched part indices ([] if none) so the caller can animate them.
  */
 function highlightPartByName(name) {
   const target = (name || '').toLowerCase().trim();
-  if (!target) return false;
+  if (!target) return [];
   const exact = parts.find((p) => (p.name || '').toLowerCase() === target);
   const indices = exact ? findParts(parts, [exact.name]) : findParts(parts, [target]);
-  if (!indices.length) return false;
+  if (!indices.length) return [];
   focusedPart = parts[indices[0]].name;
   if (currentMode === 'explore') {
     selectedPart = indices[0];
@@ -1037,8 +1150,12 @@ function highlightPartByName(name) {
     );
     addCardExplodeSlider();
   }
-  return true;
+  return indices;
 }
+
+// DEBUG: simulate a spoken phrase from the console (no mic needed) — exercises
+// the exact same routing as real speech, incl. Fix-mode planning.
+window.__ask = handleSpeech;
 
 const recognizer = createRecognizer({
   onResult: handleSpeech,
@@ -1193,6 +1310,10 @@ renderer.setAnimationLoop((time, frame) => {
     controls.autoRotateSpeed = 1.2;
   }
   updateTweens(dt);
+  // After updateTweens: the step clip layers over the explode state and must
+  // win the frame for its own parts (it re-derives the base from the live
+  // amount, so slider drags and explode tweens keep working underneath it).
+  updateFixAnim(dt, parseFloat(ui.explode.value) || 0);
   controls.update();
   renderer.render(scene, camera);
 });
