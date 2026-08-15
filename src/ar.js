@@ -190,11 +190,14 @@ function stabilizerUpdate(rawMatrix, dt) {
 
 /**
  * Start an AR session.
- * opts: { renderer, scene, camera, group, controls, overlay, onEnd, onPlaced }
+ * opts: { renderer, scene, camera, group, controls, overlay, onEnd, onPlaced, fitBox }
+ *
+ * `fitBox` (optional) is the box to size the placement against, instead of the
+ * group's live bounds — see the fit below for why that matters.
  */
 export async function startAR(opts) {
   refs = opts;
-  const { renderer, scene, camera, group, controls, overlay } = opts;
+  const { renderer, scene, camera, group, controls, overlay, fitBox } = opts;
 
   session = await navigator.xr.requestSession('immersive-ar', {
     requiredFeatures: ['hit-test'],
@@ -256,7 +259,12 @@ export async function startAR(opts) {
   selectionRing.visible = false;
   pivot.add(selectionRing);
 
-  const box = new THREE.Box3().setFromObject(group);
+  // Fit to ~0.7 m. Measure the *assembled* model when the caller can supply it:
+  // the live bounds grow with the explode amount, so entering AR from a mode
+  // that spreads the parts (Fix, Diagnose, Quiz) would otherwise scale the
+  // object down to fit its exploded silhouette — and reassembling mid-session
+  // would then leave a chair well under 0.7 m standing on the floor.
+  const box = fitBox || new THREE.Box3().setFromObject(group);
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
   const s = 0.7 / (size.y || 1);

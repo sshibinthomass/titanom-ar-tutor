@@ -10,6 +10,17 @@ place an **exploded 3D object**, and an AI voice tutor teaches, repairs, and
 diagnoses it hands-free. The desktop 3D view works everywhere; markerless AR is
 **Android Chrome only** (iOS/desktop fall back to the orbit viewer).
 
+**The object is the IKEA Markus chair.** It is the default selection, the only
+model fetched on boot, and the one every mode's content is authored for. The
+office chair, bicycle and bed are secondary demos that prove the splitter is
+model-agnostic — they load lazily, only if the user picks them from the
+dropdown. **Build every new feature for the Markus first**: author its content in
+`CONTENT['markus-chair']` / `MARKUS_INFO`, name its parts in
+`SEMANTIC_NAMES['markus-chair']`, and demo it on the Markus. A feature that only
+works on another model is not done. Porting to the other models afterwards is
+optional; where a feature can't be authored for them, the generic fallback
+resolvers must still keep them functional (never crashing, never blank).
+
 Stack: **Vite + Three.js**, no other runtime deps. Plain ES modules, no
 framework, no TypeScript, no bundled UI lib. Keep it that way unless there's a
 strong reason.
@@ -38,6 +49,7 @@ modules are focused, mostly-pure helpers it calls.
 |------|----------------|
 | [src/main.js](src/main.js) | App shell: renderer/scene/camera/lights, model registry, UI wiring, mode state machine, voice + AR glue, render loop. |
 | [src/explode.js](src/explode.js) | The **core**. Splits a glTF into parts and drives the exploded view + per-part highlight/dim/isolate. |
+| [src/animate.js](src/animate.js) | Tween engine (keyed channels, driven from the render loop) + the camera flight that frames a part. |
 | [src/modes.js](src/modes.js) | The 5 modes + **authored per-model content** (fix steps, assemble prompts, diagnoses, quizzes) and semantic part names. |
 | [src/puzzle.js](src/puzzle.js) | Assemble's drag-to-build engine: scatter, ghost slots, snap magnetism, reject. Surface-agnostic — driven by a world-space ray. |
 | [src/select.js](src/select.js) | Raycast tap/click part-picking (drag threshold so orbiting ≠ tapping) + the desktop part-dragger. |
@@ -55,7 +67,8 @@ Sketchfab exports come in two flavours, so there are two split strategies chosen
 per model via `defaultMode` in the `MODELS` registry:
 
 - **`group`** — one part per source mesh. Good when the model is already split
-  by material (e.g. the bicycle). Clean, semantic parts.
+  by mesh/material — **the hero Markus uses this** (47 meshes → 47 parts), as
+  does the bicycle. Clean, semantic parts.
 - **`component`** — split each mesh's geometry into **connected components**
   (union-find over welded vertex positions). Needed when the model is one fused
   mesh (the office chair, the bed). Vertices are welded by quantized position
@@ -70,6 +83,39 @@ identity transform and drops in exactly where the original sat.
 Key exports used across the app: `buildExplodedView`, `setExplode`,
 `isolateParts` (spotlight some, dim the rest), `setHighlight`, `clearPartStates`,
 `findParts`/`findPart` (match parts by name keyword).
+
+### Motion (`animate.js`)
+
+Nothing snaps. Two tween **channels** — `'explode'` and `'camera'` — are advanced
+by the single `updateTweens(dt)` call in the render loop; starting a tween on a
+channel replaces the one already there, so mashing **Next** never stacks
+half-finished flights. `prefers-reduced-motion` completes every tween on
+creation, which is exactly the app's old snap behaviour.
+
+- **Explode** is *staggered*: `setExplodeAmount()` gives each part its own slice
+  of the timeline (`EXPLODE_STAGGER`), so the model unpeels outward instead of
+  inflating as one rigid shell. That's why the tween calls `setPartExplode()`
+  per part rather than `setExplode()` — a uniform amount would flatten the
+  cascade. Dragging the slider stays instant and cancels any tween.
+- **Camera** — `flyToParts()` frames whatever a guided step just spotlighted.
+  It **keeps the user's viewing angle** and only orbits (smallest turn that
+  clears the view) when something *solid* blocks the part. Ghosted parts
+  (`isolateParts` dims the rest to ~7%) explicitly don't count as occluders,
+  or every Fix step would swing the camera for nothing.
+
+Three things keep it from fighting other systems — don't regress them:
+
+1. **The destination is re-derived every frame**, not frozen at t=0. An explode
+   tween usually runs alongside, so parts are still moving and `groundExploded()`
+   is still shifting the group vertically. Freezing the target makes the camera
+   drift toward a stale point; freezing the *distance* frames the same step
+   differently depending on whether it was reached mid-explode or after.
+2. **`controls`' `start` event cancels the camera tween** — the moment the user
+   grabs the scene, the flight lets go instead of fighting the drag.
+3. **`autoRotate` yields while a flight runs**, and flights are **skipped
+   entirely during AR** (`renderer.xr.isPresenting`), where `camera` is the
+   device pose and writing to it would fight WebXR. The explode animation *does*
+   run in AR — it's the best thing in the demo there.
 
 ### Modes (`modes.js` + state in `main.js`)
 
@@ -87,11 +133,15 @@ Authored content in `CONTENT` (keyed by model id) references parts by **keyword*
 runtime via `findParts()` — so it survives however the splitter cut the model.
 Resolvers fall back to a generic teardown when a model has no authored content.
 
-**Hero model:** the office chair is one fused mesh → 20 connected components. The
-raw indices are mapped to real names (Backrest, Gas cylinder, Armrest, Seat,
-Star base, Caster×5, Base hub, Height lever) in `SEMANTIC_NAMES['office-chair']`.
-Several islands share a name (5 casters), so highlighting a name lights the whole
-group.
+**Hero model — IKEA Markus (`markus-chair`).** It splits in `group` mode into
+**47 meshes**, every one named individually in `SEMANTIC_NAMES['markus-chair']`
+(Backrest frame, Gas cylinder, Height lever + its shaft, Recline lock lever,
+Tilt tension knob, Caster wheels/stem/brake hood ×5, Mesh panel front/rear,
+Lumbar support band ×10, …). The names were identified visually part-by-part in
+Blender and checked against the official IKEA assembly manual (AA-251870-21);
+its fix/assemble/diagnose/quiz content and the per-part `MARKUS_INFO`
+descriptions are grounded in that manual and real IKEA part numbers — so keep
+new Markus content factual, not invented.
 
 ### The Assemble puzzle (`puzzle.js`)
 
@@ -182,11 +232,17 @@ build. Voice "move it" still repositions. The puzzle also asks AR for
 **life-size** (`MODELS[*].realHeight` ÷ the 0.7 m fit) rather than tabletop
 scale, so reaching for a part rehearses the real reach.
 
-> ⚠️ Those semantic indices come from the **deterministic** component split of
-> this exact GLB (verified via bounding-box positions). **If a model is
-> re-exported, the indices can change** — re-run the split and re-map. To
-> re-author them, `window.__parts` is exposed in `rebuild()` with each part's
-> triangle count and world-space bbox.
+The secondary office chair is one fused mesh → 20 connected components, mapped
+to names (Backrest, Gas cylinder, Armrest, Seat, Star base, Caster×5, Base hub,
+Height lever) in `SEMANTIC_NAMES['office-chair']`. Several islands share a name
+(5 casters), so highlighting a name lights the whole group — true for the Markus
+casters too.
+
+> ⚠️ Semantic indices in both maps come from the **deterministic** split of that
+> exact GLB (Markus: mesh rank by triangle count; office chair: component order,
+> verified via bounding-box positions). **If a model is re-exported, the indices
+> can change** — re-run the split and re-map. To re-author them, `window.__parts`
+> is exposed in `rebuild()` with each part's triangle count and world-space bbox.
 
 ### Voice + AI flow
 
@@ -227,7 +283,12 @@ voice commands, modes, model loads and AR; `tts.js` tracks the spoken provider.
 ### AR (`ar.js`)
 
 Scene graph once placed: `anchor` (world pose, on the floor) → `pivot` (user
-rotate/scale about the floor contact) → `group` (the model, fit to ~0.7 m). HTML
+rotate/scale about the floor contact) → `group` (the model, fit to ~0.7 m).
+That fit is measured against the **assembled** model — `main.js` passes
+`fitBox: restBounds()`, since the live bounds grow with the explode amount and
+starting AR from a spread-out mode (Fix/Diagnose/Quiz) would otherwise scale the
+object down to fit its exploded silhouette: entering from Fix placed a chair that
+stood 0.39 m once reassembled, and from a full explode, 0.21 m. HTML
 UI is kept as a `dom-overlay` so the mode bar/cards/mic render over the camera
 feed. `renderer.setAnimationLoop` handles both normal rAF and the XRFrame (Three
 passes the frame as the 2nd arg during a session). `onSessionEnd` fully restores
@@ -306,6 +367,11 @@ Then the site is at `https://<owner>.github.io/titanom_hack_2026/`.
 
 - Plain ES modules; helpers are small and mostly pure. `main.js` holds mutable
   app state and does the wiring.
+- The boot model is `DEFAULT_MODEL` in [src/main.js](src/main.js) (`markus-chair`),
+  and the Markus is listed **first** in `MODELS` so it heads the dropdown. Don't
+  preload the other models — one glTF fetch on boot. Voice model-switching
+  (`MODEL_KEYWORDS`) gives a bare "chair" to the Markus; the office chair only
+  answers to its multi-word phrases.
 - Refer to parts by **keyword match**, never by hard-coded index in content —
   indices are only pinned in `SEMANTIC_NAMES` for the fused hero model.
 - Always clone materials before mutating per-part visual state.

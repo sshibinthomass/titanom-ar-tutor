@@ -25,35 +25,40 @@ export const SEMANTIC_NAMES = {
 
   // IKEA Markus — a 'group'-mode model: 47 separate meshes, so the part index is
   // the mesh's rank by triangle count (largest first), per buildExplodedView's
-  // sort. Mapping verified from each part's world-space bbox: the signature high
-  // mesh back (its own material) + headrest sit at the top; seat/tilt in the
-  // middle; gas lift, star base and 5 casters (each caster = wheel + housing +
-  // stem, so 3 islands apiece → 15 caster parts) at the bottom. Several tiny
-  // 1-triangle slivers at the recline pivot (37–46) are folded into 'Tilt
-  // mechanism' so no group is left hidden in Assemble. Every group here was
-  // confirmed visually by highlighting it in Blender. Re-export ⇒ re-run the
-  // split (window.__parts) and re-map.
+  // sort. EVERY index below was identified visually: each part was highlighted
+  // alone in a Blender render and matched against the official IKEA assembly
+  // manual (AA-251870-21). Notable identifications: the right paddle (8) is the
+  // height lever and the left (9) the recline lock — per the manual's use page —
+  // with their shafts at 20/21; the egg-shaped knob under the seat front (10) is
+  // the tilt tension knob; each caster is 3 islands (twin wheels / press-fit
+  // stem / brake hood → 15 parts); the mesh back is two stacked layers (17
+  // front, 16 rear); and the ten 1-triangle strips (37–46) sit hidden BETWEEN
+  // the mesh layers at belt height — the built-in lumbar support band.
+  // Duplicate names below = genuinely identical hardware or fragments of one
+  // piece. Re-export ⇒ re-run the split (window.__parts) and re-map.
   'markus-chair': {
-    0: 'Backrest',
-    1: 'Tilt mechanism',
+    0: 'Backrest frame',
+    1: 'Tilt mechanism frame',
     2: 'Seat',
-    3: 'Armrest', 4: 'Armrest',
+    3: 'Armrest frame (right)', 4: 'Armrest frame (left)',
     5: 'Headrest',
-    6: 'Armrest', 7: 'Armrest', 8: 'Armrest', 9: 'Armrest',
-    10: 'Height lever',
-    11: 'Caster', 12: 'Caster', 13: 'Caster', 14: 'Caster', 15: 'Caster',
-    16: 'Mesh back', 17: 'Mesh back',
+    6: 'Armrest pad (left)', 7: 'Armrest pad (right)',
+    8: 'Height lever', 9: 'Recline lock lever',
+    10: 'Tilt tension knob',
+    11: 'Caster wheels', 12: 'Caster wheels', 13: 'Caster wheels', 14: 'Caster wheels', 15: 'Caster wheels',
+    16: 'Mesh panel (rear)', 17: 'Mesh panel (front)',
     18: 'Star base',
     19: 'Gas cylinder',
-    20: 'Armrest', 21: 'Armrest',
-    22: 'Tilt mechanism',
-    23: 'Caster', 24: 'Caster', 25: 'Caster', 26: 'Caster', 27: 'Caster',
-    28: 'Caster', 29: 'Caster', 30: 'Caster', 31: 'Caster', 32: 'Caster',
-    33: 'Armrest', 34: 'Armrest', 35: 'Armrest', 36: 'Armrest',
-    37: 'Tilt mechanism', 38: 'Tilt mechanism', 39: 'Tilt mechanism',
-    40: 'Tilt mechanism', 41: 'Tilt mechanism', 42: 'Tilt mechanism',
-    43: 'Tilt mechanism', 44: 'Tilt mechanism', 45: 'Tilt mechanism',
-    46: 'Tilt mechanism',
+    20: 'Height lever shaft', 21: 'Recline lock shaft',
+    22: 'Tilt mechanism plate',
+    23: 'Caster stem', 24: 'Caster stem', 25: 'Caster stem', 26: 'Caster stem', 27: 'Caster stem',
+    28: 'Caster brake hood', 29: 'Caster brake hood', 30: 'Caster brake hood', 31: 'Caster brake hood', 32: 'Caster brake hood',
+    33: 'Armrest bolt cap (left)', 34: 'Armrest bolt cap (left)',
+    35: 'Armrest bolt cap (right)', 36: 'Armrest bolt cap (right)',
+    37: 'Lumbar support band', 38: 'Lumbar support band', 39: 'Lumbar support band',
+    40: 'Lumbar support band', 41: 'Lumbar support band', 42: 'Lumbar support band',
+    43: 'Lumbar support band', 44: 'Lumbar support band', 45: 'Lumbar support band',
+    46: 'Lumbar support band',
   },
 };
 
@@ -200,18 +205,21 @@ const CONTENT = {
   },
 
   'markus-chair': {
-    // Verified product facts (IKEA Markus, Vissle dark grey, art. 702.611.50).
-    // Grounds the AI tutor so free-form questions about materials, capacity and
-    // adjustments are answered from the real chair, not generic guesses.
-    about: 'The IKEA Markus (designer Henrik Preutz) is a high-back swivel office chair. Its backrest is a breathable Vissle dark-grey mesh of recycled polyester over a powder-coated steel frame, with built-in lumbar support and a fixed headrest at the top. The armrests are fixed, padded in polypropylene and synthetic rubber. The seat is polyurethane foam over a laminated wood base, raised and lowered by a pneumatic gas lift. The five-star foot is powder-coated aluminium on self-braking casters that lock when you stand up. It has a synchronised tilt that locks in three positions with a manual tension knob under the seat, a seat-height range of 46–57 cm, and a rated capacity of 110 kg.',
+    // Grounding digest for the AI tutor — built ONLY from checked sources so
+    // answers come from the real chair, not model guesses: the official IKEA
+    // assembly manual AA-251870-21 (hardware IDs, steps, safety pages), the
+    // ikea.com MARKUS product page (materials, dimensions), the Instructables
+    // "IKEA Markus Assembly Guide", and the manuall.co.uk MARKUS page
+    // (owner FAQ: common failures and spares).
+    about: 'The IKEA Markus (designer Henrik Preutz, art. 702.611.50) is a high-back swivel office chair rated to 110 kg, certified EN 1335, with a 10-year warranty. Backrest: breathable Vissle dark-grey mesh (100% polyester, min 90% recycled) in two layers over a powder-coated steel frame, with a lumbar support band sewn in at belt height and a fixed headrest. Armrests: fixed height (no adjustable version exists), identical left/right, padded with polypropylene and synthetic rubber. Seat: 35 kg/m³ polyurethane foam on laminated wood veneer. Base: powder-coated aluminium five-star on twin-wheel safety casters that brake automatically when nobody sits in the chair, so it never rolls away when you stand up. Controls: the RIGHT paddle under the seat is the height lever (lift while seated to sink, unweight to rise, 46–57 cm); the LEFT lever is the recline lock — the backrest is sprung forward, unlock to rock, lock upright (3 positions); the knob under the seat front-centre sets tilt tension (turn + for more resistance, − for less). Assembly hardware (manual AA-251870-21): 6 countersunk screws #122134, 5 flange bolts #115994 (2 fix the tilt mechanism to the seat, 3 fix the backrest bracket), one allen key #124345, 5 press-in casters #100049021 — push casters straight in, never at an angle; pull the transport cap off the gas cylinder before fitting; start all 3 backrest bolts loosely before tightening; lowering the assembled chair onto the cylinder is a two-person lift. IKEA warns that only trained personnel may replace or repair the gas spring (energy accumulator). Known aging failures from owners: the gas lift loses pressure (replaceable, standard taper fit), the tilt-mechanism frame can crack after years of heavy use, and taper joints seize — freeing the cylinder from the seat mechanism or base needs firm taps with a rubber mallet.',
     fix: {
       title: 'Fix a sinking Markus — replace the gas lift',
       steps: [
-        { match: ['seat'], text: 'Tip the chair on its side and take out the four screws holding the seat plate to the tilt mechanism.' },
-        { match: ['cylinder', 'gas', 'lift'], text: 'Twist the seat off the gas cylinder, then knock the cylinder out of the star base with a rubber mallet.' },
-        { match: ['star'], text: 'Stand the five-star base upright with all five casters flat on the floor.' },
-        { match: ['cylinder', 'gas', 'lift'], text: 'Drop the new gas lift into the cone of the star base, wide collar down.' },
-        { match: ['seat'], text: 'Refit the seat and tilt mechanism onto the cylinder, then sit on it to lock the taper.' },
+        { match: ['seat'], text: 'Tip the chair on its side and undo the tilt-mechanism fasteners under the seat: two flange bolts and two countersunk screws, using the allen key that came with the chair.' },
+        { match: ['cylinder', 'gas', 'lift'], text: 'Free the old cylinder from the mechanism plate — the taper joint seizes over time, so tap the plate around the cone with a rubber mallet, never pry against the seat.' },
+        { match: ['star'], text: 'Knock the cylinder out of the star base the same way, then stand the base upright with all five casters flat on the floor.' },
+        { match: ['cylinder', 'gas', 'lift'], text: 'Drop the new gas lift into the base cone, thin end down — and if it shipped with a transport cap, pull that off first.' },
+        { match: ['seat'], text: 'Refit the seat and mechanism onto the cylinder and sit down firmly — your weight locks the taper. IKEA notes gas-spring service is for trained hands, so work carefully.' },
       ],
     },
     // symptoms[0] is the chip label; every string is also a voice-match keyword
@@ -231,13 +239,13 @@ const CONTENT = {
       },
       {
         symptoms: ['Backrest won\'t lock', 'wont lock', 'recline', 'wont hold', 'flops back', 'no lock'],
-        match: ['tilt'],
-        text: 'A back that will not stay upright is the tilt lock not engaging — the side lever is not catching the ratchet. Free the lever and check its linkage into the tilt mechanism. Highlighted is the tilt mechanism.',
+        match: ['recline'],
+        text: 'The Markus backrest is sprung forward and held by the LEFT-hand lever — the recline lock, which holds one of three positions. If the back will not stay upright, the lock is not engaging: work the left lever and check its shaft into the mechanism. Highlighted is the recline lock.',
       },
       {
         symptoms: ['Reclines too easily', 'too easy', 'too loose', 'tips back', 'tension', 'springs back'],
-        match: ['tilt'],
-        text: 'A back that snaps forward or leans too freely is the tilt tension wound too loose. Turn the knob under the front of the seat clockwise to add resistance. Highlighted is the tilt mechanism.',
+        match: ['tension'],
+        text: 'A back that leans too freely or snaps forward is the tilt tension set too loose for your weight. Find the knob under the front-centre of the seat and turn it toward + for more resistance, − for less. Highlighted is the tension knob.',
       },
       {
         symptoms: ['Chair wobbles', 'wobble', 'wobbles', 'unstable', 'rocking', 'shaky'],
@@ -257,12 +265,12 @@ const CONTENT = {
       {
         symptoms: ['Rolls away', 'rolls away', 'drifts', 'slides', 'wont stay put'],
         match: ['caster', 'wheel', 'roller'],
-        text: 'A chair that rolls on its own has worn casters or the wrong wheel for the floor — fit braked casters, or the correct hard-floor or carpet type. Highlighted is the caster set.',
+        text: 'Markus casters are safety casters — they brake automatically when nobody is sitting, so an empty chair should never drift. If it rolls away on its own, a brake hood is worn or jammed: pop that caster out and replace it (IKEA part 100049021). Highlighted is the caster set.',
       },
       {
         symptoms: ['Squeaks and creaks', 'squeak', 'squeaks', 'creak', 'noise', 'clicking', 'grinding'],
         match: ['tilt'],
-        text: 'Squeaks and creaks come from the tilt mechanism and swivel — dry springs, loose seat-plate bolts, or the cylinder top bearing. Tighten the under-seat bolts and grease the pivot. Highlighted is the tilt mechanism.',
+        text: 'Squeaks and creaks come from the tilt mechanism and swivel — dry springs, loose fasteners on the seat plate, or the cylinder top bearing. Snug the two flange bolts and two screws under the seat with the allen key, and grease the pivot. Highlighted is the tilt mechanism.',
       },
       {
         symptoms: ['Headrest slips', 'headrest', 'head rest', 'wont stay up', 'slides down', 'wont adjust'],
@@ -272,20 +280,23 @@ const CONTENT = {
       {
         symptoms: ['Loose armrest', 'armrest', 'arm wobbles', 'arm loose', 'broken arm'],
         match: ['armrest', 'arm'],
-        text: 'A wobbly armrest is almost always loose bolts under the seat pan where the arm mounts. Tighten them; if the arm itself is cracked, replace it. Highlighted is the armrest.',
+        text: 'Each Markus armrest is held by two countersunk screws into the seat side — a wobbly arm means they have worked loose, so snug them with the allen key. The arms are identical left/right and fixed height; no adjustable version exists. Highlighted is the armrest.',
       },
       {
         symptoms: ['Mesh sagging', 'mesh', 'saggy', 'stretched', 'baggy back', 'worn mesh'],
         match: ['mesh'],
-        text: 'A sagging or stretched mesh back has lost its tension and cannot be re-tightened — the mesh is bonded to the frame. Replace the back assembly. Highlighted is the mesh back.',
+        text: 'A sagging or stretched mesh back has lost its tension and cannot be re-tightened — the two mesh layers are fixed to the frame with the lumbar band sewn between them. Replace the back assembly. Highlighted is the mesh back.',
       },
     ],
     quiz: [
       { match: ['cylinder', 'gas', 'lift'], question: 'What part lets you raise and lower the seat?', answer: 'the gas cylinder (pneumatic lift)' },
       { match: ['star'], question: 'What is the five-armed part on the floor called?', answer: 'the star base' },
-      { match: ['caster', 'wheel', 'roller'], question: 'What are the rolling parts called?', answer: 'casters' },
+      { match: ['caster', 'wheel', 'roller'], question: 'What are the rolling parts called?', answer: 'casters — safety casters that brake when the chair is empty' },
+      { match: ['recline'], question: 'Which control locks the backrest upright?', answer: 'the left-hand recline lock lever' },
+      { match: ['tension'], question: 'What sets how hard the chair resists leaning back?', answer: 'the tilt tension knob under the seat front' },
       { match: ['headrest'], question: 'What supports your head at the very top of the chair?', answer: 'the headrest' },
-      { match: ['mesh'], question: 'What is the breathable part your back rests against?', answer: 'the mesh back' },
+      { match: ['mesh'], question: 'What is the breathable part your back rests against?', answer: 'the Vissle mesh back' },
+      { match: ['lumbar'], question: 'What is sewn between the mesh layers at belt height?', answer: 'the lumbar support band' },
     ],
   },
 
@@ -315,49 +326,66 @@ const CONTENT = {
 // ---- Resolvers: turn keyword content into concrete part indices ------------
 
 // Assemble order by semantic group, bottom-up, for models we have names for.
-const ASSEMBLE_ORDER = {
-  'office-chair': ['Star base', 'Caster', 'Base hub', 'Gas cylinder', 'Seat', 'Backrest', 'Armrest', 'Height lever'],
-  // Every semantic group must appear here — in Assemble, a part in no step stays
-  // hidden. Bottom-up build order.
-  'markus-chair': ['Star base', 'Caster', 'Gas cylinder', 'Tilt mechanism', 'Height lever', 'Seat', 'Armrest', 'Backrest', 'Mesh back', 'Headrest'],
-};
 /**
  * The *question* asked before each Assemble step, and the deliberate inverse of
- * ASSEMBLE_TEXT below.
+ * the step's `text` below.
  *
  * Assemble is a drag-to-build puzzle: the user has to pick the right piece out
  * of the scattered parts, so the prompt describes the piece by its job or its
- * position and never names it. The naming line (ASSEMBLE_TEXT) is spoken
- * *after* a correct placement — as confirmation, not as an instruction. Recall
- * first, label second; a prompt that gives the answer away reduces the puzzle to
- * fetching.
+ * position and never names it. The step text is spoken *after* a correct
+ * placement — as confirmation, not as an instruction. Recall first, label
+ * second; a prompt that gives the answer away reduces the puzzle to fetching.
+ *
+ * Keyed by the same `group` string as ASSEMBLE_STEPS. A group with no prompt
+ * falls back to a bare "Which part goes on next?", so adding a step never breaks
+ * the puzzle — it just asks less well.
  */
 const ASSEMBLE_PROMPT = {
   'Star base': 'Start at the floor. Which piece spreads your weight out to five points?',
   'Caster': 'What makes it roll? Five of these press into the ends of the base arms.',
   'Base hub': 'Which piece caps the centre of the base so the chair can swivel?',
   'Gas cylinder': 'What drops into the cone in the middle to raise and lower you?',
-  'Tilt mechanism': 'Which block bolts on top of the cylinder and lets the chair recline?',
+  'Tilt': 'Which block bolts under the seat and lets the chair rock back?',
+  'Height lever': 'Which paddle do you lift to change the seat height?',
+  'Recline lock': 'Which lever holds the backrest still instead of letting it rock?',
   'Seat': 'What do you actually sit on?',
   'Backrest': 'Which frame carries your back?',
-  'Mesh back': 'What stretches across the back frame to keep you cool?',
-  'Armrest': 'Where do your forearms rest? Two of these bolt under the seat.',
-  'Headrest': 'What clips onto the very top to support your head?',
-  'Height lever': 'Last piece — what do you lift to change the seat height?',
+  'Mesh panel': 'What stretches across the back frame to keep you cool?',
+  'Lumbar': 'Which band sits at belt height, supporting the small of your back?',
+  'Armrest': 'Where do your forearms rest? One goes on each side.',
+  'Headrest': 'What tops the backrest to support your head?',
 };
 
-const ASSEMBLE_TEXT = {
-  'Star base': 'Lay out the five-armed star base.',
-  'Caster': 'Press a caster into the end of each base arm.',
-  'Base hub': 'Fit the central hub into the base.',
-  'Gas cylinder': 'Drop the gas cylinder into the base cone.',
-  'Tilt mechanism': 'Bolt the tilt mechanism onto the top of the gas cylinder.',
-  'Seat': 'Lower the seat onto the cylinder and press to seat the taper.',
-  'Backrest': 'Bolt the tall backrest frame to the tilt mechanism.',
-  'Mesh back': 'Stretch the breathable mesh onto the backrest frame.',
-  'Armrest': 'Attach the left and right armrests.',
-  'Headrest': 'Clip the headrest onto the top of the backrest.',
-  'Height lever': 'Clip on the height-adjust lever. Done!',
+// Each step's `group` matches parts whose name equals it OR starts with it plus
+// a space — so one step can reveal a whole family of distinct part names
+// ('Caster' → Caster wheels / Caster stem / Caster brake hood). Every part must
+// be caught by some step: in Assemble, an unmatched part stays hidden.
+const ASSEMBLE_STEPS = {
+  'office-chair': [
+    { group: 'Star base', text: 'Lay out the five-armed star base.' },
+    { group: 'Caster', text: 'Press a caster into the end of each base arm.' },
+    { group: 'Base hub', text: 'Fit the central hub into the base.' },
+    { group: 'Gas cylinder', text: 'Drop the gas cylinder into the base cone.' },
+    { group: 'Seat', text: 'Lower the seat onto the cylinder and press to seat the taper.' },
+    { group: 'Backrest', text: 'Bolt the backrest to the seat mechanism.' },
+    { group: 'Armrest', text: 'Attach the left and right armrests.' },
+    { group: 'Height lever', text: 'Clip on the height-adjust lever. Done!' },
+  ],
+  // Follows the official IKEA manual AA-251870-21, steps 1–11.
+  'markus-chair': [
+    { group: 'Star base', text: 'Lay the five-arm aluminium star base upside-down on a rug (manual step 1).' },
+    { group: 'Caster', text: 'Press all five safety casters straight into the base arms — square, never at an angle (step 1).' },
+    { group: 'Gas cylinder', text: 'Pull the transport cap off the gas cylinder, discard it, and drop the cylinder into the base cone, thin end down (steps 2–3).' },
+    { group: 'Tilt', text: 'Bolt the tilt mechanism to the seat underside: two flange bolts #115994, then two countersunk screws #122134, snugged with the allen key (steps 4–6).' },
+    { group: 'Height lever', text: 'The right-hand paddle is the height lever — it comes fitted to the mechanism. Lift it while seated to sink, unweight the seat to rise.' },
+    { group: 'Recline lock', text: 'The left-hand lever is the recline lock. The backrest is sprung forward: unlock to rock freely, lock to hold one of three positions.' },
+    { group: 'Seat', text: 'The seat — foam on laminated wood — now carries the whole mechanism on its underside.' },
+    { group: 'Backrest', text: 'Slide the backrest\'s L-bracket into the seat slot and start all three flange bolts loosely before tightening any — the holes align one at a time (steps 8–9).' },
+    { group: 'Mesh panel', text: 'The Vissle mesh comes factory-tensioned over the frame in two layers, front and rear.' },
+    { group: 'Lumbar', text: 'The lumbar support band is sewn between the mesh layers at belt height — built in, nothing to attach.' },
+    { group: 'Armrest', text: 'Slide each armrest down over the seat edge and fix it with two countersunk screws per side — left and right arms are identical (steps 7 + 11).' },
+    { group: 'Headrest', text: 'The fixed headrest tops the backrest frame. Now the two-person lift: lower the whole chair onto the gas cylinder (step 10). Done!' },
+  ],
 };
 
 /** Fix procedure → { title, steps:[{ indices, text }] }. */
@@ -379,17 +407,19 @@ export function resolveFix(modelKey, parts) {
  * Models with no authored order fall back to biggest-part-first.
  */
 export function resolveAssemble(modelKey, parts) {
-  const order = ASSEMBLE_ORDER[modelKey];
-  if (order) {
+  const authored = ASSEMBLE_STEPS[modelKey];
+  if (authored) {
     const steps = [];
-    for (const groupName of order) {
-      const indices = parts.map((p, i) => (p.name === groupName ? i : -1)).filter((i) => i >= 0);
+    for (const { group, text } of authored) {
+      const indices = parts
+        .map((p, i) => (p.name === group || (p.name || '').startsWith(group + ' ') ? i : -1))
+        .filter((i) => i >= 0);
       if (!indices.length) continue;
       steps.push({
         indices,
-        name: groupName,
-        text: ASSEMBLE_TEXT[groupName] || `Attach the ${groupName.toLowerCase()}.`,
-        prompt: ASSEMBLE_PROMPT[groupName] || 'Which part goes on next?',
+        name: group,
+        text,
+        prompt: ASSEMBLE_PROMPT[group] || 'Which part goes on next?',
       });
     }
     return { title: 'Assemble the chair', steps };
@@ -440,19 +470,37 @@ export function knowledgeDigest(modelKey) {
  * entry, or a part with no entry, just shows the bare part name as before. Kept
  * short: one or two sentences, spoken aloud on tap, so they must read naturally.
  */
+// Specs grounded in the official IKEA manual (AA-251870-21), the MARKUS product
+// page, and owner guides — hardware IDs and behaviours are the documented ones.
+const MARKUS_INFO = {
+  'Backrest frame': 'The powder-coated steel spine of the chair. Its L-shaped bracket slides into the seat slot and bolts on with three flange bolts #115994 — start all three loosely, the holes align one at a time.',
+  'Mesh panel (front)': 'The seating-side layer of Vissle dark-grey mesh — 100% polyester, at least 90% recycled. It flexes against your back and keeps air moving on long days.',
+  'Mesh panel (rear)': 'The outer mesh layer, showing the Vissle two-tone mélange weave. Together with the front layer it sandwiches the lumbar band.',
+  'Lumbar support band': 'A tension band sewn between the two mesh layers at belt height — the Markus\'s built-in lumbar support. It is part of the back assembly and cannot be adjusted or removed.',
+  'Headrest': 'The fixed head support topping the high back. It is part of the backrest frame, not height-adjustable.',
+  'Seat': '35 kg/m³ polyurethane foam on laminated wood veneer, rated to 110 kg. The tilt mechanism bolts to its underside with two flange bolts and two countersunk screws.',
+  'Tilt mechanism frame': 'The steel frame of the synchronised tilt — it reclines seat and back together for a better hip angle. On heavily used chairs this frame is the part owners report cracking; then the mechanism is replaced.',
+  'Tilt mechanism plate': 'The plate that bolts against the seat underside and takes the gas cylinder\'s taper. When swapping the gas lift, tap around this cone with a rubber mallet to free the seized joint.',
+  'Height lever': 'The RIGHT-hand paddle. Lift it while seated to sink, lift it unweighted to rise — 46 to 57 cm of seat height. IKEA warns only trained personnel should service the gas spring itself.',
+  'Height lever shaft': 'The steel rod that carries the right paddle\'s motion to the valve pin on top of the gas cylinder.',
+  'Recline lock lever': 'The LEFT-hand lever. The backrest is sprung forward: flip the lever one way to rock freely, the other to lock upright — it holds one of three positions.',
+  'Recline lock shaft': 'The rod linking the left lever to the tilt ratchet inside the mechanism.',
+  'Tilt tension knob': 'The knob under the seat front-centre. Turn toward + for more recline resistance, − for less — set it to your body weight so the back follows you without pushing.',
+  'Gas cylinder': 'The pneumatic lift (a gas spring). It ships with a transport cap — pull it off before fitting. When a chair keeps sinking the cylinder is swapped as a unit; it is a standard taper fit.',
+  'Star base': 'The five-arm base of powder-coated aluminium. The gas cylinder drops into its centre cone, thin end down, and locks by taper — no fasteners.',
+  'Caster wheels': 'The twin wheels of a safety caster (IKEA part 100049021). They roll when you sit and brake automatically when the chair is empty, so it never drifts away.',
+  'Caster stem': 'The press-fit pin that mounts the caster: line it up and push it straight into the base arm — never at an angle, or it will not seat.',
+  'Caster brake hood': 'The hood over the twin wheels housing the auto-brake that grips when the chair is unloaded. A worn hood is why an empty chair starts to drift.',
+  'Armrest frame (right)': 'The right armrest loop — steel, fixed height, interchangeable with the left. It slides down over the seat edge and is held by two countersunk screws #122134.',
+  'Armrest frame (left)': 'The left armrest loop — steel, fixed height, interchangeable with the right. It slides down over the seat edge and is held by two countersunk screws #122134.',
+  'Armrest pad (right)': 'The padded top of the right armrest — polypropylene with synthetic rubber, shaped to take your forearm and ease shoulder strain.',
+  'Armrest pad (left)': 'The padded top of the left armrest — polypropylene with synthetic rubber, shaped to take your forearm and ease shoulder strain.',
+  'Armrest bolt cap (right)': 'One of the two fixing points where countersunk screws #122134 clamp the right armrest to the seat side — the first thing to snug when an arm wobbles.',
+  'Armrest bolt cap (left)': 'One of the two fixing points where countersunk screws #122134 clamp the left armrest to the seat side — the first thing to snug when an arm wobbles.',
+};
+
 const PART_INFO = {
-  'markus-chair': {
-    'Backrest': 'The powder-coated steel backrest frame. It holds the mesh under tension and carries the recline load through to the tilt mechanism.',
-    'Mesh back': 'The breathable Vissle mesh panel — recycled polyester that flexes to support your back and stays cool over a long day.',
-    'Headrest': 'The fixed head support at the very top. It cradles your neck and head when you lean back into the high backrest.',
-    'Seat': 'Polyurethane foam over a laminated wood base. It bolts to the tilt mechanism and is rated to carry up to 110 kilograms.',
-    'Tilt mechanism': 'The synchronised tilt under the seat. It reclines with you, locks in three positions, and a knob sets how hard it resists leaning.',
-    'Height lever': 'The paddle under the seat. Lift it to release the gas lift and raise or lower the seat between 46 and 57 centimetres.',
-    'Armrest': 'A fixed armrest, padded in polypropylene and synthetic rubber. It bolts under the seat to support your forearm and ease shoulder strain.',
-    'Gas cylinder': 'The pneumatic gas lift. Compressed gas raises and lowers the seat; when a chair keeps sinking, this whole cylinder is replaced.',
-    'Star base': 'The five-armed foot of powder-coated aluminium. It spreads your weight out to the five casters for a stable, tip-resistant stance.',
-    'Caster': 'A self-braking wheel. It rolls freely when you sit down and locks when you stand up, so the chair will not drift away from you.',
-  },
+  'markus-chair': MARKUS_INFO,
 };
 
 /** One-line description for a part in Explore mode, or '' if none authored. */

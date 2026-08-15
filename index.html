@@ -337,7 +337,10 @@
       <!-- Primary, end-user controls: choose an object, spread it, look around. -->
       <div class="field">
         <label>Model</label>
-        <select id="model"></select>
+        <!-- autocomplete=off: the app owns this value; Chrome form-restoration
+             otherwise re-applies a stale selection mid-boot and desyncs the
+             loaded model from the semantic name map. -->
+        <select id="model" autocomplete="off"></select>
       </div>
 
       <div class="field">
@@ -362,7 +365,7 @@
 
         <div class="field">
           <label>Split mode</label>
-          <select id="mode">
+          <select id="mode" autocomplete="off">
             <option value="group">By material group</option>
             <option value="component">By connected piece</option>
           </select>
