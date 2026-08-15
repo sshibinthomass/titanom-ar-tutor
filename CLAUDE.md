@@ -50,6 +50,7 @@ modules are focused, mostly-pure helpers it calls.
 | [src/main.js](src/main.js) | App shell: renderer/scene/camera/lights, model registry, UI wiring, mode state machine, voice + AR glue, render loop. |
 | [src/explode.js](src/explode.js) | The **core**. Splits a glTF into parts and drives the exploded view + per-part highlight/dim/isolate. |
 | [src/animate.js](src/animate.js) | Tween engine (keyed channels, driven from the render loop) + the camera flight that frames a part. |
+| [src/fixanim.js](src/fixanim.js) | Fix's motion primitives: looping clips (remove/install/unscrew/tap_loose/press_fit/turn/…) that act a step's verb out on its parts. LLM picks the verb, this module owns the motion. |
 | [src/modes.js](src/modes.js) | The 5 modes + **authored per-model content** (fix steps, assemble prompts, diagnoses, quizzes) and semantic part names. |
 | [src/puzzle.js](src/puzzle.js) | Assemble's drag-to-build engine: scatter, ghost slots, snap magnetism, reject. Surface-agnostic — driven by a world-space ray. |
 | [src/select.js](src/select.js) | Raycast tap/click part-picking (drag threshold so orbiting ≠ tapping) + the desktop part-dragger. |
@@ -128,8 +129,15 @@ only the card content and which parts are lit change:
    strict JSON, grounded in `knowledgeDigest` and constrained to the live part
    names; `resolvePlanParts` maps each step's part names to indices and the
    walkthrough rides the same isolate + fly-to + TTS pipeline (Next/Back).
-   The authored `CONTENT[*].fix` procedure is the fallback when DGPT is
-   unconfigured or unreachable — never the only path.
+   Each step also carries an **action verb** (`FIX_ACTIONS` in fixanim.js) the
+   LLM picks per step; fixanim.js plays that verb's looping motion clip on the
+   step's parts. The clip layer is **additive over the explode state** (base
+   re-derived from the live amount every frame, run after `updateTweens`) so it
+   never fights the explode tween/slider/AR — and rotation compensates with the
+   part's bbox centre because geometry is baked to group space (a naive
+   `mesh.quaternion` spin orbits the group origin). The authored
+   `CONTENT[*].fix` procedure (now with authored `action` verbs) is the
+   fallback when DGPT is unconfigured or unreachable — never the only path.
 3. **Assemble** — a **drag-to-build puzzle** (see below); the user places each group.
 4. **Diagnose** — pick a symptom chip → highlight the likely part.
 5. **Quiz** — highlight a part, ask the user to name it.
@@ -283,7 +291,10 @@ ALL authored per-part facts (`partInfoDigest` — never shown in the UI, LLM
 grounding only), calls DeutschlandGPT, and speaks the ≤2-sentence answer via
 `tts.speak()`. The LLM also names which part the question was about
 (`PART: <name>` header) and main.js spotlights it — so asking about the gas
-lift while the seat is selected highlights the gas lift and answers. It
+lift while the seat is selected highlights the gas lift and answers. A second
+`ACTION: <verb>` header (whitelisted against `FIX_ACTIONS`) names the physical
+motion the answer describes, and main.js plays that clip on the part for a few
+loops — "how do I get the cylinder out?" shows the cylinder tapping loose. It
 declines only questions unrelated to the whole object, never "wrong part"
 questions.
 

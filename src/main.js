@@ -11,6 +11,7 @@ import { speak, stop as stopSpeaking, isSpeaking } from './tts.js';
 import { primeSfx, playSfx } from './sfx.js';
 import { createRecognizer } from './voice.js';
 import { answerQuestion, answerDiagnosis, explainNextPart, generateFixPlan } from './tutor.js';
+import { startFixAnim, stopFixAnim, updateFixAnim } from './fixanim.js';
 import { aiAvailable } from './ai.js';
 import { initTelemetry, track } from './telemetry.js';
 
@@ -218,7 +219,8 @@ function loadModel(key) {
 }
 
 function rebuild() {
-  stopPuzzle(); // release the ghosts before the geometry they borrow is disposed
+  stopPuzzle();  // release the ghosts before the geometry they borrow is disposed
+  stopFixAnim(); // and the step clip, before its part refs go stale
   // Any tween in flight still points at the outgoing part list — drop them both
   // before the meshes are disposed.
   cancelTween('explode');
@@ -250,7 +252,7 @@ function rebuild() {
     const b = p.mesh.geometry.boundingBox;
     const c = b.getCenter(new THREE.Vector3());
     const s = b.getSize(new THREE.Vector3());
-    return { i, tris: p.triangleCount,
+    return { i, tris: p.triangleCount, mesh: p.mesh, // live mesh ref: lets the console watch animations
       cx: +c.x.toFixed(3), cy: +c.y.toFixed(3), cz: +c.z.toFixed(3),
       sx: +s.x.toFixed(3), sy: +s.y.toFixed(3), sz: +s.z.toFixed(3) };
   });
@@ -592,6 +594,7 @@ function enterMode(id) {
   setModeButtons(id);
   cardExplode = null; // drop any stale inline slider before the card is rebuilt
   stopPuzzle();       // before resetParts, which assumes it owns part positions
+  stopFixAnim();      // ditto — the clip writes part positions every frame
   applyARInteraction();
   resetParts();
   selectedPart = -1;
@@ -666,6 +669,7 @@ function showFixAsk(lead = '') {
   fixState = 'ask';
   steps = [];
   focusedPart = null;
+  stopFixAnim();
   clearPartStates(parts);
   setExplodeAmount(0, { animate: true });
   const chips = fixSuggestions(currentKey()).map((label) => ({
@@ -704,7 +708,7 @@ async function startFixRequest(request) {
     return;
   }
 
-  steps = plan.steps.map((s) => ({ indices: resolvePlanParts(parts, s.parts), text: s.text }));
+  steps = plan.steps.map((s) => ({ indices: resolvePlanParts(parts, s.parts), action: s.action, text: s.text }));
   stepIndex = 0;
   stepTitle = plan.title || `Fix: ${request}`;
   stepKicker = 'Fix';
@@ -724,6 +728,14 @@ function renderStep(preface = '') {
 
   isolateParts(parts, stepIndices); // spotlight this step's part(s), dim the rest
   flyTo(stepIndices); // and bring it to the user rather than making them orbit for it
+  // Show the step's physical motion on its parts, looping while the step is up.
+  // Delayed past the mild-explode tween (700 ms) so the clip starts from a
+  // settled pose instead of fighting the staggered spread.
+  startFixAnim(parts, stepIndices, s.action || 'inspect', {
+    scale: modelRadius,
+    amount: parseFloat(ui.explode.value) || 0,
+    delay: 0.85,
+  });
 
   const partName = stepIndices.length ? parts[stepIndices[0]].name : null;
   focusedPart = partName;
@@ -1085,11 +1097,20 @@ async function handleSpeech(text) {
   track('voice-question', { input: t, metadata: { mode: currentMode, part: focusedPart } });
   // The LLM answers about whichever part the question concerns and names it —
   // the app then spotlights that part, so asking about the gas lift while the
-  // seat is selected highlights the gas lift and answers about it.
-  const { part, answer } = await answerQuestion(getContext(), t);
+  // seat is selected highlights the gas lift and answers about it. When the
+  // answer describes a physical motion, the LLM also picks the ACTION verb and
+  // the part *acts it out* (a few loops, then it settles back).
+  const { part, action, answer } = await answerQuestion(getContext(), t);
   if (my !== askSeq) return;             // a newer question superseded this answer
   if (recognizer?.isCapturing()) return; // the user is mid-question — never talk over them
-  if (part) highlightPartByName(part);
+  const indices = part ? highlightPartByName(part) : [];
+  if (indices.length && action && !isPuzzleActive()) {
+    startFixAnim(parts, indices, action, {
+      scale: modelRadius,
+      amount: parseFloat(ui.explode.value) || 0,
+      loops: 3, // demonstrate, then settle — this is an answer, not a step held on screen
+    });
+  }
   showCaption(answer);
   say(answer);
 }
@@ -1099,13 +1120,14 @@ async function handleSpeech(text) {
  * (the LLM copies names from the parts list), keyword fallback for near
  * misses. Only Explore rewrites the card/selection — the other modes keep
  * their own step/symptom isolation, we just don't fight it mid-flow.
+ * Returns the matched part indices ([] if none) so the caller can animate them.
  */
 function highlightPartByName(name) {
   const target = (name || '').toLowerCase().trim();
-  if (!target) return false;
+  if (!target) return [];
   const exact = parts.find((p) => (p.name || '').toLowerCase() === target);
   const indices = exact ? findParts(parts, [exact.name]) : findParts(parts, [target]);
-  if (!indices.length) return false;
+  if (!indices.length) return [];
   focusedPart = parts[indices[0]].name;
   if (currentMode === 'explore') {
     selectedPart = indices[0];
@@ -1117,7 +1139,7 @@ function highlightPartByName(name) {
     );
     addCardExplodeSlider();
   }
-  return true;
+  return indices;
 }
 
 // DEBUG: simulate a spoken phrase from the console (no mic needed) — exercises
@@ -1277,6 +1299,10 @@ renderer.setAnimationLoop((time, frame) => {
     controls.autoRotateSpeed = 1.2;
   }
   updateTweens(dt);
+  // After updateTweens: the step clip layers over the explode state and must
+  // win the frame for its own parts (it re-derives the base from the live
+  // amount, so slider drags and explode tweens keep working underneath it).
+  updateFixAnim(dt, parseFloat(ui.explode.value) || 0);
   controls.update();
   renderer.render(scene, camera);
 });

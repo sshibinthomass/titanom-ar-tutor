@@ -96,11 +96,11 @@ const CONTENT = {
     fix: {
       title: 'Fix a flat tyre',
       steps: [
-        { match: ['tire', 'tyre', 'rubber', 'wheel'], text: 'Fully deflate the tyre and unseat one bead from the rim with tyre levers.' },
-        { match: ['tube', 'inner'], text: 'Pull the punctured inner tube out from under the tyre.' },
-        { match: ['tire', 'tyre', 'rubber'], text: 'Run a finger inside the tyre to find the thorn or glass that caused it.' },
-        { match: ['tube', 'inner'], text: 'Seat the new tube, partially inflated, evenly inside the tyre.' },
-        { match: ['tire', 'tyre', 'rubber', 'wheel'], text: 'Work the bead back onto the rim, then inflate to the pressure on the sidewall.' },
+        { match: ['tire', 'tyre', 'rubber', 'wheel'], action: 'remove', text: 'Fully deflate the tyre and unseat one bead from the rim with tyre levers.' },
+        { match: ['tube', 'inner'], action: 'remove', text: 'Pull the punctured inner tube out from under the tyre.' },
+        { match: ['tire', 'tyre', 'rubber'], action: 'inspect', text: 'Run a finger inside the tyre to find the thorn or glass that caused it.' },
+        { match: ['tube', 'inner'], action: 'install', text: 'Seat the new tube, partially inflated, evenly inside the tyre.' },
+        { match: ['tire', 'tyre', 'rubber', 'wheel'], action: 'press_fit', text: 'Work the bead back onto the rim, then inflate to the pressure on the sidewall.' },
       ],
     },
     diagnose: [
@@ -120,11 +120,11 @@ const CONTENT = {
     fix: {
       title: 'Fix a sinking chair — replace the gas lift',
       steps: [
-        { match: ['seat', 'cushion', 'pan'], text: 'Detach the seat from the tilt mechanism by removing the seat-plate screws.' },
-        { match: ['cylinder', 'gas', 'lift', 'piston', 'strut'], text: 'Separate the old gas cylinder from the seat mechanism and the star base.' },
-        { match: ['base', 'star', 'foot', 'spider'], text: 'Stand the star base upright with all casters on the floor.' },
-        { match: ['cylinder', 'gas', 'lift', 'piston', 'strut'], text: 'Drop the new gas cylinder into the cone of the star base.' },
-        { match: ['seat', 'cushion', 'pan'], text: 'Refit the seat onto the cylinder and press down firmly to seat the taper.' },
+        { match: ['seat', 'cushion', 'pan'], action: 'unscrew', text: 'Detach the seat from the tilt mechanism by removing the seat-plate screws.' },
+        { match: ['cylinder', 'gas', 'lift', 'piston', 'strut'], action: 'remove', text: 'Separate the old gas cylinder from the seat mechanism and the star base.' },
+        { match: ['base', 'star', 'foot', 'spider'], action: 'inspect', text: 'Stand the star base upright with all casters on the floor.' },
+        { match: ['cylinder', 'gas', 'lift', 'piston', 'strut'], action: 'install', text: 'Drop the new gas cylinder into the cone of the star base.' },
+        { match: ['seat', 'cushion', 'pan'], action: 'press_fit', text: 'Refit the seat onto the cylinder and press down firmly to seat the taper.' },
       ],
     },
     // Diagnose = symptom → likely part. symptoms[0] is the chip label; every
@@ -212,14 +212,17 @@ const CONTENT = {
     // "IKEA Markus Assembly Guide", and the manuall.co.uk MARKUS page
     // (owner FAQ: common failures and spares).
     about: 'The IKEA Markus (designer Henrik Preutz, art. 702.611.50) is a high-back swivel office chair rated to 110 kg, certified EN 1335, with a 10-year warranty. Backrest: breathable Vissle dark-grey mesh (100% polyester, min 90% recycled) in two layers over a powder-coated steel frame, with a lumbar support band sewn in at belt height and a fixed headrest. Armrests: fixed height (no adjustable version exists), identical left/right, padded with polypropylene and synthetic rubber. Seat: 35 kg/m³ polyurethane foam on laminated wood veneer. Base: powder-coated aluminium five-star on twin-wheel safety casters that brake automatically when nobody sits in the chair, so it never rolls away when you stand up. Controls: the RIGHT paddle under the seat is the height lever (lift while seated to sink, unweight to rise, 46–57 cm); the LEFT lever is the recline lock — the backrest is sprung forward, unlock to rock, lock upright (3 positions); the knob under the seat front-centre sets tilt tension (turn + for more resistance, − for less). Assembly hardware (manual AA-251870-21): 6 countersunk screws #122134, 5 flange bolts #115994 (2 fix the tilt mechanism to the seat, 3 fix the backrest bracket), one allen key #124345, 5 press-in casters #100049021 — push casters straight in, never at an angle; pull the transport cap off the gas cylinder before fitting; start all 3 backrest bolts loosely before tightening; lowering the assembled chair onto the cylinder is a two-person lift. IKEA warns that only trained personnel may replace or repair the gas spring (energy accumulator). Known aging failures from owners: the gas lift loses pressure (replaceable, standard taper fit), the tilt-mechanism frame can crack after years of heavy use, and taper joints seize — freeing the cylinder from the seat mechanism or base needs firm taps with a rubber mallet.',
+    // `action` picks the motion primitive (fixanim.js) each step animates with —
+    // the same verbs the DGPT planner chooses from, so the no-AI fallback moves
+    // exactly like a generated plan.
     fix: {
       title: 'Fix a sinking Markus — replace the gas lift',
       steps: [
-        { match: ['seat'], text: 'Tip the chair on its side and undo the tilt-mechanism fasteners under the seat: two flange bolts and two countersunk screws, using the allen key that came with the chair.' },
-        { match: ['cylinder', 'gas', 'lift'], text: 'Free the old cylinder from the mechanism plate — the taper joint seizes over time, so tap the plate around the cone with a rubber mallet, never pry against the seat.' },
-        { match: ['star'], text: 'Knock the cylinder out of the star base the same way, then stand the base upright with all five casters flat on the floor.' },
-        { match: ['cylinder', 'gas', 'lift'], text: 'Drop the new gas lift into the base cone, thin end down — and if it shipped with a transport cap, pull that off first.' },
-        { match: ['seat'], text: 'Refit the seat and mechanism onto the cylinder and sit down firmly — your weight locks the taper. IKEA notes gas-spring service is for trained hands, so work carefully.' },
+        { match: ['seat'], action: 'unscrew', text: 'Tip the chair on its side and undo the tilt-mechanism fasteners under the seat: two flange bolts and two countersunk screws, using the allen key that came with the chair.' },
+        { match: ['cylinder', 'gas', 'lift'], action: 'tap_loose', text: 'Free the old cylinder from the mechanism plate — the taper joint seizes over time, so tap the plate around the cone with a rubber mallet, never pry against the seat.' },
+        { match: ['star'], action: 'tap_loose', text: 'Knock the cylinder out of the star base the same way, then stand the base upright with all five casters flat on the floor.' },
+        { match: ['cylinder', 'gas', 'lift'], action: 'install', text: 'Drop the new gas lift into the base cone, thin end down — and if it shipped with a transport cap, pull that off first.' },
+        { match: ['seat'], action: 'press_fit', text: 'Refit the seat and mechanism onto the cylinder and sit down firmly — your weight locks the taper. IKEA notes gas-spring service is for trained hands, so work carefully.' },
       ],
     },
     // symptoms[0] is the chip label; every string is also a voice-match keyword
@@ -305,11 +308,11 @@ const CONTENT = {
     fix: {
       title: 'Replace a piston',
       steps: [
-        { match: ['cylinder', 'head'], text: 'Remove the cylinder head bolts to expose the piston.' },
-        { match: ['piston'], text: 'Slide the old piston out of its bore.' },
-        { match: ['ring'], text: 'Fit new rings, gaps staggered around the piston.' },
-        { match: ['piston'], text: 'Insert the new piston squarely into the bore.' },
-        { match: ['cylinder', 'head'], text: 'Refit the head and torque the bolts in a cross pattern.' },
+        { match: ['cylinder', 'head'], action: 'unscrew', text: 'Remove the cylinder head bolts to expose the piston.' },
+        { match: ['piston'], action: 'remove', text: 'Slide the old piston out of its bore.' },
+        { match: ['ring'], action: 'install', text: 'Fit new rings, gaps staggered around the piston.' },
+        { match: ['piston'], action: 'install', text: 'Insert the new piston squarely into the bore.' },
+        { match: ['cylinder', 'head'], action: 'screw_in', text: 'Refit the head and torque the bolts in a cross pattern.' },
       ],
     },
     diagnose: [
@@ -440,7 +443,7 @@ export function resolveFix(modelKey, parts) {
   if (authored) {
     return {
       title: authored.title,
-      steps: authored.steps.map((s) => ({ indices: findParts(parts, s.match), text: s.text })),
+      steps: authored.steps.map((s) => ({ indices: findParts(parts, s.match), action: s.action || 'inspect', text: s.text })),
     };
   }
   return genericTeardown(parts);
@@ -573,6 +576,6 @@ export function resolveQuiz(modelKey, parts) {
 function genericTeardown(parts) {
   const n = Math.min(parts.length, 6);
   const steps = [];
-  for (let i = 0; i < n; i++) steps.push({ indices: [i], text: `Remove ${parts[i].name}.` });
+  for (let i = 0; i < n; i++) steps.push({ indices: [i], action: 'remove', text: `Remove ${parts[i].name}.` });
   return { title: 'Teardown', steps };
 }
