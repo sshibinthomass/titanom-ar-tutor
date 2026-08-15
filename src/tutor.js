@@ -171,6 +171,62 @@ export async function answerDiagnosis(ctx, { symptom, part, reference, question 
 }
 
 /**
+ * Assemble-puzzle guidance, spoken when a piece doesn't go in.
+ *
+ * Phrased as an **instruction, not a correction**: name the part that goes on
+ * next and why it has to come first. The learner already knows the drop failed —
+ * the shake and the flash said so — and being told "not yet, that's the seat"
+ * adds a scold on top without adding information. What they need is the part to
+ * reach for. So the wrong attempt is context for the model, never something it
+ * repeats back.
+ *
+ * Kept to one spoken sentence because it fires mid-build, and grounded in the
+ * authored order so it explains this chair's real sequence rather than one it
+ * invented.
+ *
+ * ctx: getContext() result. opts: { attempted, expected, stepText }.
+ */
+export async function explainNextPart(ctx, { attempted, expected, stepText }) {
+  const fallback = `The ${expected} goes on next. ${stepText}`;
+
+  const trace = startTrace('ai-assemble-next-part', {
+    input: `${attempted} → ${expected}`,
+    metadata: { model: ctx.modelLabel, attempted, expected },
+  });
+
+  if (!aiAvailable()) {
+    trace.end({ output: fallback, metadata: { aiAvailable: false } });
+    return fallback;
+  }
+
+  const system = [
+    'You are an augmented-reality assembly tutor speaking out loud to a learner.',
+    `They are building a ${ctx.modelLabel}. The part that goes on next is the "${expected}".`,
+    `The step is: ${stepText}`,
+    `Say in ONE short spoken sentence which part to fit next and why it has to go on before the rest — a physical reason (what it bolts to, what has to support it, what it would block). Start with the "${expected}".`,
+    // They just tried the wrong piece; that is context for you, not something to
+    // repeat. Telling them they were wrong adds nothing they don't already know.
+    `Do NOT mention that they made a mistake, and do not refer to the "${attempted}" as a wrong choice. No "not yet", no "instead", no correction language — just say what to fit and why.`,
+    'Be direct and practical. Do not invent measurements, tools or part names. No markdown, no lists.',
+    ctx.diagnostics && `Reference knowledge for this model: ${ctx.diagnostics}`,
+  ].filter(Boolean).join(' ');
+
+  try {
+    const answer = await chat(
+      [{ role: 'system', content: system },
+       { role: 'user', content: `What goes on next, and why does the ${expected} have to go on first?` }],
+      { temperature: 0.3, maxTokens: 90, trace, name: 'assemble-next-part' }
+    );
+    trace.end({ output: answer });
+    return answer;
+  } catch (e) {
+    console.warn('explainNextPart failed:', e.message);
+    trace.end({ output: fallback, metadata: { error: e.message } });
+    return fallback;
+  }
+}
+
+/**
  * Answer a free-form question about the current object via DeutschlandGPT.
  * context: { modelLabel, parts:[names], mode, focusedPart }
  * opts.focusOnly: constrain the answer to `context.focusedPart` alone — used by

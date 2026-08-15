@@ -2,12 +2,14 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { buildExplodedView, setExplode, isolateParts, clearPartStates, setHighlight, findParts } from './explode.js';
-import { attachPicker } from './select.js';
+import { attachPicker, attachDragger } from './select.js';
 import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames, knowledgeDigest, describePart } from './modes.js';
-import { isARSupported, startAR, updateAR, endAR, requestMove } from './ar.js';
+import { isARSupported, startAR, updateAR, endAR, requestMove, setInteractor, setManipulationEnabled, setPivotScale, getFitScale } from './ar.js';
+import { startPuzzle, stopPuzzle, updatePuzzle, puzzleInteractor, isPuzzleActive, puzzleAutoPlace, puzzleHintIndices, puzzleStatus } from './puzzle.js';
 import { speak, stop as stopSpeaking } from './tts.js';
+import { primeSfx, playSfx } from './sfx.js';
 import { createRecognizer, speechRecognitionAvailable } from './voice.js';
-import { classifyCommand, answerQuestion, looksLikeQuestion, answerDiagnosis } from './tutor.js';
+import { classifyCommand, answerQuestion, looksLikeQuestion, answerDiagnosis, explainNextPart } from './tutor.js';
 import { initTelemetry, track } from './telemetry.js';
 
 // ---- Model registry --------------------------------------------------------
@@ -17,6 +19,10 @@ import { initTelemetry, track } from './telemetry.js';
 // '/models/…' would wrongly point at the domain root on Pages.
 const BASE_URL = import.meta.env.BASE_URL;
 
+// `realHeight` is the object's true height in metres. AR normally fits the model
+// to a ~0.7 m tabletop size, which is fine for looking at but wrong for learning:
+// the point of the Assemble puzzle is that reaching for a part in the room
+// rehearses the real thing, so the puzzle asks AR for life-size instead.
 const MODELS = {
   'office-chair': {
     label: 'Office Chair',
@@ -24,6 +30,7 @@ const MODELS = {
     credit: 'Office Chair Modern — thethieme, CC-BY-4.0',
     creditUrl: 'https://sketchfab.com/3d-models/office-chair-modern-675f34f7304e4d92812a41e9750539aa',
     defaultMode: 'component', // single fused mesh → must split by connected pieces
+    realHeight: 1.05,
   },
   'markus-chair': {
     label: 'IKEA Markus Chair',
@@ -31,6 +38,7 @@ const MODELS = {
     credit: 'IKEA Markus Office Chair — Graham Rust, Sketchfab Standard',
     creditUrl: 'https://sketchfab.com/3d-models/ikea-markus-office-chair-cee12c29ebda4bcdb91b84a6f126a971',
     defaultMode: 'group', // already 47 separate meshes → one clean part per mesh
+    realHeight: 1.29,     // IKEA spec: 129 cm to the top of the headrest
   },
   bicycle: {
     label: 'Bicycle',
@@ -38,6 +46,7 @@ const MODELS = {
     credit: 'bicycle — local.yany, CC-BY-4.0',
     creditUrl: 'https://sketchfab.com/3d-models/bicycle-8db2d442b58045baac2edfc5e9ee11e3',
     defaultMode: 'group', // 14 meshes, one per material → clean semantic parts
+    realHeight: 1.05,
   },
   bed: {
     label: 'Bed Low Poly',
@@ -45,6 +54,7 @@ const MODELS = {
     credit: 'Bed Low Poly — LinNacume, CC-BY-4.0',
     creditUrl: 'https://sketchfab.com/3d-models/bed-low-poly-b19855811635449288827767b45d4b38',
     defaultMode: 'component', // single merged mesh → must split by connected pieces
+    realHeight: 0.6,
   },
 };
 
@@ -137,6 +147,7 @@ let parts = [];
 let explodedGroup = null;
 let originalScene = null;
 let modelRadius = 1;
+let modelHeight = 1;   // local-unit height at rest; the basis for AR life-size sizing
 
 function currentModel() {
   return MODELS[ui.model.value];
@@ -154,6 +165,11 @@ ui.model.value = 'office-chair';
 // Telemetry: one Langfuse session per page load. Tracks voice, AI, modes, AR,
 // TTS and errors. No-op (and never throws) when Langfuse isn't configured.
 initTelemetry({ initialModel: ui.model.value });
+
+// Generate the puzzle's ElevenLabs sound cues now, not when Assemble opens:
+// generation takes seconds, and they'd miss the moment they punctuate. Cached
+// in localStorage, so this is one round of requests per browser, ever.
+primeSfx();
 
 // ---- Load + build ----------------------------------------------------------
 
@@ -190,6 +206,7 @@ function loadModel(key) {
 }
 
 function rebuild() {
+  stopPuzzle(); // must release the ghosts before the geometry they borrow is disposed
   if (explodedGroup) {
     scene.remove(explodedGroup);
     for (const p of parts) p.mesh.geometry.dispose();
@@ -223,11 +240,19 @@ function rebuild() {
   });
 }
 
-function frameModel() {
+// `fit` widens the camera pull-back — the Assemble puzzle scatters parts in a
+// ring well outside the model's own bounds, so it needs a roomier framing.
+function frameModel(fit = 1) {
   const box = new THREE.Box3().setFromObject(explodedGroup);
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
-  modelRadius = Math.max(size.x, size.y, size.z) * 0.5 || 1;
+  // While the puzzle has parts scattered the bounding box is meaningless as a
+  // measure of the object, so keep the at-rest figures the whole app derives
+  // from (explode range, ground size, AR life-size scale).
+  if (!isPuzzleActive()) {
+    modelRadius = Math.max(size.x, size.y, size.z) * 0.5 || 1;
+    modelHeight = size.y || 1;
+  }
 
   // Drop model onto the ground plane and centre it at origin X/Z.
   explodedGroup.position.set(-center.x, -box.min.y, -center.z);
@@ -243,7 +268,7 @@ function frameModel() {
   sc.updateProjectionMatrix();
 
   controls.target.set(0, size.y * 0.5, 0);
-  const dist = modelRadius * 3.2;
+  const dist = modelRadius * 3.2 * fit;
   camera.position.set(dist * 0.8, size.y * 0.6 + dist * 0.4, dist * 0.9);
   camera.near = modelRadius * 0.01;
   camera.far = modelRadius * 200;
@@ -291,8 +316,12 @@ function highlight(index, on) {
 
 function onExplodeChange() {
   const amount = parseFloat(ui.explode.value);
-  setExplode(parts, amount);
-  groundExploded(); // exploding pushes parts every direction incl. down — keep them above the floor
+  // The puzzle owns every part's position while it runs — setExplode would yank
+  // the piece out of the user's hand and undo the scatter.
+  if (!isPuzzleActive()) {
+    setExplode(parts, amount);
+    groundExploded(); // exploding pushes parts every direction incl. down — keep them above the floor
+  }
   ui.explodeVal.textContent = amount.toFixed(2);
   // Keep the Explore card's inline slider in step with the panel slider.
   if (cardExplode) {
@@ -419,6 +448,8 @@ function enterMode(id) {
   currentMode = id;
   setModeButtons(id);
   cardExplode = null; // drop any stale inline slider before the card is rebuilt
+  stopPuzzle();       // before resetParts, which assumes it owns part positions
+  applyARInteraction();
   resetParts();
   selectedPart = -1;
   if (!parts.length) { hideCard(); return; }
@@ -469,28 +500,13 @@ function enterFix() {
   mildExplode();
   renderStep();
 }
-function enterAssemble() {
-  const proc = resolveAssemble(currentKey(), parts);
-  steps = proc.steps; stepIndex = 0; stepTitle = proc.title; stepKicker = 'Assemble';
-  ui.explode.value = 0; onExplodeChange();
-  renderStep();
-}
 function renderStep() {
   const title = stepTitle, kicker = stepKicker;
   if (!steps.length) { showCard(kicker, 'No procedure for this model yet.'); return; }
   const s = steps[stepIndex];
   const stepIndices = s.indices || [];
 
-  if (kicker === 'Assemble') {
-    // Progressive build-up: reveal every part added in steps 0..stepIndex.
-    const shown = new Set();
-    for (let k = 0; k <= stepIndex; k++) (steps[k].indices || []).forEach((i) => shown.add(i));
-    parts.forEach((p, i) => { p.mesh.visible = shown.has(i); });
-    clearPartStates(parts);
-    for (const i of stepIndices) setHighlight(parts[i], true); // glow the just-added group
-  } else {
-    isolateParts(parts, stepIndices); // spotlight this step's part(s), dim the rest
-  }
+  isolateParts(parts, stepIndices); // spotlight this step's part(s), dim the rest
 
   const partName = stepIndices.length ? parts[stepIndices[0]].name : null;
   focusedPart = partName;
@@ -511,6 +527,168 @@ function goStep(delta) {
 }
 ui.stepPrev.addEventListener('click', () => goStep(-1));
 ui.stepNext.addEventListener('click', () => goStep(1));
+
+// --- Assemble: drag-to-build puzzle -----------------------------------------
+// The parts scatter in a ring, the current slot is drawn as a ghost, and the
+// user drags the piece they think comes next into it. The engine (puzzle.js)
+// owns all the 3D; this section owns the card, the voice, and the AI correction.
+
+let hintTimer = null;
+let wrongSeq = 0;     // newest wrong answer wins if two corrections race
+let arLifeSize = false;
+
+function enterAssemble() {
+  const proc = resolveAssemble(currentKey(), parts);
+  steps = proc.steps; stepIndex = 0; stepTitle = proc.title; stepKicker = 'Assemble';
+  ui.explode.value = 0; onExplodeChange();
+  if (!steps.length) { showCard('Assemble', 'No procedure for this model yet.'); return; }
+
+  startPuzzle({
+    group: explodedGroup, parts, steps, radius: modelRadius,
+    onStep: onPuzzleStep,
+    onCorrect: onPuzzleCorrect,
+    onWrong: onPuzzleWrong,
+    onCarry: onPuzzleCarry,
+    onComplete: onPuzzleComplete,
+  });
+  playSfx('dismantle'); // rides the opening teardown startPuzzle just kicked off
+  track('puzzle-start', { metadata: { model: ui.model.value, steps: steps.length } });
+
+  applyARInteraction();                                  // life-size + lock the board in AR
+  if (!renderer.xr.isPresenting) frameModel(2.1);        // pull back to take in the scatter ring
+}
+
+/**
+ * Reconcile AR with whether a puzzle is running.
+ *
+ * Two things change: whole-model gestures are retired (a drag must never slide
+ * the board out from under the piece being placed — voice "move it" still
+ * repositions), and the model is shown life-size rather than at the ~0.7 m
+ * tabletop fit, so reaching for a part rehearses the real reach.
+ */
+function applyARInteraction() {
+  if (!renderer.xr.isPresenting) { arLifeSize = false; return; }
+  const puzzling = isPuzzleActive();
+  setManipulationEnabled(!puzzling);
+
+  if (puzzling && !arLifeSize) {
+    const fit = getFitScale();                  // ar.js's fit-to-0.7 m group scale
+    const real = currentModel().realHeight;
+    if (real && modelHeight && fit) { setPivotScale(real / (modelHeight * fit)); arLifeSize = true; }
+  } else if (!puzzling && arLifeSize) {
+    setPivotScale(1);                           // back to the tabletop fit
+    arLifeSize = false;
+  }
+}
+
+// `done` overrides how many steps count as finished — on a correct placement the
+// engine hasn't advanced yet, but the bar should already show the win.
+function renderPuzzleCard(bodyHtml, meta, done) {
+  const st = puzzleStatus();
+  if (!st) return;
+  const pct = Math.round(((done ?? st.stepIndex) / st.total) * 100);
+  showCard('Assemble',
+    `${bodyHtml}<div class="progress"><i style="width:${pct}%"></i></div>`,
+    meta,
+    { chips: [
+      { label: '💡 Hint', onClick: puzzleHint },
+      { label: '✋ Place it for me', onClick: () => { track('puzzle-assist'); puzzleAutoPlace(); } },
+    ] });
+}
+
+function puzzleMeta() {
+  const st = puzzleStatus();
+  const misses = st.mistakes ? ` · ${st.mistakes} wrong ${st.mistakes === 1 ? 'try' : 'tries'}` : '';
+  return `Step ${st.stepIndex + 1} of ${st.total}${misses}`;
+}
+
+// A new step is armed: ask which part comes next — and do NOT name it. The
+// naming line is the reward for getting it right (see onPuzzleCorrect).
+function onPuzzleStep({ index, step }) {
+  focusedPart = null; // don't leak the answer into the tutor's context
+  const how = index === 0
+    ? 'Drag the right piece into the glowing outline.'
+    : '';
+  renderPuzzleCard(
+    `<b>${step.prompt}</b>${how ? `<span class="partdesc">${how}</span>` : ''}`,
+    puzzleMeta()
+  );
+  say(index === 0 ? `${step.prompt} Drag the right piece into the glowing outline.` : step.prompt);
+}
+
+function onPuzzleCorrect({ step, assisted }) {
+  focusedPart = step.name || null;
+  playSfx('snap'); // lands on the placement; the spoken line follows a beat later
+  const lead = assisted ? 'That one is the' : 'Yes — the';
+  renderPuzzleCard(
+    `<b>${assisted ? '' : '✅ '}${step.name}</b><span class="partdesc">${step.text}</span>`,
+    puzzleMeta(),
+    puzzleStatus().stepIndex + 1
+  );
+  say(`${lead} ${step.name}. ${step.text}`);
+  track(assisted ? 'puzzle-assist-placed' : 'puzzle-correct', {
+    metadata: { model: ui.model.value, part: step.name },
+  });
+}
+
+/**
+ * A piece didn't go in. The shake and the red flash are puzzle.js's job and
+ * already say the drop failed, so the words don't repeat that — they name the
+ * part to reach for instead. `expected` leads; the tutor then adds why it has to
+ * come first. Falls back to the step's own instruction line whenever
+ * DeutschlandGPT is unreachable, so the guidance is never silent.
+ */
+async function onPuzzleWrong({ step, attempted, expected }) {
+  const seq = ++wrongSeq;
+  playSfx('reject'); // immediate, unlike the AI line below
+  const next = `The ${expected} goes on next.`;
+  renderPuzzleCard(`<b>${next}</b><span class="partdesc">${step.text}</span>`, puzzleMeta());
+  showCaption(next);
+  track('puzzle-wrong', { metadata: { model: ui.model.value, attempted, expected } });
+
+  const why = await explainNextPart(getContext(), { attempted, expected, stepText: step.text });
+  if (seq !== wrongSeq || !isPuzzleActive()) return; // superseded, or the mode changed
+  renderPuzzleCard(`<b>${next}</b><span class="partdesc">${why}</span>`, puzzleMeta());
+  showCaption(why);
+  say(why);
+}
+
+// Picking a part up focuses it for the tutor, so "what is this?" works mid-drag
+// without naming it on screen — the question stays the user's to answer.
+function onPuzzleCarry(index) {
+  focusedPart = index >= 0 ? parts[index].name : null;
+}
+
+function onPuzzleComplete({ mistakes, assists }) {
+  focusedPart = null;
+  const clean = mistakes === 0 && assists === 0;
+  const line = clean
+    ? 'Built it start to finish without a single wrong piece. That is the real assembly order.'
+    : `Built. ${mistakes} wrong ${mistakes === 1 ? 'try' : 'tries'}${assists ? `, ${assists} placed for you` : ''} — run it again and see if you can go clean.`;
+  showCard('Assemble', `<b>🎉 ${currentModel().label} assembled</b><span class="partdesc">${line}</span>`, 'Complete', {
+    chips: [
+      { label: '🔁 Build it again', onClick: () => enterMode('assemble') },
+      { label: '🔍 Explore it', onClick: () => enterMode('explore') },
+    ],
+  });
+  say(line);
+  track('puzzle-complete', { metadata: { model: ui.model.value, mistakes, assists } });
+}
+
+// Hint: glow the piece the step wants, briefly. Deliberately a separate act from
+// the prompt — asking for it is the learner's choice, not the default.
+function puzzleHint() {
+  const indices = puzzleHintIndices();
+  if (!indices.length) return;
+  clearTimeout(hintTimer);
+  for (const i of indices) setHighlight(parts[i], true);
+  hintTimer = setTimeout(() => {
+    if (!isPuzzleActive()) return;
+    for (const i of indices) setHighlight(parts[i], false);
+  }, 2600);
+  showCaption('That one — drag it into the outline.');
+  track('puzzle-hint');
+}
 
 // --- Diagnose: pick a symptom → highlight the likely part ---
 function enterDiagnose() {
@@ -605,6 +783,11 @@ attachPicker(renderer, camera, () => parts, (index) => {
     revealQuiz();
   }
 });
+
+// --- Part dragging (Assemble puzzle) — the desktop half of the input contract.
+// The AR half is registered on the session in startARFlow; both feed the same
+// engine, so a build behaves identically on a laptop and through a phone.
+attachDragger(renderer, camera, controls, puzzleInteractor);
 
 // ---- Tutor context, voice commands, AR -------------------------------------
 
@@ -766,11 +949,14 @@ async function runCommand(cmd) {
   if (cmd.mode) { enterMode(cmd.mode); return; }
   switch (cmd.action) {
     case 'next':
-      if (currentMode === 'fix' || currentMode === 'assemble') goStep(1);
+      // In the puzzle there is nothing to skip to — "next" means "do it for me".
+      if (isPuzzleActive()) { track('puzzle-assist', { metadata: { via: 'voice' } }); puzzleAutoPlace(); }
+      else if (currentMode === 'fix') goStep(1);
       else if (currentMode === 'quiz') nextQuiz();
       break;
     case 'back':
-      if (currentMode === 'fix' || currentMode === 'assemble') goStep(-1);
+      if (isPuzzleActive()) puzzleHint();   // no going back mid-build; offer the hint instead
+      else if (currentMode === 'fix') goStep(-1);
       break;
     case 'repeat': say(lastSpoken); break;
     case 'reset': enterMode(currentMode); break;
@@ -870,8 +1056,14 @@ async function startARFlow() {
       overlay: document.body,
       onPlaced: () => {
         track('ar-placed', { metadata: { model: ui.model.value } });
-        showCaption('Placed! Long-press to grab it, then drag to move · pinch to zoom · twist to rotate.');
-        say('Placed. Press and hold the object to grab it, then drag to move it, or pinch to resize.');
+        applyARInteraction(); // pivot exists only once placed — size + lock it now
+        if (isPuzzleActive()) {
+          showCaption('Placed at full size. Drag each part into the glowing outline. Say “move it” to re-place the build.');
+          say('Placed, at full size. Drag each part into the glowing outline.');
+        } else {
+          showCaption('Placed! Long-press to grab it, then drag to move · pinch to zoom · twist to rotate.');
+          say('Placed. Press and hold the object to grab it, then drag to move it, or pinch to resize.');
+        }
       },
       onSelectedChange: (sel) => {
         track(sel ? 'ar-select' : 'ar-deselect');
@@ -879,8 +1071,9 @@ async function startARFlow() {
           ? 'Grabbed — drag to move · pinch to zoom · twist to rotate · tap to release.'
           : 'Released. Long-press the object again to move or resize it.');
       },
-      onEnd: () => { document.body.classList.remove('ar-active'); track('ar-exit'); },
+      onEnd: () => { document.body.classList.remove('ar-active'); arLifeSize = false; track('ar-exit'); },
     });
+    setInteractor(puzzleInteractor); // the finger's target ray drives part dragging
     showCaption('Point at the floor, then tap to place the chair.');
   } catch (e) {
     console.error('AR failed', e);
@@ -943,8 +1136,12 @@ function resize() {
 
 // setAnimationLoop works both for normal rAF and inside a WebXR session
 // (three.js passes the XRFrame as the 2nd arg during an AR session).
+let lastFrameTime = 0;
 renderer.setAnimationLoop((time, frame) => {
+  const dt = lastFrameTime ? (time - lastFrameTime) / 1000 : 0;
+  lastFrameTime = time;
   if (frame) updateAR(frame);
+  updatePuzzle(dt); // damped carry + snap/reject tweens + ghost pulse (no-op when idle)
   if (!renderer.xr.isPresenting) {
     resize();
     controls.autoRotate = ui.autorotate.checked;

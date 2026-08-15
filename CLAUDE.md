@@ -38,10 +38,12 @@ modules are focused, mostly-pure helpers it calls.
 |------|----------------|
 | [src/main.js](src/main.js) | App shell: renderer/scene/camera/lights, model registry, UI wiring, mode state machine, voice + AR glue, render loop. |
 | [src/explode.js](src/explode.js) | The **core**. Splits a glTF into parts and drives the exploded view + per-part highlight/dim/isolate. |
-| [src/modes.js](src/modes.js) | The 5 modes + **authored per-model content** (fix steps, diagnoses, quizzes) and semantic part names. |
-| [src/select.js](src/select.js) | Raycast tap/click part-picking (drag threshold so orbiting ≠ tapping). |
-| [src/ar.js](src/ar.js) | WebXR `immersive-ar` session: hit-test reticle, tap-to-place, long-press to grab then one-finger drag-to-move / pinch scale + twist rotate; voice "move it" re-places on a fresh anchor. |
+| [src/modes.js](src/modes.js) | The 5 modes + **authored per-model content** (fix steps, assemble prompts, diagnoses, quizzes) and semantic part names. |
+| [src/puzzle.js](src/puzzle.js) | Assemble's drag-to-build engine: scatter, ghost slots, snap magnetism, reject. Surface-agnostic — driven by a world-space ray. |
+| [src/select.js](src/select.js) | Raycast tap/click part-picking (drag threshold so orbiting ≠ tapping) + the desktop part-dragger. |
+| [src/ar.js](src/ar.js) | WebXR `immersive-ar` session: hit-test reticle, tap-to-place, long-press to grab then one-finger drag-to-move / pinch scale + twist rotate; voice "move it" re-places on a fresh anchor. Also hands the finger's target ray to an **interactor** (the puzzle). |
 | [src/tts.js](src/tts.js) | Text-to-speech. ElevenLabs primary, browser `speechSynthesis` fallback. |
+| [src/sfx.js](src/sfx.js) | The puzzle's sound cues (snap / reject / dismantle). ElevenLabs **sound generation**, pre-generated + cached; WebAudio synth fallback. |
 | [src/voice.js](src/voice.js) | Speech-to-text via Web Speech API (`SpeechRecognition`), auto-restarting recognizer. |
 | [src/ai.js](src/ai.js) | DeutschlandGPT chat client (OpenAI-compatible `/chat/completions`). |
 | [src/tutor.js](src/tutor.js) | "Brain" glue: classify a spoken phrase into an app command vs. a free-form question, then answer via AI with context. |
@@ -76,7 +78,7 @@ only the card content and which parts are lit change:
 
 1. **Explore** — tap a part → isolate + name it.
 2. **Fix** — ordered repair steps; Next/Back spotlights each step's part(s).
-3. **Assemble** — progressive build-up; each step *reveals* the group added.
+3. **Assemble** — a **drag-to-build puzzle** (see below); the user places each group.
 4. **Diagnose** — pick a symptom chip → highlight the likely part.
 5. **Quiz** — highlight a part, ask the user to name it.
 
@@ -90,6 +92,95 @@ raw indices are mapped to real names (Backrest, Gas cylinder, Armrest, Seat,
 Star base, Caster×5, Base hub, Height lever) in `SEMANTIC_NAMES['office-chair']`.
 Several islands share a name (5 casters), so highlighting a name lights the whole
 group.
+
+### The Assemble puzzle (`puzzle.js`)
+
+Assemble is the one mode that is *interactive* rather than narrated: parts
+scatter in a ring on the floor, the current step's slot is drawn as a
+translucent ghost, and the user drags the piece they think comes next into it.
+Right piece → it snaps and the group settles; wrong piece → red flash, shake,
+and the tutor says **why** that part comes later.
+
+Three design rules hold the learning value; don't quietly undo them:
+
+- **Prompt before label.** `ASSEMBLE_PROMPT` asks by function or position and
+  never names the part; `ASSEMBLE_TEXT` (the naming line) is spoken only *after*
+  a correct placement. Naming it up front turns recall into fetching.
+- **A failed drop points forward, not back.** The shake and the red flash
+  already say the drop failed, so the words don't repeat it: they name the part
+  to reach for. `explainNextPart()` (tutor.js) leads with the expected part and
+  adds why it comes first, and is explicitly told never to mention the wrong
+  attempt or use correction language ("not yet", "instead"). It degrades to the
+  step's own instruction line, so the guidance is never silent. Don't reintroduce
+  "that's the X" phrasing — it scolds without adding information the learner
+  doesn't already have.
+- **One correct drop places the whole semantic group.** A step is a group (5
+  casters; the Markus has *15* caster pieces) — dragging each one is busywork
+  after the first. Dropping any member into any of that step's slots counts.
+
+Entering the mode (and "Build it again") opens by **taking the assembled object
+apart** rather than cutting to a pile: `scatter({ animate, stagger })` releases
+one group per `SCATTER_STAGGER` in *reverse* build order, so it reads as a
+teardown from the top down — and the learner sees the finished object once
+before being asked to rebuild it. The ghost is held hidden (`state.ghostHold`)
+until the teardown clears, or the first slot's outline would glow inside the
+part still sitting in it. Between steps the remaining parts *glide* to their new
+ring positions (animated, no stagger) so a piece you were eyeing doesn't
+teleport.
+
+**Everything is measured in the exploded group's local space**, which is what
+makes one implementation correct on both surfaces: geometry is baked at build
+time so a part's slot is simply "where its geometry already is"
+(`restPosition` is 0), and converting the pointer ray with `worldToLocal` cancels
+out the AR pivot's user scale (verified 0.35×–3.1×), its yaw, and the per-frame
+anchor refinement. A carried part is a child of the group, so anchor refinement
+carries it along instead of fighting it.
+
+Input is abstracted to a **world-space ray**, so both surfaces share the engine:
+- **desktop** — `attachDragger` (select.js) builds it from camera + cursor.
+- **AR** — ar.js reads the XR input source's target ray (`targetRayMode:
+  'screen'` — the finger) from `selectstart` to `selectend`. Do *not* try to
+  rebuild NDC against the XR `ArrayCamera`; the target ray is exact and is read
+  in the same reference space as the anchor.
+
+### Sound cues (`sfx.js`)
+
+Three cues — `snap`, `reject`, `dismantle` — generated by **ElevenLabs sound
+generation** (`POST /v1/sound-generation`, same `VITE_ELEVENLABS_API_KEY` as the
+voice), prompted in words like everything else here.
+
+The constraint that shapes the module: generation takes *seconds*, so nothing is
+ever fetched on demand — a cue requested when the part lands would arrive long
+after the moment it punctuates. `primeSfx()` runs once at startup, the mp3 is
+cached in **localStorage** (base64) so it is one request per browser ever, and
+it is decoded to an AudioBuffer so playback is a zero-latency WebAudio call
+rather than an `<audio>` element (which stutters when re-triggered). Anything
+asked for before its clip is ready falls straight through to a small WebAudio
+**synth** — as does everything when no key is set. Feedback is never delayed
+waiting on the network.
+
+Bump `CACHE_VERSION` when you edit a prompt, or browsers keep the old sound.
+Keep the prompts short, physical and explicitly non-musical: the tutor starts
+speaking a beat after each cue, and a cue that turns into a jingle fights it.
+
+**Snap magnetism** (`applyAssist`) is not polish, it is load-bearing. A drag
+rides at the distance the part was grabbed at, but the slot sits at the centre of
+the scatter ring — up to a ring radius nearer or further — so a pointer that is
+dead-on in screen terms is still far off in depth. Reach is therefore measured
+*perpendicular to the carry ray* against the **slot centre** (the ghost you aim
+at, not the mesh origin), while the pull applies in all three axes. It is a
+**persistent blend** (`held.assist`, eased 0→1), because `move()` rewrites the
+raw target from the live ray every frame and any one-shot nudge would be
+discarded before it accumulated. Both of those were real bugs; the symptom is a
+part that hovers in front of the slot and never snaps.
+
+Stability in AR rests on: the local-space maths above, damped carry (the same
+exponential smoothing the reticle uses — a hand-held phone ray is noisy), and
+`setManipulationEnabled(false)` while a puzzle runs, which retires the
+whole-model gestures so a drag can never slide the board out from under the
+build. Voice "move it" still repositions. The puzzle also asks AR for
+**life-size** (`MODELS[*].realHeight` ÷ the 0.7 m fit) rather than tabletop
+scale, so reaching for a part rehearses the real reach.
 
 > ⚠️ Those semantic indices come from the **deterministic** component split of
 > this exact GLB (verified via bounding-box positions). **If a model is

@@ -40,3 +40,59 @@ export function attachPicker(renderer, camera, getParts, onPick) {
     }
   });
 }
+
+/**
+ * Mouse/touch drag for the Assemble puzzle — the desktop half of the input
+ * contract in puzzle.js (ar.js is the other half). It builds a world-space ray
+ * from the camera through the cursor and hands it to the interactor; all the
+ * 3D reasoning stays in puzzle.js so both surfaces behave identically.
+ *
+ * The interactor decides whether a press actually grabbed anything; only then do
+ * we suppress OrbitControls, so an empty-space drag still orbits the scene. AR
+ * has its own ray source, so this bails out during a session.
+ */
+export function attachDragger(renderer, camera, controls, interactor) {
+  const el = renderer.domElement;
+  const ndc = new THREE.Vector2();
+  const origin = new THREE.Vector3();
+  const direction = new THREE.Vector3();
+  const ray = { origin, direction };
+  let dragging = false;
+
+  function rayAt(e) {
+    const rect = el.getBoundingClientRect();
+    ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    origin.setFromMatrixPosition(camera.matrixWorld);
+    direction.set(ndc.x, ndc.y, 0.5).unproject(camera).sub(origin).normalize();
+    return ray;
+  }
+
+  function end(e) {
+    if (!dragging) return;
+    dragging = false;
+    interactor.release();
+    controls.enabled = true;
+    try { el.releasePointerCapture(e.pointerId); } catch {}
+  }
+
+  el.addEventListener('pointerdown', (e) => {
+    if (renderer.xr.isPresenting || !interactor.active()) return;
+    if (e.button !== undefined && e.button !== 0) return;
+    if (!interactor.grab(rayAt(e))) return;
+    dragging = true;
+    controls.enabled = false; // only once something is actually in hand
+    try { el.setPointerCapture(e.pointerId); } catch {}
+  });
+  el.addEventListener('pointermove', (e) => { if (dragging) interactor.move(rayAt(e)); });
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+
+  // Depth control: a screen drag alone can't change how far away the part is,
+  // so the wheel pushes it away / pulls it closer while it's held.
+  el.addEventListener('wheel', (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    interactor.push(-e.deltaY * 0.0015);
+  }, { passive: false });
+}

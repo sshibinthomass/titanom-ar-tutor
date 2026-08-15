@@ -321,6 +321,31 @@ const ASSEMBLE_ORDER = {
   // hidden. Bottom-up build order.
   'markus-chair': ['Star base', 'Caster', 'Gas cylinder', 'Tilt mechanism', 'Height lever', 'Seat', 'Armrest', 'Backrest', 'Mesh back', 'Headrest'],
 };
+/**
+ * The *question* asked before each Assemble step, and the deliberate inverse of
+ * ASSEMBLE_TEXT below.
+ *
+ * Assemble is a drag-to-build puzzle: the user has to pick the right piece out
+ * of the scattered parts, so the prompt describes the piece by its job or its
+ * position and never names it. The naming line (ASSEMBLE_TEXT) is spoken
+ * *after* a correct placement — as confirmation, not as an instruction. Recall
+ * first, label second; a prompt that gives the answer away reduces the puzzle to
+ * fetching.
+ */
+const ASSEMBLE_PROMPT = {
+  'Star base': 'Start at the floor. Which piece spreads your weight out to five points?',
+  'Caster': 'What makes it roll? Five of these press into the ends of the base arms.',
+  'Base hub': 'Which piece caps the centre of the base so the chair can swivel?',
+  'Gas cylinder': 'What drops into the cone in the middle to raise and lower you?',
+  'Tilt mechanism': 'Which block bolts on top of the cylinder and lets the chair recline?',
+  'Seat': 'What do you actually sit on?',
+  'Backrest': 'Which frame carries your back?',
+  'Mesh back': 'What stretches across the back frame to keep you cool?',
+  'Armrest': 'Where do your forearms rest? Two of these bolt under the seat.',
+  'Headrest': 'What clips onto the very top to support your head?',
+  'Height lever': 'Last piece — what do you lift to change the seat height?',
+};
+
 const ASSEMBLE_TEXT = {
   'Star base': 'Lay out the five-armed star base.',
   'Caster': 'Press a caster into the end of each base arm.',
@@ -348,9 +373,10 @@ export function resolveFix(modelKey, parts) {
 }
 
 /**
- * Assemble = build-up. For models with a semantic order, reveal one group per
- * step (each step's `indices` are the parts ADDED that step). Otherwise reveal
- * the biggest parts one at a time.
+ * Assemble = a drag-to-build puzzle. Each step is one semantic group, in
+ * bottom-up order; `indices` are the parts placed that step, `prompt` is the
+ * question asked before the attempt and `text` the line spoken after it lands.
+ * Models with no authored order fall back to biggest-part-first.
  */
 export function resolveAssemble(modelKey, parts) {
   const order = ASSEMBLE_ORDER[modelKey];
@@ -358,13 +384,21 @@ export function resolveAssemble(modelKey, parts) {
     const steps = [];
     for (const groupName of order) {
       const indices = parts.map((p, i) => (p.name === groupName ? i : -1)).filter((i) => i >= 0);
-      if (indices.length) steps.push({ indices, text: ASSEMBLE_TEXT[groupName] || `Attach the ${groupName.toLowerCase()}.` });
+      if (!indices.length) continue;
+      steps.push({
+        indices,
+        name: groupName,
+        text: ASSEMBLE_TEXT[groupName] || `Attach the ${groupName.toLowerCase()}.`,
+        prompt: ASSEMBLE_PROMPT[groupName] || 'Which part goes on next?',
+      });
     }
     return { title: 'Assemble the chair', steps };
   }
   const steps = parts.map((p, i) => ({
     indices: [i],
+    name: p.name,
     text: i === 0 ? 'Start with the largest part as the base.' : `Attach the next part: ${p.name}.`,
+    prompt: i === 0 ? 'Which is the biggest piece? It goes down first.' : 'Which part goes on next?',
   }));
   return { title: 'Assemble from parts', steps };
 }

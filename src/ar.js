@@ -37,6 +37,13 @@ import * as THREE from 'three';
  *   • voice "move it"  → re-enter placement; tap a new spot to re-place it on a
  *                        fresh anchor (hands-free reposition to another surface)
  *
+ * An **interactor** (the Assemble puzzle) can claim the finger instead: on
+ * `selectstart` we hand it the XR input source's target ray, and if it grabs
+ * something the whole-model gesture path stands down for that touch. While a
+ * puzzle is running, `setManipulationEnabled(false)` retires the one-finger
+ * model-move entirely, so dragging a piece can never slide the board out from
+ * under it — voice "move it" remains the way to reposition.
+ *
  * Scene graph once placed:
  *   anchor (matrix driven by the live XRAnchor pose, on the floor)
  *     └─ pivot (user rotation + scale, about the floor contact point)
@@ -82,6 +89,13 @@ let longPressFired = false; // this press was consumed to select → don't also 
 const LONG_PRESS_MS = 450;
 const MOVE_CANCEL_PX = 12;  // finger travel that turns a press into a drag
 const TAP_MAX_MS = 250;
+
+// Interactor: an optional consumer of the finger's target ray (the Assemble
+// puzzle). See setInteractor / onSelectStart.
+let interactor = null;
+let carrying = false;
+let activeInputSource = null;
+let manipulationEnabled = true;
 
 export async function isARSupported() {
   if (!('xr' in navigator)) return false;
@@ -259,9 +273,13 @@ export async function startAR(opts) {
   pendingAnchorMatrix = null;
   anchorGen = 0;
   lastTime = 0;
+  carrying = false;
+  activeInputSource = null;
   resetStabilizer();
 
   session.addEventListener('select', onSelect);
+  session.addEventListener('selectstart', onSelectStart);
+  session.addEventListener('selectend', onSelectEnd);
   session.addEventListener('end', onSessionEnd);
 
   // Gesture handlers on the dom-overlay (touch), for rotate + scale.
@@ -315,6 +333,88 @@ export function requestMove() {
   }
 }
 
+// ---- Interactor (drag a part, not the model) -------------------------------
+
+/**
+ * Register something that wants the finger's 3D ray — the Assemble puzzle.
+ * Contract: `active()`, `grab(ray) → bool`, `move(ray)`, `release()`. The ray is
+ * `{ origin, direction }` in world space, using scratch vectors that are valid
+ * only for the duration of the call.
+ */
+export function setInteractor(next) {
+  if (carrying && interactor && next !== interactor) { interactor.release(); carrying = false; }
+  interactor = next;
+}
+
+/**
+ * Turn the whole-model gestures (long-press grab, one-finger slide, pinch) on or
+ * off. The puzzle switches them off so a mis-aimed drag can't move the board it
+ * is being assembled on — the biggest source of "it moved on me" in AR.
+ */
+export function setManipulationEnabled(on) {
+  manipulationEnabled = !!on;
+  if (!on) {
+    cancelPressTimer();
+    gesture = null;
+    if (selected) setSelected(false); // only fire the callback on a real change
+  }
+}
+
+/** Override the user transform's scale — used to show the model life-size. */
+export function setPivotScale(mult) {
+  if (pivot && Number.isFinite(mult) && mult > 0) pivot.scale.setScalar(Math.max(0.05, Math.min(20, mult)));
+}
+
+/** The model group's fit scale, so callers can compute a real-world size. */
+export function getFitScale() {
+  return refs && refs.group ? refs.group.scale.x : 1;
+}
+
+const _rayPos = new THREE.Vector3();
+const _rayDir = new THREE.Vector3();
+const _rayQuat = new THREE.Quaternion();
+const _ray = { origin: _rayPos, direction: _rayDir };
+
+/**
+ * The finger as a 3D ray. On a handheld device the input source's
+ * `targetRayMode` is 'screen': the runtime casts the ray from the viewer through
+ * the touch point, which is exactly what we want and is far more accurate than
+ * reconstructing NDC against the XR ArrayCamera. Read in the same reference
+ * space as the anchor and the renderer, so nothing disagrees about the world.
+ */
+function rayFromInput(frame, inputSource) {
+  if (!frame || !inputSource || !inputSource.targetRaySpace || !refs) return null;
+  const refSpace = refs.renderer.xr.getReferenceSpace();
+  if (!refSpace) return null;
+  const pose = frame.getPose(inputSource.targetRaySpace, refSpace);
+  if (!pose) return null;
+  const { position: p, orientation: o } = pose.transform;
+  _rayPos.set(p.x, p.y, p.z);
+  _rayQuat.set(o.x, o.y, o.z, o.w);
+  _rayDir.set(0, 0, -1).applyQuaternion(_rayQuat);
+  return _ray;
+}
+
+// XRInputSourceEvent carries the frame it fired on, so the ray is available at
+// the very start of the touch — no waiting a frame to find out what was grabbed.
+function onSelectStart(e) {
+  if (!placed || moveMode || !interactor || !interactor.active()) return;
+  const ray = rayFromInput(e.frame, e.inputSource);
+  if (!ray || !interactor.grab(ray)) return;
+  carrying = true;
+  activeInputSource = e.inputSource;
+  cancelPressTimer();  // this touch belongs to the part, not to the model
+  gesture = null;
+}
+
+function onSelectEnd() {
+  if (!carrying) return;
+  carrying = false;
+  activeInputSource = null;
+  gesture = null;
+  interactor?.release();
+}
+
 /** Call every animation frame with the XRFrame. */
 export function updateAR(frame) {
   if (!frame || !refs) return;
@@ -350,6 +450,14 @@ export function updateAR(frame) {
       anchor.matrix.fromArray(pose.transform.matrix);
       anchor.matrixWorldNeedsUpdate = true;
     }
+  }
+
+  // 2b) A carried part follows the finger's live target ray. It is a child of
+  //     the model group, so the anchor refinement above moves it too — the piece
+  //     stays in the user's hand relative to the object, never fighting it.
+  if (carrying && interactor && activeInputSource) {
+    const ray = rayFromInput(frame, activeInputSource);
+    if (ray) interactor.move(ray);
   }
 
   // 3) Reticle / hit-test only while we still need to place (or re-place).
@@ -434,6 +542,8 @@ function applyMove(clientX, clientY) {
 function onTouchStart(e) {
   if (!placed || moveMode) return;
   if (isUI(e.target)) return;
+  // A part is in hand, or the puzzle owns the finger — don't also move the model.
+  if (carrying || !manipulationEnabled) return;
 
   if (e.touches.length === 1) {
     const t = e.touches[0];
@@ -470,6 +580,8 @@ function onTouchStart(e) {
 
 function onTouchMove(e) {
   if (!placed || moveMode) return;
+  // Dragging a part: swallow the move so the dom-overlay doesn't scroll under it.
+  if (carrying) { e.preventDefault(); return; }
 
   if (e.touches.length === 1 && pressStart) {
     const t = e.touches[0];
@@ -526,6 +638,10 @@ function onSessionEnd() {
   }
 
   cancelPressTimer();
+  if (carrying) { try { interactor?.release(); } catch {} }
+  carrying = false;
+  activeInputSource = null;
+  manipulationEnabled = true; // the next session starts with normal gestures
   selected = false;
   pressStart = null;
   gesture = null;
