@@ -338,10 +338,24 @@ function hideLoader() {
   ui.loader.style.setProperty('--p', 0);
 }
 
+// States worth a line of text are the transient, machine-ish ones: loading,
+// splitting, failed. "Ready" is not one of them — by the time it is true the
+// object is on screen and the card is already saying what to do with it, so the
+// pill just sat in the corner of every page repeating itself. Ready hides it.
+const STATUS_SILENT = new Set(['status.ready']);
+
+/** Paint the status line from the current key. Split out from setStatus because
+ *  a language switch has to re-render it without changing what it says. */
+function paintStatus() {
+  const silent = STATUS_SILENT.has(statusKey);
+  ui.status.hidden = silent;
+  ui.status.textContent = silent ? '' : t(statusKey, statusVars);
+}
+
 function setStatus(key, vars = null) {
   statusKey = key;
   statusVars = vars;
-  ui.status.textContent = t(key, vars);
+  paintStatus();
 }
 
 function rebuild() {
@@ -2133,7 +2147,7 @@ onLangChange((next) => {
   paintMic();                        // caption + title, in whichever mic state we're in
   if (!recognizer) ui.micBtn.title = t('btn.micTitle');
   if (!arSupported) { setLabel(ui.startAR, t('btn.arUnsupported')); ui.startAR.title = t('btn.arTitle'); }
-  ui.status.textContent = t(statusKey, statusVars);
+  paintStatus();
   buildLegend();                     // part names are display names
   enterMode(currentMode);            // re-resolve the mode's content in the new language
 });

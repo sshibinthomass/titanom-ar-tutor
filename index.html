@@ -520,20 +520,23 @@
         background: var(--frost); border-color: var(--frost-border);
         color: var(--frost-ink); box-shadow: var(--frost-shadow);
       }
-      .fab.ar { min-height: 54px; }
       /* Push-to-talk: the button is held, so the browser must not treat the
          hold as a scroll, a text selection or a long-press callout — any of
          those steal the pointer mid-sentence and cancel the capture. */
       .fab.mic { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-      /* Icon only. The label stays in the DOM — it is the button's accessible
-         name and it still changes with the state (hold / listening) — but a mic
-         glyph is unambiguous and the words cost a third of the dock. */
-      .fab.mic { width: 54px; min-height: 54px; padding: 0; border-radius: 50%; justify-content: center; }
-      .fab.mic .lbl {
+      /* Both fabs are icon-only circles of the same size — they are a pair, and
+         a wide pill above a round button read as two unrelated things. The label
+         stays in the DOM: it is each button's accessible name, and the mic's
+         still changes with its state (hold / listening). */
+      .fab.ar, .fab.mic {
+        width: 54px; min-height: 54px; padding: 0;
+        border-radius: 50%; justify-content: center;
+      }
+      .fab.ar .lbl, .fab.mic .lbl {
         position: absolute; width: 1px; height: 1px; margin: -1px;
         overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
       }
-      .fab.mic .ico { width: 22px; height: 22px; }
+      .fab.ar .ico, .fab.mic .ico { width: 22px; height: 22px; }
       /* Armed but idle: the mic is open and a hold will record instantly. */
       .fab.mic.armed { border-color: var(--accent); box-shadow: var(--frost-shadow), 0 0 0 1px var(--accent); }
       /* Listening and holding are the tutor's own state, so they glow blue —
@@ -554,6 +557,7 @@
         padding: 8px 15px; border-radius: var(--r-pill); transition: opacity 0.3s;
         text-align: center;
       }
+      .status[hidden] { display: none; }
       /* What you asked and what came back, pinned under the header rather than
          in the dock. Down there it sat on top of the card it was answering
          *about*, and in AR it covered the object it was describing — the two
