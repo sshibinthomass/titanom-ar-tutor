@@ -138,7 +138,7 @@ const STRINGS = {
                           de: 'Richte die Kamera darauf — ich erkenne es.' },
   'home.select':        { en: 'Select an object',            de: 'Objekt auswählen' },
   'home.selectSub':     { en: 'Choose from the objects I know.',
-                          de: 'Wähle aus den Objekten, die ich kenne.' },
+                          de: 'Wähle ein Objekt, das ich bereits kenne, aus.' },
 
   // -- Object scan (camera → vision) ----------------------------------------
   'scan.capture':       { en: 'Capture',                       de: 'Aufnehmen' },
@@ -169,14 +169,14 @@ const STRINGS = {
                           de: 'Modell konnte nicht geladen werden. Konsole prüfen.' },
 
   // -- Modes -----------------------------------------------------------------
-  'mode.explore':       { en: 'Explore',                       de: 'Erkunden' },
+  'mode.explore':       { en: 'Explore',                       de: 'Untersuchung' },
   'mode.fix':           { en: 'Fix',                           de: 'Reparieren' },
   'mode.assemble':      { en: 'Assemble',                      de: 'Zusammenbauen' },
 
   // Card kickers: the same three names without the emoji. Kept separate from
   // `mode.*` because the card header is typographic (small caps, no icon) and
   // because main.js keys its mode logic on the id, never on this label.
-  'kicker.explore':     { en: 'Explore',                    de: 'Erkunden' },
+  'kicker.explore':     { en: 'Explore',                    de: 'Untersuchung' },
   'kicker.fix':         { en: 'Fix',                        de: 'Reparieren' },
   'kicker.assemble':    { en: 'Assemble',                   de: 'Zusammenbauen' },
 
@@ -249,7 +249,7 @@ const STRINGS = {
                           de: 'Zusammengebaut. {mistakes} — bau ihn nochmal und versuch es ohne Fehler.' },
   'assemble.assists':   { en: ', {count} placed for you',   de: ', {count} für dich platziert' },
   'assemble.again':     { en: 'Build it again',                de: 'Nochmal bauen' },
-  'assemble.explore':   { en: 'Explore it',                    de: 'Erkunden' },
+  'assemble.explore':   { en: 'Explore it',                    de: 'Untersuchung' },
   'assemble.none':      { en: 'No procedure for this model yet.',
                           de: 'Für dieses Modell gibt es noch keine Anleitung.' },
   'assemble.fallbackPrompt': { en: 'Which part goes on next?', de: 'Welches Teil kommt als Nächstes?' },
