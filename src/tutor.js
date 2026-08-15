@@ -24,6 +24,15 @@ import { getLang, t } from './i18n.js';
  */
 const LANG_NAME = { en: 'English', de: 'German (Deutsch)' };
 
+/**
+ * What kind of answer a fix request deserves. The planner used to have only two
+ * endings — a repair, or an empty plan for nonsense — so a question about a part
+ * that genuinely cannot be serviced ("the mesh sags", "the headrest slips") got
+ * an invented repair, complete with invented hardware. Naming the honest endings
+ * is what lets it say "this is replaced as a unit" instead.
+ */
+export const PLAN_KINDS = ['adjustment', 'repair', 'replace', 'not_applicable'];
+
 function languageRule() {
   const name = LANG_NAME[getLang()] || LANG_NAME.en;
   return `CRITICAL LANGUAGE RULE: You MUST write every word the user will read or hear in ${name}. This applies even if the user's question, or any text quoted to you, is in a different language — never mirror the user's language, never translate your answer into it, never mix languages, and never apologise for the language. Reference material below may be in ${name} already; keep it that way. Use natural, idiomatic, spoken ${name}.`;
@@ -52,15 +61,18 @@ function germanStyle() {
  * illustrates it — so the model on screen does what the voice is describing,
  * sentence by sentence, instead of holding one pose for a whole paragraph.
  *
- * Returns { title, intro, steps:[{ beats:[{ parts:[names], action, text }] }] }
+ * Returns { kind, title, intro, steps:[{ beats:[{ parts:[names], action, text }] }] }
  * — steps may be [] when the model judges the request unfixable on this object
  * (intro then says why, spoken). Returns null on any AI/parse failure so the
  * caller can fall back to the authored procedure; the demo never dead-ends.
+ *
+ * `opts.fault` is the authored fault the request matched (modes.matchFault), if
+ * any — the established cause to build the plan around rather than reinvent.
  */
-export async function generateFixPlan(ctx, request) {
+export async function generateFixPlan(ctx, request, { fault } = {}) {
   const trace = startTrace('ai-fix-plan', {
     input: request,
-    metadata: { model: ctx.modelLabel, partCount: (ctx.parts || []).length },
+    metadata: { model: ctx.modelLabel, partCount: (ctx.parts || []).length, matchedFault: fault?.symptom || null },
   });
 
   if (!aiAvailable()) {
@@ -68,30 +80,7 @@ export async function generateFixPlan(ctx, request) {
     return null;
   }
 
-  const partNames = [...new Set(ctx.parts || [])].filter(Boolean);
-  const system = [
-    languageRule(),
-    germanStyle(),
-    // The JSON keys and the `action` verbs are machine-read and stay English —
-    // only "title", "intro" and each beat's "text" are spoken to the user.
-    'Note on the JSON below: the field names and the "action" values are fixed English identifiers and must be copied exactly. The language rule applies to the "title", "intro" and "text" values, which are the only parts the user ever hears.',
-    'You are an augmented-reality repair tutor. Produce a step-by-step repair plan that an app will animate on a 3D exploded model, highlighting the named parts and speaking each step out loud.',
-    `The object is a ${ctx.modelLabel}. Its parts, with the EXACT names the app knows them by: ${partNames.join('; ')}.`,
-    ctx.faults && `Ground truth about this exact object — prefer it and never contradict it: ${ctx.faults}`,
-    'Reply with ONLY a JSON object — no markdown fences, no prose before or after — in exactly this shape:',
-    '{"title":"short plan title","intro":"one spoken sentence saying what we will do and why","steps":[{"beats":[{"text":"ONE spoken sentence","parts":["exact part name"],"action":"unscrew"}]}]}',
-    'Rules: 3 to 6 steps, in the real repair order.',
-    // Beats are the whole point of the format: the app speaks one beat at a
-    // time and plays that beat's gesture on that beat's parts while it talks.
-    'Split every step into 2 to 4 "beats". A beat is ONE short spoken sentence describing ONE physical action, plus the parts it happens to and the gesture that shows it. The app speaks the beats in order and animates each one as it is spoken, so the sentence and the motion MUST describe the same thing. Never put two different actions in one beat.',
-    `"action" MUST be one of: ${FIX_ACTIONS.join(', ')}. Meanings: ${FIX_ACTION_GUIDE}`,
-    'Every entry in "parts" MUST be copied verbatim from the part list above — the part(s) that beat physically moves.',
-    `These actions move the WHOLE chair and take "parts": [] — ${OBJECT_ACTIONS.join(', ')}. Every other action needs at least one part.`,
-    'Pick the most physically specific action for what the sentence actually says — that is the whole point, because the user watches it happen. Use inspect ONLY when nothing moves at all; if the sentence says to clean it use wipe, to grease it use grease, to line it up use align, to check it is tight use tug, to check it for play use wiggle, to pop a cap off use unclip.',
-    'Keep instructions practical and grounded in the ground truth; do NOT invent tools, torque values, measurements, or part numbers it does not support. Plain spoken language, no markdown, and keep each beat under about 25 words so it is quick to say.',
-    'If the request cannot be repaired on this object (wrong object, not a repair, nonsense), return {"title":"","intro":"<one spoken sentence explaining why and what they could ask instead>","steps":[]}.',
-  ].filter(Boolean).join(' ');
-
+  const system = planSystemPrompt(ctx, fault);
   const messages = [{ role: 'system', content: system }, { role: 'user', content: `Fix request: ${request}` }];
   try {
     let raw;
@@ -118,6 +107,107 @@ export async function generateFixPlan(ctx, request) {
   }
 }
 
+/**
+ * The planner's system prompt, shared with the repair round-trip below.
+ *
+ * The ORDER is load-bearing, and it is what the first version got wrong. The
+ * grounding used to be one 5k-character block of reference prose in the middle
+ * of the prompt, and the facts that got violated most (which lever is on which
+ * side, that the taper joints have no fasteners, that the headrest does not
+ * adjust) were all subordinate clauses buried in it. So: the reference material
+ * goes in the middle where it can be consulted, and `ctx.rules` — the same facts
+ * restated as six short imperatives — goes LAST, immediately before the model
+ * starts writing. Recency is most of what makes a rule stick.
+ */
+function planSystemPrompt(ctx, fault) {
+  const partNames = [...new Set(ctx.parts || [])].filter(Boolean);
+  return [
+    languageRule(),
+    germanStyle(),
+    // The JSON keys and the `action` verbs are machine-read and stay English —
+    // only "title", "intro" and each beat's "text" are spoken to the user.
+    'Note on the JSON below: the field names and the "action" and "kind" values are fixed English identifiers and must be copied exactly. The language rule applies to the "title", "intro" and "text" values, which are the only parts the user ever hears.',
+    'You are an augmented-reality repair tutor. Produce a step-by-step repair plan that an app will animate on a 3D exploded model, highlighting the named parts and speaking each step out loud.',
+    `The object is a ${ctx.modelLabel}. Its parts, with the EXACT names the app knows them by: ${partNames.join('; ')}.`,
+    // MARKUS_INFO. The planner used to be the one caller that never saw this,
+    // while the free-form tutor did — and several facts live ONLY here (that the
+    // star base takes the cylinder by taper "with no fasteners" is the one that
+    // cost the most, because without it the model invents bolts to undo).
+    ctx.partInfo && `Reference facts per part — treat these as ground truth and never contradict them: ${ctx.partInfo}`,
+    ctx.faults && `Ground truth about this exact object — prefer it and never contradict it: ${ctx.faults}`,
+    // Retrieval: when the request matches a documented fault, the cause is not
+    // the model's to work out. Expanding a known remedy into beats is a far
+    // safer job than inventing a repair, and it is what keeps the flagship
+    // demos identical run to run.
+    fault && `This request matches a DOCUMENTED fault of this exact object — "${fault.symptom}": ${fault.text} That is the established cause and remedy. Build the plan around it, do not propose a different cause, and do not contradict it.`,
+    'Reply with ONLY a JSON object — no markdown fences, no prose before or after — in exactly this shape:',
+    '{"kind":"repair","title":"short plan title","intro":"one spoken sentence saying what we will do and why","steps":[{"beats":[{"text":"ONE spoken sentence","parts":["exact part name"],"action":"unscrew"}]}]}',
+    // Four honest endings. With only "a plan" or "no plan" on offer, a request
+    // about a part that cannot be serviced was answered with an invented repair
+    // — the model read the empty-plan escape hatch as being about nonsense
+    // questions, which this one was not.
+    '"kind" says what kind of answer this is, and it decides the shape of the plan:',
+    '"adjustment" — nothing is broken and nothing comes apart; the user just needs to work a control or change a setting. Give 1 to 3 short steps and never disassemble anything.',
+    '"repair" — a genuine repair. Give 3 to 6 steps in the real repair order.',
+    '"replace" — the faulty part cannot be serviced, adjusted or tightened on this object and its assembly is replaced as a unit. Give 2 to 3 steps that confirm the fault and say plainly what gets replaced. NEVER invent an adjustment or a fastener to make such a part serviceable — saying it is not repairable is the correct answer.',
+    '"not_applicable" — wrong object, not a repair, or nonsense. Return "steps":[] with an intro saying why and what they could ask instead.',
+    // Beats are the whole point of the format: the app speaks one beat at a
+    // time and plays that beat's gesture on that beat's parts while it talks.
+    'Split every step into 2 to 4 "beats". A beat is ONE short spoken sentence describing ONE physical action, plus the parts it happens to and the gesture that shows it. The app speaks the beats in order and animates each one as it is spoken, so the sentence and the motion MUST describe the same thing. Never put two different actions in one beat.',
+    `"action" MUST be one of: ${FIX_ACTIONS.join(', ')}. Meanings: ${FIX_ACTION_GUIDE}`,
+    'Every entry in "parts" MUST be copied verbatim from the part list above — the part(s) that beat physically moves.',
+    `These actions move the WHOLE chair and take "parts": [] — ${OBJECT_ACTIONS.join(', ')}. Every other action needs at least one part.`,
+    'Pick the most physically specific action for what the sentence actually says — that is the whole point, because the user watches it happen. Use inspect ONLY when nothing moves at all; if the sentence says to clean it use wipe, to grease it use grease, to line it up use align, to check it is tight use tug, to check it for play use wiggle, to pop a cap off use unclip.',
+    'Keep instructions practical and grounded in the ground truth; do NOT invent tools, torque values, measurements, or part numbers it does not support. Plain spoken language, no markdown, and keep each beat under about 25 words so it is quick to say.',
+    'Before you answer, check the request against the hard constraints below. If they say the part cannot be serviced, the answer is "replace" — not a repair you had to invent hardware for.',
+    // Last, and deliberately so.
+    ctx.rules && `HARD CONSTRAINTS about this exact object. These override anything you believe about office chairs in general, and a plan that breaks one of them is wrong: ${ctx.rules}`,
+  ].filter(Boolean).join(' ');
+}
+
+/**
+ * Second chance for a plan that broke a hard constraint.
+ *
+ * lintPlan() catches the specific, checkable violations deterministically, and
+ * this is what the app does about them: quote the broken rules back with the
+ * offending sentences and ask for the whole plan again. One round-trip only —
+ * the caller drops the still-offending beats rather than arguing further, since
+ * a model that has ignored the same rule twice will not honour a third ask.
+ */
+export async function repairFixPlan(ctx, request, plan, violations, { fault } = {}) {
+  const trace = startTrace('ai-fix-plan-repair', {
+    input: request,
+    metadata: { model: ctx.modelLabel, violations: violations.length },
+  });
+
+  if (!aiAvailable() || !violations.length) {
+    trace.end({ output: null, metadata: { skipped: true } });
+    return null;
+  }
+
+  const complaints = violations
+    .map((v, i) => `${i + 1}. Step ${v.step + 1}, the sentence "${v.text}" breaks this rule: ${v.rule}`)
+    .join(' ');
+
+  const messages = [
+    { role: 'system', content: planSystemPrompt(ctx, fault) },
+    { role: 'user', content: `Fix request: ${request}` },
+    { role: 'assistant', content: JSON.stringify(plan) },
+    { role: 'user', content: `That plan breaks hard constraints about this object: ${complaints} Rewrite the WHOLE plan as one JSON object in the same shape, correcting exactly those problems and keeping everything else. If a part turns out not to be serviceable, return "kind":"replace" and say plainly that the assembly is replaced rather than inventing a way to service it.` },
+  ];
+
+  try {
+    const raw = await chat(messages, { temperature: 0.1, maxTokens: 4000, trace, name: 'fix-plan-repair', model: PLAN_MODEL });
+    const repaired = extractFixPlan(raw);
+    trace.end({ output: repaired, metadata: { steps: repaired?.steps?.length ?? 0 } });
+    return repaired;
+  } catch (e) {
+    console.warn('repairFixPlan failed:', e.message);
+    trace.end({ output: null, metadata: { error: e.message } });
+    return null;
+  }
+}
+
 // Tolerant JSON extraction: models sometimes wrap the object in fences or a
 // stray sentence, so slice from the first '{' to the last '}' before parsing.
 function extractFixPlan(raw) {
@@ -138,7 +228,11 @@ function extractFixPlan(raw) {
     .filter((beats) => beats.length)
     .map((beats) => ({ beats }));
   if (!steps.length && !(typeof obj.intro === 'string' && obj.intro.trim())) return null;
+  // An unrecognised or missing kind degrades to 'repair' — the shape the app
+  // played before kinds existed, so a model that ignores the field costs nothing.
+  const kind = PLAN_KINDS.includes(obj.kind) ? obj.kind : 'repair';
   return {
+    kind,
     title: typeof obj.title === 'string' ? obj.title.trim() : '',
     intro: typeof obj.intro === 'string' ? obj.intro.trim() : '',
     steps,

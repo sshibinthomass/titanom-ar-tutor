@@ -7,7 +7,7 @@ Guidance for working in this repo. Read this before making changes.
 **AR Repair Tutor** — a Titanom × DeutschlandGPT hackathon app (Aug 2026, theme
 Education × AI, ElevenLabs award). Point a phone at the floor (WebXR hit-test),
 place an **exploded 3D object**, and an AI voice tutor teaches, repairs, and
-quizzes you on it hands-free. The desktop 3D view works everywhere; markerless AR is
+rebuilds it with you hands-free. The desktop 3D view works everywhere; markerless AR is
 **Android Chrome only** (iOS/desktop fall back to the orbit viewer).
 
 The app runs in **English or German** — one at a time, everywhere (see
@@ -59,13 +59,13 @@ modules are focused, mostly-pure helpers it calls.
 | [src/explode.js](src/explode.js) | The **core**. Splits a glTF into parts and drives the exploded view + per-part highlight/dim/isolate. |
 | [src/animate.js](src/animate.js) | Tween engine (keyed channels, driven from the render loop) + the camera flight that frames a part. |
 | [src/fixanim.js](src/fixanim.js) | Fix's gesture library: 22 part gestures (remove/lift_off/unscrew/tap_loose/press_fit/align/tug/spin/grease/wipe/…) + 6 whole-object ones (tip_over/flip_over/stand_up/sit_test/rock_test/roll_away). The LLM picks the verb per spoken beat; this module owns the motion. |
-| [src/modes.js](src/modes.js) | The modes (`MODE_LIST` / `selectableModes`) + **authored per-model content** (fix steps, assemble prompts, known faults, quizzes) and semantic part names. |
+| [src/modes.js](src/modes.js) | The 3 modes + **authored per-model content** (fix steps, assemble prompts, known faults) and semantic part names. |
 | [src/puzzle.js](src/puzzle.js) | Assemble's drag-to-build engine: scatter, ghost slots, snap magnetism, reject. Surface-agnostic — driven by a world-space ray. |
 | [src/select.js](src/select.js) | Raycast tap/click part-picking (drag threshold so orbiting ≠ tapping) + the desktop part-dragger. |
 | [src/ar.js](src/ar.js) | WebXR `immersive-ar` session: hit-test reticle, tap-to-place, long-press to grab then one-finger drag-to-move / pinch scale + twist rotate; voice "move it" re-places on a fresh anchor. Also hands the finger's target ray to an **interactor** (the puzzle). |
 | [src/tts.js](src/tts.js) | Text-to-speech. ElevenLabs primary (streamed via MediaSource so audio starts on the first chunk), browser `speechSynthesis` fallback; race-proof (one voice at a time) and interruptible. |
 | [src/sfx.js](src/sfx.js) | The puzzle's sound cues (snap / reject / dismantle). ElevenLabs **sound generation**, pre-generated + cached; WebAudio synth fallback. |
-| [src/voice.js](src/voice.js) | Mic capture: MediaRecorder → the stt.js provider chain (works on iOS), bounded either by **push-to-talk** (the default — hold 🎤) or by the opt-in WebAudio **VAD**; Web Speech API fallback. Fires barge-in the moment the user speaks. |
+| [src/voice.js](src/voice.js) | Mic capture: MediaRecorder → the stt.js provider chain (works on iOS), bounded either by **push-to-talk** (the default — hold 🎤, which opens the mic and closes it again on release so playback stays on the loudspeaker) or by the opt-in WebAudio **VAD**; Web Speech API fallback. Fires barge-in the moment the user speaks. |
 | [src/stt.js](src/stt.js) | Transcription provider chain: ElevenLabs **Scribe v2** primary (browser-direct, no proxy hop) → DGPT Whisper fallback. |
 | [src/ai.js](src/ai.js) | DeutschlandGPT chat client (OpenAI-compatible `/chat/completions`). |
 | [src/tutor.js](src/tutor.js) | "Brain" glue: classify a spoken phrase into an app command vs. a free-form question, then answer via AI with context. |
@@ -231,7 +231,7 @@ Three things keep it from fighting other systems — don't regress them:
 
 ### Modes (`modes.js` + state in `main.js`)
 
-All modes ride the **same core** (explode + isolate/highlight + visibility);
+All 3 modes ride the **same core** (explode + isolate/highlight + visibility);
 only the card content and which parts are lit change:
 
 1. **Explore** — tap a part → isolate + name it.
@@ -247,12 +247,11 @@ can be adjusted on the surfaces the app is actually used on.
    names; `resolvePlanParts` maps each step's part names to indices and the
    walkthrough rides the same isolate + fly-to + TTS pipeline (Next/Back).
    Fix opens at a deliberately small spread (`FIX_EXPLODE`, a slider value of 7
-   capped at 15% of the model's range) rather than Quiz's 35%: the
-   gestures are the point here and they only read against something still
-   recognisable as a chair — tipping a model blown 35% apart looks like debris
-   rotating. Each step is a list of **beats** — one spoken sentence plus the
-   gesture that illustrates it — so the model does what the voice is describing,
-   sentence by sentence. See "Fix's narrated gestures" below. The authored `CONTENT[*].fix`
+   capped at 15% of the model's range): the gestures are the point here and
+   they only read against something still recognisable as a chair — tipping a
+   model blown 35% apart looks like debris rotating. Each step is a list of
+   **beats** — one spoken sentence plus the gesture that illustrates it — so the
+   model does what the voice is describing, sentence by sentence. See "Fix's narrated gestures" below. The authored `CONTENT[*].fix`
    procedure (one beat per step, carrying an authored verb) is the fallback when
    DGPT is unconfigured or unreachable — never the only path.
    **Fix always opens on the question**, planner or no planner. The ask screen —
@@ -267,14 +266,6 @@ can be adjusted on the surfaces the app is actually used on.
    those four paths.
 3. **Assemble** — a **drag-to-build puzzle** (see below); the user places each
    group, by dragging it or by **saying what it is**.
-4. **Quiz** — highlight a part, ask the user to name it. **Flagged `hidden` in
-   `MODE_LIST`**, so it has no button and no route (`selectableModes` feeds
-   both). Everything else about it still works — `enterQuiz`, `resolveQuiz`, the
-   `CONTENT[*].quiz` blocks, the `quiz.*` strings — and dropping the flag brings
-   it straight back. It is hidden because this is a *repair* tutor: Explore
-   teaches the parts, and Fix and Assemble already test you on them by making
-   you do the thing, so a fourth tab bought a naming drill at the cost of
-   pushing the three that matter into an icons-only row on a phone.
 
 Authored content in `CONTENT` (keyed by model id) references parts by **keyword**
 (`match: ['cylinder','gas','lift']`), resolved against the live part list at
@@ -296,7 +287,7 @@ tails inside those texts are leftovers of that screen, stripped at read time.
 Tilt tension knob, Caster wheels/stem/brake hood ×5, Mesh panel front/rear,
 Lumbar support band ×10, …). The names were identified visually part-by-part in
 Blender and checked against the official IKEA assembly manual (AA-251870-21);
-its fix/assemble/faults/quiz content and the per-part `MARKUS_INFO`
+its fix/assemble/faults content and the per-part `MARKUS_INFO`
 descriptions are grounded in that manual and real IKEA part numbers — so keep
 new Markus content factual, not invented.
 
@@ -574,17 +565,36 @@ there are two answers because they fail in opposite ways:
    usable with both hands on the object — the case AR exists for — but it is a
    guess, and a wrong guess halves a sentence or never fires at all.
 
-Both share **one armed mic**, so toggling costs no `getUserMedia` and a hold
-always works even with hands-free on. Rules that hold it together:
+**Who holds the mic open decides where the sound comes out**, which is why
+push-to-talk opens the mic on the press and closes it on the release rather than
+keeping one armed between questions. A live capture track puts the phone into
+*communication* mode — Android needs it for the platform echo canceller, iOS's
+PlayAndRecord category is the same story — and that mode routes playback to the
+**earpiece**. Leave the track open and the tutor's voice moves to the receiver
+you hold against your ear and stays there for the rest of the session. So:
 
+- **Push-to-talk owns the whole microphone.** `press()` calls `getUserMedia`,
+  `release()` flushes the audio and then `releaseStream()`s it — tracks stopped,
+  no AudioContext ever built (there is nothing to detect: the button stated both
+  boundaries). It costs the opening moments of the first syllable while
+  getUserMedia resolves; the caption says the mic is coming up.
+- **Hands-free is the exception**, because a VAD needs a track that outlives an
+  utterance. There the mic stays open — and earpiece routing with it — until the
+  toggle goes off, which is what `setHandsFree(false)` closing it is for.
+- **Echo cancellation follows the same split.** `echoCancellation` is what lets
+  the VAD hear the user over the tutor, and it is also what forces communication
+  mode, so only hands-free asks for it. Push-to-talk has nothing to cancel —
+  nothing is allowed to play while the button is down (see `setMuted` below).
+- **`releaseStream()` is not `stop()`.** It lets the mic go without bumping
+  `session`, so the utterance already on its way to the transcriber still comes
+  back and gets answered. `stop()` — mute — bumps it and discards.
 - **A press outranks the VAD.** While the button is down, `step()` returns early:
   the press already stated where speech begins, so continuing to guess could only
-  overrule a fact with an estimate. Only the `MAX_UTTER_MS` runaway cap survives.
-- **One button, two gestures.** Hold = talk. Tap (< `MIC_TAP_MS`) = arm the mic,
-  or mute it if it was already armed. Arming matters: after it, a hold records
-  from the first millisecond instead of waiting on `getUserMedia`. `press()`
-  arms on demand too, so a first-time hold still works — it just loses its
-  opening moment, and the caption says the mic is now ready.
+  overrule a fact with an estimate. Under push-to-talk there is no ticker at all,
+  so the `MAX_UTTER_MS` runaway cap rides on its own timer.
+- **Hold is the only gesture** that does anything under push-to-talk — there is
+  no armed state left to toggle. A tap is an off switch only while hands-free is
+  the thing holding the mic open.
 - **`release()` reports whether it sent**, which is how main.js tells a hold from
   a tap. It reports `pressFlushed` when the press was already closed by the
   runaway cap, so a 15-second hold doesn't end by claiming the question vanished.
@@ -611,16 +621,26 @@ loose while it says so. It
 declines only questions unrelated to the whole object, never "wrong part"
 questions.
 
-**Nothing ever overlaps.** Three interlocking guards — don't regress them:
-1. **Barge-in**: the VAD's `onSpeechStart` fires the instant the user talks
+**Nothing ever overlaps.** Four interlocking guards — don't regress them:
+1. **A held button silences the tutor completely.** `setMuted(true)` (tts.js) on
+   the press doesn't just stop what is audible — it makes `speak()` drop
+   anything that tries to *start*, firing both callbacks so no awaiting beat
+   hangs. Stopping alone left gaps: an answer whose ElevenLabs audio was still
+   generating, a puzzle prompt on a timer, a beat already requested — each
+   arrived a moment later and talked into the open microphone.
+2. **Barge-in**: the VAD's `onSpeechStart` fires the instant the user talks
    and main.js stops TTS, so the user can always interrupt an answer. While
    TTS is audible the VAD demands more sustained energy (`isTtsSpeaking`), so
-   speaker bleed the echo canceller misses can't self-trigger; getUserMedia
-   requests `echoCancellation` + `noiseSuppression` + `autoGainControl`.
-2. **`speak()` is race-proof**: a generation token discards any utterance
+   speaker bleed the echo canceller misses can't self-trigger; hands-free's
+   getUserMedia asks for `echoCancellation` (push-to-talk doesn't — see above).
+3. **`speak()` is race-proof**: a generation token discards any utterance
    superseded while its ElevenLabs audio was still being generated.
-3. **Newest question wins**: `handleSpeech` drops an answer if a newer
-   question arrived (`askSeq`) or the user is mid-utterance (`isCapturing`).
+4. **Newest question wins**: `handleSpeech` drops an answer if a newer
+   question arrived (`askSeq`) or the user is mid-utterance (`isCapturing`) —
+   and **`micDown` bumps `askSeq` itself**, so a press retires the question in
+   flight. Without that, the previous answer lands in the gap between the
+   release and the new transcript, and the tutor answers a question the user
+   has already replaced before answering the real one.
 
 TTS, STT and AI all **degrade gracefully**: no ElevenLabs key → browser
 speech + Whisper STT; no DeutschlandGPT → Web Speech recognition + a canned
@@ -632,7 +652,7 @@ The whole visual layer lives in one `<style>` block driven by CSS custom
 properties, so a theme is a token swap and nothing else. Two rules carry it:
 
 1. **Blue is the app pointing at something; amber is something being wrong.**
-   Selection, focus, the carried puzzle part, a quiz highlight — blue. The Fix
+   Selection, focus, the carried puzzle part, a tapped part — blue. The Fix
    step's part — amber, on the card *and* on the object, kept in step from one
    place (`ACCENT_3D` + `setAccentColor` in main.js, `body[data-mode='fix']` in
    the stylesheet). Amber appears nowhere else, which is the only reason it
@@ -792,7 +812,7 @@ Scene graph once placed: `anchor` (world pose, on the floor) → `pivot` (user
 rotate/scale about the floor contact) → `group` (the model, fit to ~0.7 m).
 That fit is measured against the **assembled** model — `main.js` passes
 `fitBox: restBounds()`, since the live bounds grow with the explode amount and
-starting AR from a spread-out mode (Fix/Quiz) would otherwise scale the
+starting AR from a spread-out mode (Fix) would otherwise scale the
 object down to fit its exploded silhouette: entering from Fix placed a chair that
 stood 0.39 m once reassembled, and from a full explode, 0.21 m. HTML
 UI is kept as a `dom-overlay` so the mode bar/cards/mic render over the camera

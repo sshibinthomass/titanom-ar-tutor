@@ -164,22 +164,11 @@ export function canonicalName(display) {
 
 // Ids only — the button labels come from the i18n dictionary (`mode.<id>`), so
 // the mode bar re-labels itself on a language switch without touching this list.
-//
-// `hidden` retires a mode from the UI without deleting it, the same way the
-// registry retires a model: no button, and no route (see selectableModes) — but
-// enterQuiz(), resolveQuiz(), every `CONTENT[*].quiz` block and the `quiz.*`
-// strings are all still here and still work. Quiz is hidden because the app is
-// a *repair* tutor: Explore teaches the parts, Fix and Assemble both already
-// test you on them by making you do the thing, and a fourth tab pushed the
-// three that matter into an icons-only row. Dropping the flag brings it back.
+// This list is the whole vocabulary: it builds the mode bar *and* validates
+// links, so a mode that isn't here can't be reached by typing its URL either.
 export const MODE_LIST = [
-  { id: 'explore' }, { id: 'fix' }, { id: 'assemble' }, { id: 'quiz', hidden: true },
+  { id: 'explore' }, { id: 'fix' }, { id: 'assemble' },
 ];
-
-/** The modes a user can reach — the list minus anything `hidden`. One source for
- *  both the mode bar and the link vocabulary, so a retired mode can't be reached
- *  by typing its URL either. */
-export const selectableModes = () => MODE_LIST.filter((m) => !m.hidden);
 
 // ---- Authored content, keyed by model registry id --------------------------
 
@@ -221,24 +210,6 @@ const CONTENT = {
       { symptom: { en: 'Wheel wobbles', de: 'Laufrad eiert' },
         text: { en: 'A wobble is a wheel out of true — a bent rim or loose spokes. Highlighted is the wheel.',
                 de: 'Ein eierndes Laufrad hat einen Höhen- oder Seitenschlag — verzogene Felge oder lose Speichen. Hervorgehoben ist das Laufrad.' } },
-    ],
-    quiz: [
-      { match: ['frame'],
-        question: { en: 'Name this central triangular structure everything bolts to.',
-                    de: 'Wie heißt diese zentrale Dreiecksstruktur, an der alles verschraubt ist?' },
-        answer: { en: 'frame', de: 'der Rahmen' } },
-      { match: ['tire', 'tyre', 'rubber'],
-        question: { en: 'What is this round part that grips the road?',
-                    de: 'Wie heißt dieses runde Teil, das auf der Straße greift?' },
-        answer: { en: 'tyre', de: 'der Reifen' } },
-      { match: ['seat', 'saddle'],
-        question: { en: 'What do you sit on — what is this called?',
-                    de: 'Worauf sitzt du — wie heißt dieses Teil?' },
-        answer: { en: 'saddle', de: 'der Sattel' } },
-      { match: ['chain'],
-        question: { en: 'What transfers your pedalling to the rear wheel?',
-                    de: 'Was überträgt deine Tretbewegung auf das Hinterrad?' },
-        answer: { en: 'chain', de: 'die Kette' } },
     ],
   },
 
@@ -332,20 +303,6 @@ const CONTENT = {
                 de: 'Ein Sitz, der wackelt, aber nicht absackt, hat lose Schrauben der Sitzplatte zwischen Polster und Wippmechanik. Dreh den Stuhl um und zieh die vier Befestigungsschrauben nach. Hervorgehoben ist der Sitz.' },
       },
     ],
-    quiz: [
-      { match: ['cylinder', 'gas', 'lift', 'strut'],
-        question: { en: 'What part lets you raise and lower the seat?', de: 'Mit welchem Teil kannst du den Sitz höher und tiefer stellen?' },
-        answer: { en: 'the gas cylinder (pneumatic lift)', de: 'die Gasdruckfeder (pneumatische Höhenverstellung)' } },
-      { match: ['star base', 'star', 'spider'],
-        question: { en: 'What is the five-armed part on the floor called?', de: 'Wie heißt das fünfarmige Teil auf dem Boden?' },
-        answer: { en: 'the star base', de: 'das Fußkreuz' } },
-      { match: ['caster', 'wheel', 'roller'],
-        question: { en: 'What are the rolling parts called?', de: 'Wie heißen die rollenden Teile?' },
-        answer: { en: 'casters', de: 'die Rollen' } },
-      { match: ['backrest'],
-        question: { en: 'What part supports your back?', de: 'Welches Teil stützt deinen Rücken?' },
-        answer: { en: 'the backrest', de: 'die Rückenlehne' } },
-    ],
   },
 
   'markus-chair': {
@@ -359,6 +316,28 @@ const CONTENT = {
       en: 'The IKEA Markus (designer Henrik Preutz, art. 702.611.50) is a high-back swivel office chair rated to 110 kg, certified EN 1335, with a 10-year warranty. Backrest: breathable Vissle dark-grey mesh (100% polyester, min 90% recycled) in two layers over a powder-coated steel frame, with a lumbar support band sewn in at belt height and a fixed headrest. Armrests: fixed height (no adjustable version exists), identical left/right, padded with polypropylene and synthetic rubber. Seat: 35 kg/m³ polyurethane foam on laminated wood veneer. Base: powder-coated aluminium five-star on twin-wheel safety casters that brake automatically when nobody sits in the chair, so it never rolls away when you stand up. Controls: the RIGHT paddle under the seat is the height lever (lift while seated to sink, unweight to rise, 46–57 cm); the LEFT lever is the recline lock — the backrest is sprung forward, unlock to rock, lock upright (3 positions); the knob under the seat front-centre sets tilt tension (turn + for more resistance, − for less). Assembly hardware (manual AA-251870-21): 6 countersunk screws #122134, 5 flange bolts #115994 (2 fix the tilt mechanism to the seat, 3 fix the backrest bracket), one allen key #124345, 5 press-in casters #100049021 — push casters straight in, never at an angle; pull the transport cap off the gas cylinder before fitting; start all 3 backrest bolts loosely before tightening; lowering the assembled chair onto the cylinder is a two-person lift. IKEA warns that only trained personnel may replace or repair the gas spring (energy accumulator). Known aging failures from owners: the gas lift loses pressure (replaceable, standard taper fit), the tilt-mechanism frame can crack after years of heavy use, and taper joints seize — freeing the cylinder from the seat mechanism or base needs firm taps with a rubber mallet.',
       de: 'Der IKEA MARKUS (Design Henrik Preutz, Art.-Nr. 702.611.50) ist ein Drehstuhl mit hoher Rückenlehne, zugelassen bis 110 kg, geprüft nach EN 1335, mit 10 Jahren Garantie. Rückenlehne: atmungsaktives Netzgewebe „Vissle" in Dunkelgrau (100 % Polyester, mindestens 90 % recycelt) in zwei Lagen über einem pulverbeschichteten Stahlrahmen, mit einem in Gürtelhöhe eingenähten Lendenstützband und einer fest verbauten Kopfstütze. Armlehnen: feste Höhe (eine verstellbare Variante gibt es nicht), links und rechts identisch, gepolstert mit Polypropylen und Synthesekautschuk. Sitz: Polyurethanschaum 35 kg/m³ auf Schichtholz mit Furnier. Fußkreuz: fünfarmig aus pulverbeschichtetem Aluminium auf Doppelrollen mit Sicherheitsbremse, die automatisch greift, sobald niemand sitzt — der Stuhl rollt beim Aufstehen also nicht weg. Bedienung: der RECHTE Hebel unter dem Sitz ist die Höhenverstellung (im Sitzen ziehen zum Absenken, entlastet ziehen zum Anheben, 46–57 cm); der LINKE Hebel ist die Arretierung der Rückenlehne — die Lehne ist nach vorn gefedert, entriegelt wippt sie, verriegelt hält sie eine von drei Positionen; der Drehknopf mittig vorn unter dem Sitz stellt den Wippwiderstand ein (Richtung + mehr Widerstand, Richtung − weniger). Montagematerial (Anleitung AA-251870-21): 6 Senkschrauben #122134, 5 Flanschschrauben #115994 (2 befestigen die Wippmechanik am Sitz, 3 den Halter der Rückenlehne), ein Inbusschlüssel #124345, 5 Steckrollen #100049021 — Rollen immer gerade einstecken, nie schräg; vor der Montage die Transportkappe von der Gasdruckfeder abziehen; alle 3 Lehnenschrauben zuerst locker ansetzen und erst dann festziehen; den fertigen Stuhl auf die Gasfeder zu setzen ist eine Arbeit für zwei Personen. IKEA weist darauf hin, dass die Gasdruckfeder (Energiespeicher) nur von geschultem Personal getauscht oder repariert werden darf. Bekannte Verschleißprobleme aus der Praxis: die Gasfeder verliert Druck (austauschbar, Standard-Konussitz), der Rahmen der Wippmechanik kann nach Jahren starker Nutzung reißen, und die Konusverbindungen setzen sich fest — um die Gasfeder aus Sitzmechanik oder Fußkreuz zu lösen, braucht es kräftige Schläge mit einem Gummihammer.',
     },
+    // Hard constraints for the Fix planner, kept SHORT and imperative on purpose.
+    // Every fact here is already somewhere in `about` or MARKUS_INFO — and that
+    // is exactly the problem those two have: they are dense reference prose, and
+    // a model generating a dozen beats of JSON skims a subordinate clause like
+    // "the LEFT lever is the recline lock" straight past. Restated as rules and
+    // placed LAST in the prompt, the same facts are actually obeyed. Anything
+    // added here must also be checkable — either a human can grade it, or better,
+    // PLAN_CONSTRAINTS below can lint it.
+    rules: [
+      { en: 'Taper joints, no fasteners: the gas cylinder locks into the star base cone and into the tilt mechanism plate by friction alone. Never unscrew, unbolt or undo screws on the gas cylinder or the star base. Free a seized one with firm rubber-mallet taps, and seat a new one with body weight.',
+        de: 'Konusverbindungen ohne Schrauben: Die Gasdruckfeder sitzt allein durch Klemmwirkung im Konus des Fußkreuzes und in der Platte der Wippmechanik. Schraub die Gasdruckfeder und das Fußkreuz niemals ab und lös daran keine Schrauben. Eine festsitzende Verbindung löst du mit kräftigen Schlägen mit dem Gummihammer, eine neue setzt du mit deinem Körpergewicht fest.' },
+      { en: 'Controls, never swap these sides: the RIGHT paddle under the seat is the height lever, the LEFT lever is the recline lock, and the tilt tension knob is under the seat at the front centre. The knob is marked + and −, so describe turning it toward + or toward −, never clockwise or anticlockwise.',
+        de: 'Bedienelemente, vertausch die Seiten nie: Der RECHTE Hebel unter dem Sitz ist die Höhenverstellung, der LINKE Hebel ist die Arretierung der Rückenlehne, und der Drehknopf für den Wippwiderstand sitzt mittig vorn unter dem Sitz. Der Knopf ist mit + und − markiert, sag also Richtung + oder Richtung −, niemals im oder gegen den Uhrzeigersinn.' },
+      { en: 'Not serviceable — these have no adjustment and no separate fixing, so never take one apart, tighten one or re-tension one: the headrest (moulded into the backrest frame), both mesh panels (factory-tensioned), the lumbar support band (sewn between the mesh layers), both armrest pads (not separate spare parts) and both lever shafts. When one of these is at fault, the honest plan is that the assembly is replaced as a unit.',
+        de: 'Nicht instand zu setzen — diese Teile haben keine Verstellung und keine eigene Befestigung, nimm sie also nie auseinander, zieh sie nicht nach und spann sie nicht nach: die Kopfstütze (fest am Rückenlehnenrahmen), beide Netzlagen (ab Werk gespannt), das Lendenstützband (zwischen die Netzlagen eingenäht), beide Armlehnenpolster (keine einzelnen Ersatzteile) und beide Hebelwellen. Ist eines davon defekt, lautet die ehrliche Antwort, dass die Baugruppe komplett getauscht wird.' },
+      { en: 'Always: pull the transport cap off a new gas cylinder before fitting it; push casters straight into the base arm, never at an angle; start all three backrest bolts loosely and only then tighten them; lowering the assembled chair back onto the cylinder is a two-person lift.',
+        de: 'Immer: Zieh vor dem Einbau die Transportkappe von der neuen Gasdruckfeder ab; steck die Rollen gerade in den Fußkreuzarm, nie schräg; setz alle drei Lehnenschrauben erst locker an und zieh sie dann fest; den fertig montierten Stuhl auf die Gasfeder zu setzen ist eine Arbeit für zwei Personen.' },
+      { en: 'The only fasteners on this chair are 6 countersunk screws #122134, 5 flange bolts #115994 and 5 press-in casters #100049021, all driven with allen key #124345. Never invent another screw, bolt, clip, washer or tool.',
+        de: 'Die einzigen Befestigungsteile an diesem Stuhl sind 6 Senkschrauben #122134, 5 Flanschschrauben #115994 und 5 Steckrollen #100049021, alle mit dem Inbusschlüssel #124345. Erfinde keine weiteren Schrauben, Bolzen, Clips, Scheiben oder Werkzeuge.' },
+      { en: 'Fixed figures: seat height 46 to 57 centimetres, rated to 110 kilograms, armrests are fixed height and no adjustable version exists. IKEA states that only trained personnel may replace or repair the gas spring, so keep that caution in any plan that touches it.',
+        de: 'Feste Angaben: Sitzhöhe 46 bis 57 Zentimeter, zugelassen bis 110 Kilogramm, die Armlehnen haben eine feste Höhe und eine verstellbare Variante gibt es nicht. IKEA weist darauf hin, dass die Gasdruckfeder nur von geschultem Personal getauscht oder repariert werden darf — nimm diesen Hinweis in jeden Plan auf, der sie berührt.' },
+    ],
     // `action` picks the motion primitive (fixanim.js) each step animates with —
     // the same verbs the DGPT planner chooses from, so the no-AI fallback moves
     // exactly like a generated plan.
@@ -387,11 +366,19 @@ const CONTENT = {
     // tutor's grounding digest; see the office chair's list above.
     faults: [
       {
+        // `procedure` marks the faults the authored `fix` walkthrough above
+        // actually treats. It decides what happens when the AI planner is
+        // unreachable: these two fall back to that walkthrough, and every other
+        // fault falls back to its own text — because running the gas-lift
+        // teardown for a loose armrest is not a graceful degradation, it is
+        // silently answering a different question.
+        procedure: true,
         symptom: { en: 'Seat keeps sinking', de: 'Sitz sackt immer ab' },
         text: { en: 'A Markus that slowly sinks under your weight has a failed gas cylinder — the pneumatic seal has lost its charge and cannot be refilled. Swap the whole gas lift. Highlighted is the gas cylinder.',
                 de: 'Ein MARKUS, der unter deinem Gewicht langsam absackt, hat eine defekte Gasdruckfeder — die Dichtung hat ihren Druck verloren und lässt sich nicht nachfüllen. Tausch die komplette Gasfeder. Hervorgehoben ist die Gasdruckfeder.' },
       },
       {
+        procedure: true, // also cured by replacing the gas lift — see above
         symptom: { en: 'Won\'t rise', de: 'Geht nicht mehr hoch' },
         text: { en: 'If the paddle no longer raises the seat, the gas cylinder has lost its pressure completely. Confirm the lever actually pushes the valve pin; if it does, replace the gas lift. Highlighted is the gas cylinder.',
                 de: 'Wenn der Hebel den Sitz nicht mehr anhebt, hat die Gasdruckfeder ihren Druck komplett verloren. Prüf, ob der Hebel den Ventilstift überhaupt drückt; wenn ja, tausch die Gasfeder. Hervorgehoben ist die Gasdruckfeder.' },
@@ -432,9 +419,14 @@ const CONTENT = {
                 de: 'Quietschen und Knarzen kommt aus der Wippmechanik und dem Drehlager — trockene Federn, lose Schrauben an der Sitzplatte oder das obere Lager der Gasfeder. Zieh die zwei Flansch- und zwei Senkschrauben unter dem Sitz mit dem Inbusschlüssel nach und fette den Drehpunkt. Hervorgehoben ist die Wippmechanik.' },
       },
       {
+        // The symptom is what an owner says; the text is the ground truth, and on
+        // this chair the truth is that nothing in the headrest can slip. Said
+        // otherwise (this entry used to describe a friction joint and a ratchet)
+        // it contradicts `about` and MARKUS_INFO, and the planner picks whichever
+        // it read last — which is how it invented a headrest adjustment.
         symptom: { en: 'Headrest slips', de: 'Kopfstütze rutscht' },
-        text: { en: 'A headrest that sinks or will not hold its angle has a worn friction joint at its stem. Tighten the headrest bracket; if the ratchet is stripped, the headrest is replaced as a unit. Highlighted is the headrest.',
-                de: 'Eine Kopfstütze, die absinkt oder ihren Winkel nicht hält, hat ein ausgeschlagenes Reibgelenk am Schaft. Zieh den Halter der Kopfstütze nach; ist die Rasterung ausgeleiert, wird die Kopfstütze komplett getauscht. Hervorgehoben ist die Kopfstütze.' },
+        text: { en: 'The Markus headrest is fixed — it is moulded into the backrest frame with no height or angle adjustment, so there is no joint in it to slip and nothing to tighten. What actually moves is the whole backrest: check the LEFT recline lock lever engages, and snug the three flange bolts #115994 in the backrest bracket. Highlighted is the headrest.',
+                de: 'Die MARKUS-Kopfstütze ist fest — sie gehört zum Rückenlehnenrahmen und hat weder Höhen- noch Winkelverstellung, es gibt darin also kein Gelenk, das rutschen könnte, und nichts zum Nachziehen. Was sich wirklich bewegt, ist die ganze Rückenlehne: prüf, ob der LINKE Arretierhebel greift, und zieh die drei Flanschschrauben #115994 im Lehnenhalter nach. Hervorgehoben ist die Kopfstütze.' },
       },
       {
         symptom: { en: 'Loose armrest', de: 'Armlehne lose' },
@@ -446,33 +438,6 @@ const CONTENT = {
         text: { en: 'A sagging or stretched mesh back has lost its tension and cannot be re-tightened — the two mesh layers are fixed to the frame with the lumbar band sewn between them. Replace the back assembly. Highlighted is the mesh back.',
                 de: 'Eine durchhängende oder ausgeleierte Netzbespannung hat ihre Spannung verloren und lässt sich nicht nachspannen — die zwei Netzlagen sind fest am Rahmen, mit dem Lendenstützband dazwischen eingenäht. Tausch die komplette Rückenlehne. Hervorgehoben ist die Netzbespannung.' },
       },
-    ],
-    quiz: [
-      { match: ['cylinder', 'gas', 'lift'],
-        question: { en: 'What part lets you raise and lower the seat?', de: 'Mit welchem Teil kannst du den Sitz höher und tiefer stellen?' },
-        answer: { en: 'the gas cylinder (pneumatic lift)', de: 'die Gasdruckfeder (pneumatische Höhenverstellung)' } },
-      { match: ['star'],
-        question: { en: 'What is the five-armed part on the floor called?', de: 'Wie heißt das fünfarmige Teil auf dem Boden?' },
-        answer: { en: 'the star base', de: 'das Fußkreuz' } },
-      { match: ['caster', 'wheel', 'roller'],
-        question: { en: 'What are the rolling parts called?', de: 'Wie heißen die rollenden Teile?' },
-        answer: { en: 'casters — safety casters that brake when the chair is empty',
-                  de: 'die Rollen — Sicherheitsrollen, die bremsen, sobald niemand sitzt' } },
-      { match: ['recline'],
-        question: { en: 'Which control locks the backrest upright?', de: 'Welche Bedienung arretiert die Rückenlehne aufrecht?' },
-        answer: { en: 'the left-hand recline lock lever', de: 'der linke Arretierhebel der Rückenlehne' } },
-      { match: ['tension'],
-        question: { en: 'What sets how hard the chair resists leaning back?', de: 'Womit stellst du ein, wie stark sich der Stuhl gegen das Zurücklehnen wehrt?' },
-        answer: { en: 'the tilt tension knob under the seat front', de: 'der Wippwiderstand-Drehknopf vorn unter dem Sitz' } },
-      { match: ['headrest'],
-        question: { en: 'What supports your head at the very top of the chair?', de: 'Was stützt deinen Kopf ganz oben am Stuhl?' },
-        answer: { en: 'the headrest', de: 'die Kopfstütze' } },
-      { match: ['mesh'],
-        question: { en: 'What is the breathable part your back rests against?', de: 'Wie heißt das atmungsaktive Teil, an dem dein Rücken anliegt?' },
-        answer: { en: 'the Vissle mesh back', de: 'die Vissle-Netzbespannung' } },
-      { match: ['lumbar'],
-        question: { en: 'What is sewn between the mesh layers at belt height?', de: 'Was ist in Gürtelhöhe zwischen die Netzlagen eingenäht?' },
-        answer: { en: 'the lumbar support band', de: 'das Lendenstützband' } },
     ],
   },
 
@@ -504,14 +469,6 @@ const CONTENT = {
       { symptom: { en: 'Knocking noise', de: 'Klopfendes Geräusch' },
         text: { en: 'A knock under load is often a rod or main bearing. Highlighted is the rotating assembly.',
                 de: 'Ein Klopfen unter Last kommt oft von einem Pleuel- oder Hauptlager. Hervorgehoben ist der Kurbeltrieb.' } },
-    ],
-    quiz: [
-      { match: ['piston'],
-        question: { en: 'What part travels up and down inside the cylinder?', de: 'Welches Teil bewegt sich im Zylinder auf und ab?' },
-        answer: { en: 'piston', de: 'der Kolben' } },
-      { match: ['crank'],
-        question: { en: 'What converts the pistons’ motion into rotation?', de: 'Was wandelt die Kolbenbewegung in eine Drehbewegung um?' },
-        answer: { en: 'crankshaft', de: 'die Kurbelwelle' } },
     ],
   },
 };
@@ -746,12 +703,14 @@ export function resolveAssemble(modelKey, parts) {
  * leftover of the old symptom picker and is stripped, so the AI doesn't parrot a
  * sentence about highlighting. Returns '' when a model has no authored content.
  */
+// Strip the "Highlighted is the X." tail in either language, so the AI doesn't
+// parrot a sentence about the app's own highlighting. (Module scope: the digest
+// and the fault matcher both read the same authored text.)
+const clean = (s) => tr(s).replace(/\s*(?:Highlighted is|Hervorgehoben (?:ist|sind))[^.]*\.\s*$/i, '').trim();
+
 export function knowledgeDigest(modelKey) {
   const c = CONTENT[modelKey];
   if (!c) return '';
-  // Strip the "Highlighted is the X." tail in either language, so the AI doesn't
-  // parrot a sentence about the app's own highlighting.
-  const clean = (s) => tr(s).replace(/\s*(?:Highlighted is|Hervorgehoben (?:ist|sind))[^.]*\.\s*$/i, '').trim();
   const lines = [];
   if (c.about) lines.push(tr(c.about));
   if (c.fix?.title) {
@@ -762,6 +721,194 @@ export function knowledgeDigest(modelKey) {
       c.faults.map((d) => `${tr(d.symptom)}: ${clean(d.text)}`).join(' '));
   }
   return lines.join(' ');
+}
+
+/**
+ * The Fix planner's hard constraints, numbered. Deliberately NOT folded into
+ * knowledgeDigest(): the caller places this LAST in the system prompt, after
+ * ~10k characters of reference prose, because recency is most of what buys a
+ * rule its obedience. Returns '' for a model with no authored rules.
+ */
+export function planRules(modelKey) {
+  const rules = CONTENT[modelKey]?.rules;
+  if (!rules?.length) return '';
+  return rules.map((r, i) => `${i + 1}. ${tr(r)}`).join(' ');
+}
+
+/**
+ * The subset of `rules` a machine can check, so the app enforces them instead of
+ * hoping. Everything here is keyed on things that survive translation — resolved
+ * part indices and the fixed English `action` verbs — which is what lets one
+ * table lint a German plan and an English one identically.
+ *
+ * Part entries are FAMILY prefixes, the same rule resolvePlanParts and
+ * resolveAssemble group by: "Mesh panel" covers "Mesh panel (front)" and
+ * "(rear)", "Armrest pad" covers both sides.
+ *
+ * Precision over recall, deliberately: a false positive costs a wasted repair
+ * round-trip and can talk the model out of a correct step, so each check carries
+ * an exemption for the case where the flagged part is legitimately along for the
+ * ride. The prompt rules remain the primary defence; this is the backstop.
+ */
+const PLAN_CONSTRAINTS = {
+  'markus-chair': {
+    // A plan that unscrews these is describing hardware the chair does not have.
+    // Exempt when the Seat is in the same beat: undoing the seat/mechanism bolts
+    // legitimately happens in the breath before the cylinder is tapped free.
+    noFastener: {
+      parts: ['Gas cylinder', 'Star base'],
+      actions: ['unscrew', 'screw_in'],
+      exempt: ['Seat'],
+      rule: 'The gas cylinder meets both the star base and the tilt mechanism in TAPER joints with no fasteners of any kind. They are freed with firm rubber-mallet taps and seated with body weight — never unscrewed, unbolted or screwed together.',
+    },
+    // Moulded or sewn in, with no adjustment and no separate fixing. Flagged only
+    // when the beat touches NOTHING but these, so an assembly-level step ("lift
+    // the whole back off") is left alone.
+    fixed: {
+      parts: ['Headrest', 'Mesh panel', 'Lumbar support band', 'Armrest pad'],
+      actions: ['unscrew', 'screw_in', 'remove', 'lift_off', 'slide_out', 'slide_in',
+                'unclip', 'tap_loose', 'stretch', 'swap', 'turn', 'align', 'install', 'drop_in', 'press_fit'],
+      onlyIfAlone: true,
+      rule: 'This part is moulded or sewn into its assembly with no adjustment and no separate fixing. It cannot be removed, tightened, re-tensioned or refitted on its own — when it is at fault the whole assembly is replaced as a unit.',
+    },
+    // The documented side of each control. Checked against the beat's own words,
+    // so this is the one check that has to know both languages.
+    sides: {
+      'Height lever': 'right',
+      'Recline lock lever': 'left',
+      'Recline lock shaft': 'left',
+    },
+  },
+};
+
+// Side words in both languages. "right" doubles as "correct" in English, so the
+// common idioms are excluded rather than mis-flagged.
+const SIDE_WORDS = {
+  right: /\b(?:right(?!\s+(?:way|now|one|amount|time))(?:-hand)?|rechte[rnms]?|rechts)\b/i,
+  left: /\b(?:left(?:-hand)?|linke[rnms]?|links)\b/i,
+};
+
+// Family match: exactly the prefix rule the rest of the module groups parts by.
+const inFamily = (name, list) => list.some((e) => name === e || name.startsWith(e + ' '));
+
+/**
+ * Check a resolved plan against PLAN_CONSTRAINTS, before a word of it is spoken.
+ *
+ * Runs on the walkthrough's own shape — steps of beats carrying resolved part
+ * indices and a whitelisted verb — so it grades what will actually play rather
+ * than what the model claimed. Returns [{ step, beat, rule }] (empty = clean);
+ * `rule` is model-facing English, because its only reader is the repair prompt.
+ */
+export function lintPlan(modelKey, parts, steps) {
+  const cons = PLAN_CONSTRAINTS[modelKey];
+  if (!cons) return [];
+  const out = [];
+  (steps || []).forEach((step, si) => {
+    (step.beats || []).forEach((beat, bi) => {
+      const names = (beat.indices || []).map((i) => parts[i]?.name).filter(Boolean);
+      if (!names.length) return;
+      const flag = (rule) => out.push({ step: si, beat: bi, rule, text: beat.text });
+
+      const nf = cons.noFastener;
+      if (nf && nf.actions.includes(beat.action)
+          && names.some((n) => inFamily(n, nf.parts))
+          && !names.some((n) => inFamily(n, nf.exempt || []))) flag(nf.rule);
+
+      const fx = cons.fixed;
+      if (fx && fx.actions.includes(beat.action)
+          && names.every((n) => inFamily(n, fx.parts))) flag(fx.rule);
+
+      // Only when the beat concerns exactly one sided control — two of them in
+      // one sentence and there is no telling which side the word belongs to.
+      const sided = names.filter((n) => Object.keys(cons.sides || {}).some((k) => inFamily(n, [k])));
+      if (sided.length === 1) {
+        const key = Object.keys(cons.sides).find((k) => inFamily(sided[0], [k]));
+        const side = cons.sides[key];
+        const opposite = side === 'left' ? 'right' : 'left';
+        if (SIDE_WORDS[opposite].test(beat.text || '') && !SIDE_WORDS[side].test(beat.text || '')) {
+          flag(`The ${key} is on the ${side.toUpperCase()} of the chair, and this sentence calls it the ${opposite}. Never swap the two: the RIGHT paddle is the height lever, the LEFT lever is the recline lock.`);
+        }
+      }
+    });
+  });
+  return out;
+}
+
+// Words too generic to identify a fault: every request mentions the chair, and
+// most mention that something is broken.
+const FAULT_STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'that', 'this', 'when', 'from', 'your', 'keep', 'keeps',
+  'wont', 'will', 'does', 'chair', 'markus', 'help', 'please', 'make', 'need', 'fix',
+  'fixed', 'broken', 'problem', 'seems', 'been', 'have', 'just', 'really', 'very',
+  'der', 'die', 'das', 'den', 'dem', 'und', 'mit', 'für', 'beim', 'wenn', 'nicht',
+  'mein', 'meine', 'immer', 'sich', 'wird', 'stuhl', 'bitte', 'kaputt', 'sehr',
+]);
+
+// Crude stemmer: enough to see "sinks", "sinking" and "sink" as one word without
+// dragging a morphology library into a hackathon build.
+const stem = (w) => w.replace(/(?:ing|ed|es|en|s)$/, '');
+const faultTokens = (s) => String(s || '').toLowerCase().split(/[^\p{L}]+/u)
+  .filter((w) => w.length >= 4 && !FAULT_STOPWORDS.has(w)).map(stem);
+// Shared prefix of 4+ characters: "wobble"/"wobbly" and "sink"/"sinking" match,
+// "seat"/"sitting" and "base"/"basic" do not.
+function akin(a, b) {
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  return i >= 4 || (i >= 3 && a.length === i && b.length === i);
+}
+
+/**
+ * Find the authored fault a spoken request is describing.
+ *
+ * Retrieval before generation: there are twelve documented faults with real
+ * causes and remedies, and the planner used to reinvent one from scratch every
+ * time — which is where both the run-to-run variance and the physically
+ * impossible procedures came from. A hit is handed to the planner as the cause
+ * to build around, and shown to the user immediately as a grounded lead while
+ * the plan generates. Local and deterministic on purpose: no AI call, so it
+ * costs nothing and works when DGPT is unreachable.
+ *
+ * Matched on the symptom only. The suggestion chips send a symptom verbatim, so
+ * the main path always hits; a free-form phrase that misses simply gets no
+ * boost, which is the safe direction to be wrong in.
+ */
+export function matchFault(modelKey, request) {
+  const faults = CONTENT[modelKey]?.faults;
+  const asked = faultTokens(request);
+  if (!faults?.length || !asked.length) return null;
+  let best = null;
+  for (const f of faults) {
+    const symptom = tr(f.symptom);
+    const words = faultTokens(symptom);
+    if (!words.length) continue;
+    const hits = words.filter((w) => asked.some((a) => akin(a, w))).length;
+    if (hits < required(symptom, words) || !hits) continue;
+    const score = hits / words.length;
+    const procedure = !!f.procedure;
+    // Ranked by hits BEFORE coverage: a one-word symptom scores a perfect 1.00
+    // off a single common verb, so "it rolls away on its own" used to land on
+    // "Won't roll" — the opposite fault — purely because it was listed first.
+    if (!best || hits > best.hits || (hits === best.hits && score > best.score)) {
+      best = { hits, score, symptom, procedure, text: clean(f.text) };
+    }
+  }
+  return best;
+}
+
+/**
+ * How many symptom words a request has to hit to count as that fault.
+ *
+ * Two, normally — one word is not an identification. "Seat keeps sinking" and
+ * "how do I raise the seat" share only "seat", and treating that as a match fed
+ * the planner a failed-gas-cylinder diagnosis for what is really a question
+ * about the height lever.
+ *
+ * The exception is a symptom that lists alternatives rather than a phrase —
+ * "Squeaks and creaks" is asking for either word, so one hit is the whole match.
+ */
+function required(symptom, words) {
+  const alternatives = /\b(?:and|or|und|oder)\b/i.test(symptom);
+  return alternatives ? 1 : Math.min(2, words.length);
 }
 
 /**
@@ -865,14 +1012,6 @@ export function partInfoDigest(modelKey) {
   // matches the name in the parts list the LLM is given — otherwise a German
   // session would get English keys and echo them back into `PART:` headers.
   return Object.entries(info).map(([name, desc]) => `${localizeName(name)}: ${tr(desc)}`).join(' | ');
-}
-
-/** Quiz entries → [{ indices, question, answer }] (only those that matched parts). */
-export function resolveQuiz(modelKey, parts) {
-  const entries = CONTENT[modelKey]?.quiz ?? [];
-  return entries
-    .map((e) => ({ indices: findParts(parts, e.match), question: tr(e.question), answer: tr(e.answer) }))
-    .filter((e) => e.indices.length > 0);
 }
 
 function genericTeardown(parts) {

@@ -104,6 +104,17 @@ export function isSpeaking() {
   return speaking;
 }
 
+// While the user holds the mic, the tutor has no floor at all — not "it stops
+// when it notices", but "nothing may start". Silencing on the press alone left
+// gaps: an answer whose audio was still being generated, a puzzle prompt on a
+// timer, a beat that had already been requested. Each would arrive a moment
+// later and talk into the microphone the user is speaking into.
+let muted = false;
+export function setMuted(on) {
+  muted = !!on;
+  if (muted) stop();
+}
+
 export function stop() {
   seq++;
   speaking = false;
@@ -180,6 +191,10 @@ async function playStreaming(res, my) {
 export async function speak(text, { onStart = null, onEnd = null } = {}) {
   if (!text) { onStart?.(); onEnd?.(); return; }
   stop();         // releases the previous utterance's waiter
+  // Muted (the mic is held): the line is dropped, not queued — by the time the
+  // user lets go it would be answering a question they have already replaced.
+  // Both callbacks still fire, so a caller awaiting this beat is never stranded.
+  if (muted) { onStart?.(); onEnd?.(); return; }
   const my = seq; // this utterance owns the channel until a newer stop()/speak()
   pendingStart = onStart;
   pendingEnd = onEnd;

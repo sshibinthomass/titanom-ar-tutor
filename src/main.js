@@ -5,14 +5,14 @@ import { buildExplodedView, setExplode, setPartExplode, isolateParts, clearPartS
 import { hydrateIcons, setLabel, iconSvg } from './icons.js';
 import { updateTweens, tweenTo, cancelTween, isTweening, easeInOutCubic, flyToParts, moveCamera } from './animate.js';
 import { attachPicker, attachDragger } from './select.js';
-import { selectableModes, resolveFix, resolveAssemble, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest, fixSuggestions, resolvePlanParts, partLabel, canonicalName } from './modes.js';
+import { MODE_LIST, resolveFix, resolveAssemble, applyNames, knowledgeDigest, partInfoDigest, planRules, matchFault, lintPlan, fixSuggestions, resolvePlanParts, partLabel, canonicalName } from './modes.js';
 import { LANGS, getLang, setLang, onLangChange, t, locale, applyStaticTranslations } from './i18n.js';
 import { isARSupported, startAR, updateAR, endAR, requestMove, setInteractor, setManipulationEnabled, setPivotScale, getFitScale } from './ar.js';
 import { startPuzzle, stopPuzzle, updatePuzzle, puzzleInteractor, isPuzzleActive, puzzleAutoPlace, puzzleHintIndices, puzzleStatus, puzzleAnswerByName, puzzleAnswerCandidates } from './puzzle.js';
-import { speak, stop as stopSpeaking, isSpeaking } from './tts.js';
+import { speak, stop as stopSpeaking, isSpeaking, setMuted } from './tts.js';
 import { primeSfx, playSfx } from './sfx.js';
 import { createRecognizer } from './voice.js';
-import { answerQuestion, explainNextPart, generateFixPlan, resolveSpokenPart } from './tutor.js';
+import { answerQuestion, explainNextPart, generateFixPlan, repairFixPlan, resolveSpokenPart } from './tutor.js';
 import { startFixAnim, stopFixAnim, updateFixAnim, isObjectAction } from './fixanim.js';
 import { aiAvailable } from './ai.js';
 // `homeView` here is the *camera's* default framing; the home screen's current
@@ -495,8 +495,8 @@ function setExplodeAmount(amount, { animate = false, duration = 700 } = {}) {
     onExplodeChange();
     return;
   }
-  // Already there (e.g. Explore → Quiz, both at the same spread): don't collapse
-  // and re-expand for nothing.
+  // Already there (re-entering the mode you are already in): don't collapse and
+  // re-expand for nothing.
   if (Math.abs(to - from) < 1e-4) return;
 
   const n = parts.length;
@@ -598,9 +598,6 @@ let steps = [];        // fix / assemble: [{ index, text }]
 let stepIndex = 0;
 let stepTitle = '';
 let stepKicker = '';
-let quizItems = [];    // quiz: [{ index, question, answer }]
-let quizIndex = 0;
-let quizRevealed = false;
 let focusedPart = null; // name of the currently highlighted part (for the tutor)
 let cardExplode = null; // Explore card's inline explode slider { slider, val }, or null
 
@@ -615,7 +612,7 @@ function say(text) {
 // Build the mode-switch bar once. The captions come from the dictionary and are
 // re-read on a language switch (relabelModes), so the bar itself is built once
 // and never rebuilt — the buttons keep their listeners and their active state.
-for (const m of selectableModes()) {
+for (const m of MODE_LIST) {
   const btn = document.createElement('button');
   btn.className = 'modebtn';
   btn.dataset.mode = m.id;
@@ -668,18 +665,13 @@ function showCard(kicker, bodyHtml, meta = '', { chips = null, nav = false } = {
 function hideCard() { ui.card.classList.remove('show'); }
 
 // Reset all part visuals to a clean, fully-assembled, fully-visible state.
-// The collapse animates, but a mode that immediately re-spreads (Fix, Quiz)
-// replaces the tween before it ticks, so there's no collapse-then-expand
-// flicker on the way in — see setExplodeAmount's no-op guard.
+// The collapse animates, but Fix immediately re-spreads and replaces the tween
+// before it ticks, so there's no collapse-then-expand flicker on the way in —
+// see setExplodeAmount's no-op guard.
 function resetParts() {
   clearPartStates(parts);
   for (const p of parts) p.mesh.visible = true;
   setExplodeAmount(0, { animate: true });
-}
-
-// Spread parts a little so the highlighted one is easy to see in a procedure.
-function mildExplode() {
-  setExplodeAmount(parseFloat(ui.explode.max) * 0.35, { animate: true });
 }
 
 /**
@@ -754,7 +746,6 @@ function enterMode(id) {
   if (id === 'explore') return enterExplore();
   if (id === 'fix') return enterFix();
   if (id === 'assemble') return enterAssemble();
-  if (id === 'quiz') return enterQuiz();
 }
 
 // The card header for a mode. `stepKicker` holds the mode **id**, never this
@@ -866,37 +857,86 @@ async function startFixRequest(request) {
   fixState = 'planning';
   track('fix-request', { input: request, metadata: { model: ui.model.value, lang: getLang() } });
 
-  // No planner to ask: answer with the authored procedure straight away rather
-  // than showing a "planning…" card for a round trip that will never happen.
-  if (!aiAvailable()) {
-    track('fix-plan-fallback', { metadata: { model: ui.model.value, reason: 'no-ai' } });
-    runAuthoredFix();
-    return;
-  }
-
-  showCard(kicker('fix'), `<b>“${esc(request)}”</b><span class="partdesc">${t('fix.planning')}</span>`);
+  // Retrieval first, and locally. Twelve faults on this chair are documented
+  // with a real cause and remedy, and the planner used to reinvent one from
+  // scratch every time — which is where both the run-to-run variance and the
+  // physically impossible procedures came from. A match costs no AI call, so it
+  // also buys the one thing a 20-second plan cannot: something true to say
+  // immediately.
+  const fault = matchFault(currentKey(), request);
+  showCard(kicker('fix'), `<b>“${esc(request)}”</b><span class="partdesc">${
+    fault ? esc(t('fix.knownCause', { symptom: fault.symptom })) : t('fix.planning')}</span>`);
   showCaption(esc(t('fix.planningCaption', { request })));
+  if (fault) say(t('fix.knownCauseSpoken', { symptom: fault.symptom }));
 
-  const plan = await generateFixPlan(getContext(), request);
+  let plan = await generateFixPlan(getContext(), request, { fault });
   if (my !== fixSeq || currentMode !== 'fix') return; // superseded, or the mode was left
 
   if (!plan || !plan.steps.length) {
     if (plan?.intro) { showFixAsk(plan.intro); return; } // "that's not fixable here, because…"
-    // AI unreachable mid-request: run the authored procedure so the demo never dead-ends.
-    track('fix-plan-fallback', { metadata: { model: ui.model.value } });
+    track('fix-plan-fallback', { metadata: { model: ui.model.value, matched: fault?.symptom || null } });
+    // AI unreachable mid-request. The authored procedure is the gas-lift repair
+    // whatever was asked, so it is only the right fallback for the faults it
+    // actually treats — otherwise the retrieved fault's own cause and remedy is
+    // both true and on-topic, which the teardown would not be.
+    if (fault && !fault.procedure) { showFixAsk(fault.text); return; }
     runAuthoredFix();
     return;
   }
 
-  steps = plan.steps.map(toStep);
+  // Everything above this line asked the model to behave; this is where the app
+  // checks. lintPlan grades the resolved walkthrough — the beats that will
+  // actually play, with their parts and gestures — against the constraints that
+  // can be checked mechanically.
+  let built = plan.steps.map(toStep);
+  let violations = lintPlan(currentKey(), parts, built);
+  if (violations.length) {
+    track('fix-plan-violation', {
+      metadata: { model: ui.model.value, count: violations.length, rules: violations.map((v) => v.rule.slice(0, 60)) },
+    });
+    const repaired = await repairFixPlan(getContext(), request, plan, violations, { fault });
+    if (my !== fixSeq || currentMode !== 'fix') return;
+    if (repaired?.steps?.length) {
+      const rebuilt = repaired.steps.map(toStep);
+      const left = lintPlan(currentKey(), parts, rebuilt);
+      // Only take the rewrite if it actually improved things — a "repair" that
+      // trades one violation for another is not worth the swap.
+      if (left.length < violations.length) { plan = repaired; built = rebuilt; violations = left; }
+    }
+    // Last net. A model that has ignored the same rule twice will not honour a
+    // third ask, so the offending beats are simply not spoken: what remains is
+    // still on-topic and no longer teaches something the chair cannot do.
+    if (violations.length) {
+      built = dropBeats(built, violations);
+      track('fix-plan-pruned', { metadata: { model: ui.model.value, dropped: violations.length } });
+    }
+    if (!built.length) { showFixAsk(t('fix.unsafePlan')); return; }
+  }
+
+  steps = built;
   stepIndex = 0;
   stepTitle = plan.title || t('fix.titleFor', { request });
   stepKicker = 'fix';
   fixState = 'guided';
-  track('fix-plan', { metadata: { model: ui.model.value, lang: getLang(), steps: steps.length, request } });
+  track('fix-plan', {
+    metadata: { model: ui.model.value, lang: getLang(), steps: steps.length, request, kind: plan.kind, matched: fault?.symptom || null },
+  });
   fixExplode();
   if (plan.intro) showCaption(esc(plan.intro));
   renderStep(plan.intro);
+}
+
+/**
+ * Drop the beats a lint violation names, and any step left empty by it.
+ * Indices are recomputed, since `step.indices` is what the whole step
+ * spotlights and it must not keep pointing at a beat that no longer plays.
+ */
+function dropBeats(built, violations) {
+  const doomed = new Set(violations.map((v) => `${v.step}:${v.beat}`));
+  return built
+    .map((step, si) => step.beats.filter((_, bi) => !doomed.has(`${si}:${bi}`)))
+    .filter((beats) => beats.length)
+    .map((beats) => ({ beats, indices: [...new Set(beats.flatMap((b) => b.indices))] }));
 }
 
 /**
@@ -1445,44 +1485,6 @@ function puzzleHint() {
   track('puzzle-hint');
 }
 
-// --- Quiz: highlight a part, ask you to name it ---
-function enterQuiz() {
-  quizItems = resolveQuiz(currentKey(), parts);
-  quizIndex = 0;
-  mildExplode();
-  if (!quizItems.length) { showCard(kicker('quiz'), t('quiz.none')); return; }
-  renderQuiz();
-}
-function quizMeta() {
-  return t('quiz.counter', { index: quizIndex + 1, total: quizItems.length });
-}
-function renderQuiz() {
-  const q = quizItems[quizIndex];
-  quizRevealed = false;
-  isolateParts(parts, q.indices);
-  flyTo(q.indices); // the part being asked about has to be visible to be answerable
-  focusedPart = q.indices.length ? partLabel(parts[q.indices[0]]) : focusedPart;
-  showCard(kicker('quiz'), esc(q.question), quizMeta(), {
-    chips: [
-      { label: t('quiz.reveal'), icon: 'check', onClick: revealQuiz },
-      { label: t('quiz.next'), icon: 'next', onClick: nextQuiz },
-    ],
-  });
-  say(q.question);
-}
-function revealQuiz() {
-  if (quizRevealed) return;
-  quizRevealed = true;
-  const q = quizItems[quizIndex];
-  showCard(kicker('quiz'), `${esc(q.question)}<br><b>${esc(t('quiz.answer', { answer: q.answer }))}</b>`, quizMeta(), {
-    chips: [{ label: t('quiz.next'), icon: 'next', onClick: nextQuiz }],
-  });
-}
-function nextQuiz() {
-  quizIndex = (quizIndex + 1) % quizItems.length;
-  renderQuiz();
-}
-
 // --- Part picking (tap) — behaviour depends on the active mode ---
 attachPicker(renderer, camera, () => parts, (index) => {
   if (currentMode === 'explore') {
@@ -1507,10 +1509,6 @@ attachPicker(renderer, camera, () => parts, (index) => {
       showCard(kicker('explore'), t('explore.intro'), t('explore.partCount', { count: parts.length }));
     }
   }
-  else if (currentMode === 'quiz' && index >= 0) {
-    // Tapping a part in quiz mode is a shortcut to reveal.
-    revealQuiz();
-  }
 });
 
 // --- Part dragging (Assemble puzzle) — the desktop half of the input contract.
@@ -1532,6 +1530,10 @@ function getContext() {
     // ALL authored per-part facts (MARKUS_INFO). Never shown or spoken directly
     // — they ground the LLM's answer about whichever part the question concerns.
     partInfo: partInfoDigest(currentKey()),
+    // The checkable subset of the above, restated as short imperatives. Kept a
+    // separate field because the planner puts it LAST in its prompt — see
+    // planSystemPrompt in tutor.js for why that placement is the point.
+    rules: planRules(currentKey()),
     // Authored repair + fault knowledge for this model, so the AI tutor grounds
     // free-form answers in the real faults instead of guessing.
     faults: knowledgeDigest(currentKey()),
@@ -1724,10 +1726,14 @@ window.__gesture = (action, indices = []) => {
 // VAD's guess is still available (the Controls toggle) for when both hands are
 // on the object, which is the case AR exists for.
 //
-// One button, two gestures:
-//   hold  → talk; the release sends what was said
-//   tap   → arm the mic (so the next hold records from the first millisecond),
-//           or mute it again if it was already armed
+// The button owns the whole microphone, not just the recording: the press opens
+// it, the release closes it (voice.js explains why — a track that outlives the
+// question moves the tutor's voice to the earpiece). So the hold is the only
+// gesture that does anything under push-to-talk; a tap is an off switch only
+// while hands-free is the thing holding the mic open.
+//
+//   hold  → talk; the release sends what was said and shuts the mic
+//   tap   → nothing (hands-free: mute)
 const MIC_TAP_MS = 250; // shorter than this was a tap, not a question
 
 // Mirrored from onStateChange so a language switch can relabel the mic button
@@ -1757,15 +1763,45 @@ const recognizer = createRecognizer({
     else if (phase === 'arming') showCaption(t('voice.arming'));
   },
   onError: (msg) => showCaption(esc(msg)),
-  onStateChange: (listening) => { micListening = listening; paintMic(); },
+  // The mic closing is the moment routing can go back to the loudspeaker — and
+  // it happens a beat *after* the release, once the recorder has handed over its
+  // audio, so this is the signal to hang it off rather than the button-up.
+  onStateChange: (listening) => {
+    micListening = listening;
+    if (!listening) preferLoudspeaker();
+    paintMic();
+  },
 });
 if (!recognizer) {
   ui.micBtn.disabled = true;
   ui.micBtn.title = t('btn.micTitle');
 }
 
-// Three states worth telling apart: held (recording right now), hands-free and
-// armed (the VAD is deciding), armed but idle (a hold will be instant).
+/**
+ * Ask the platform to treat this page as playback again.
+ *
+ * Closing the microphone is what actually restores loudspeaker routing (see
+ * voice.js's header), but iOS Safari also exposes the audio session directly
+ * (16.4+) and will keep the page in `play-and-record` — earpiece — until told
+ * otherwise. Feature-detected and best-effort: on every other browser this is a
+ * no-op, and nothing depends on it having worked.
+ */
+function preferLoudspeaker() {
+  // Hands-free keeps the mic open on purpose; claiming a playback-only session
+  // under a live capture is the one way this could do harm.
+  if (recognizer?.isListening()) return;
+  try {
+    if (navigator.audioSession && navigator.audioSession.type !== 'playback') {
+      navigator.audioSession.type = 'playback';
+    }
+  } catch { /* read-only or unsupported — the closed mic is the real fix */ }
+}
+preferLoudspeaker();
+
+// Two states worth telling apart: held (the mic is open and recording right
+// now) and hands-free (the VAD has it open and is deciding). The third class,
+// `armed`, is what a mic that outlives an utterance would look like — only
+// reachable now while hands-free is coming up.
 function paintMic() {
   const hands = micListening && ui.handsfree.checked;
   setLabel(ui.micBtn, t(micHeld ? 'btn.micHold' : hands ? 'btn.micListening' : 'btn.mic'));
@@ -1785,8 +1821,15 @@ function micDown(e) {
   micHeld = true;
   micHoldStart = performance.now();
   micWasArmed = recognizer.isListening();
-  stopSpeaking(); // the tutor yields even before the first syllable arrives
+  // The floor is the user's for as long as the button is down: stop what is
+  // audible, cancel the walkthrough, and refuse anything that tries to start.
+  setMuted(true);
   cancelBeats();
+  // A press retires the question in flight. Otherwise the previous answer —
+  // generated while the user was already asking the next thing — lands in the
+  // gap between the release and the new transcript, and the tutor answers a
+  // question that has been superseded before answering the real one.
+  askSeq++;
   paintMic();
   showCaption(t('voice.holdHint'));
   recognizer.press();
@@ -1798,15 +1841,19 @@ function micUp(e) {
   try { ui.micBtn.releasePointerCapture?.(e?.pointerId); } catch { /* never captured */ }
   const held = performance.now() - micHoldStart;
   const sent = recognizer.release();
+  // The tutor has the floor again. (Routing back to the loudspeaker is handled
+  // by onStateChange, which fires when the mic has actually closed.)
+  setMuted(false);
   paintMic();
   if (sent) return;                       // on its way to the transcriber
-  if (held < MIC_TAP_MS && micWasArmed) { // a tap on a live mic mutes it
+  // A tap only means something while hands-free holds the mic open: there it is
+  // the off switch. Under push-to-talk there is no live mic to switch off — the
+  // release already closed it — so a tap is just a hold that was too short.
+  if (held < MIC_TAP_MS && micWasArmed && ui.handsfree.checked) {
     recognizer.stop();
     showCaption(t('voice.micOff'));
   } else {
-    // Either a tap that armed the mic, or a hold too short to be a question —
-    // both want the same sentence.
-    showCaption(t(micWasArmed ? 'voice.holdHint' : 'voice.micArmed'));
+    showCaption(t('voice.holdHint'));
   }
 }
 
@@ -2094,9 +2141,7 @@ ui.homeBtn.addEventListener('click', () => goTo({ kind: 'home', view: 'choose' }
 // would blank ui.model.value and leave currentModel() undefined.
 const routeVocab = () => ({
   models: selectableModels().map((o) => o.key),
-  // Hidden modes are not link vocabulary either: a bookmark to a retired mode
-  // lands on the default rather than on a screen with no button to leave it by.
-  modes: selectableModes().map((m) => m.id),
+  modes: MODE_LIST.map((m) => m.id),
   defaultMode: 'explore',
 });
 

@@ -120,8 +120,8 @@ const STRINGS = {
   'btn.mic':            { en: 'Hold to ask',                   de: 'Halten & fragen' },
   'btn.micHold':        { en: 'Release to send',               de: 'Loslassen zum Senden' },
   'btn.micListening':   { en: 'Listening…',                    de: 'Ich höre zu…' },
-  'btn.micHint':        { en: 'Hold to talk, release to ask. Tap to arm or mute the mic.',
-                          de: 'Zum Sprechen halten, zum Fragen loslassen. Tippen schaltet das Mikrofon scharf oder stumm.' },
+  'btn.micHint':        { en: 'Hold to talk, release to ask. The mic closes when you let go.',
+                          de: 'Zum Sprechen halten, zum Fragen loslassen. Beim Loslassen schließt sich das Mikrofon.' },
   'btn.micTitle':       { en: 'Voice needs a microphone plus an ElevenLabs or DeutschlandGPT key (or Chrome).',
                           de: 'Für die Sprachfunktion braucht es ein Mikrofon und einen ElevenLabs- oder DeutschlandGPT-Schlüssel (oder Chrome).' },
   'btn.back':           { en: 'Back',                          de: 'Zurück' },
@@ -173,15 +173,13 @@ const STRINGS = {
   'mode.explore':       { en: 'Explore',                       de: 'Erkunden' },
   'mode.fix':           { en: 'Fix',                           de: 'Reparieren' },
   'mode.assemble':      { en: 'Assemble',                      de: 'Zusammenbauen' },
-  'mode.quiz':          { en: 'Quiz',                          de: 'Quiz' },
 
-  // Card kickers: the same four names without the emoji. Kept separate from
+  // Card kickers: the same three names without the emoji. Kept separate from
   // `mode.*` because the card header is typographic (small caps, no icon) and
   // because main.js keys its mode logic on the id, never on this label.
   'kicker.explore':     { en: 'Explore',                    de: 'Erkunden' },
   'kicker.fix':         { en: 'Fix',                        de: 'Reparieren' },
   'kicker.assemble':    { en: 'Assemble',                   de: 'Zusammenbauen' },
-  'kicker.quiz':        { en: 'Quiz',                       de: 'Quiz' },
 
   // -- Explore ---------------------------------------------------------------
   'explore.intro':      { en: 'Tap any part to isolate it, then hold the mic button and ask about it. Drag the slider to spread the parts apart.',
@@ -199,6 +197,17 @@ const STRINGS = {
   'fix.askSpoken':      { en: 'What should we fix? Describe the problem, or pick a suggestion.',
                           de: 'Was sollen wir reparieren? Beschreibe das Problem oder wähle einen Vorschlag.' },
   'fix.planning':       { en: '…planning the repair',       de: '…die Reparatur wird geplant' },
+  // Shown and spoken the instant a request matches an authored fault, while the
+  // plan is still generating — the one true thing the app can say in the ~20 s
+  // the planner takes.
+  'fix.knownCause':     { en: 'Known fault: {symptom} · …planning the repair',
+                          de: 'Bekannter Fehler: {symptom} · …die Reparatur wird geplant' },
+  'fix.knownCauseSpoken':{ en: 'That one\'s documented — {symptom}. Let me plan the repair.',
+                          de: 'Das ist ein bekannter Fehler — {symptom}. Ich plane die Reparatur.' },
+  // Every beat broke a hard constraint and was dropped; better to ask again than
+  // to narrate a repair this chair cannot have.
+  'fix.unsafePlan':     { en: 'I couldn\'t put together a plan I trust for that one. Try describing the problem another way.',
+                          de: 'Dafür konnte ich keinen verlässlichen Plan erstellen. Beschreib das Problem gern nochmal anders.' },
   'fix.planningCaption':{ en: '“{request}” · …planning',    de: '„{request}“ · …wird geplant' },
   'fix.done':           { en: 'Done — that should sort it. Anything else to fix?',
                           de: 'Fertig — das sollte es beheben. Sonst noch etwas zu reparieren?' },
@@ -253,22 +262,12 @@ const STRINGS = {
   'assemble.genericTitle': { en: 'Assemble from parts',     de: 'Aus Einzelteilen zusammenbauen' },
   'assemble.title':     { en: 'Assemble the chair',         de: 'Den Stuhl zusammenbauen' },
 
-  // -- Quiz ------------------------------------------------------------------
-  'quiz.reveal':        { en: 'Reveal answer',              de: 'Antwort zeigen' },
-  'quiz.next':          { en: 'Next question',                 de: 'Nächste Frage' },
-  'quiz.counter':       { en: 'Question {index} of {total}', de: 'Frage {index} von {total}' },
-  'quiz.answer':        { en: 'Answer: {answer}',           de: 'Antwort: {answer}' },
-  'quiz.none':          { en: 'No quiz authored for this model yet.',
-                          de: 'Für dieses Modell gibt es noch kein Quiz.' },
-
   // -- Voice -----------------------------------------------------------------
   'voice.holdHint':     { en: 'Hold the mic button while you talk, then let go — I answer out loud.',
                           de: 'Halte die Mikrofontaste gedrückt, während du sprichst, und lass dann los — ich antworte laut.' },
-  'voice.arming':       { en: 'Mic…',                        de: 'Mikro…' },
-  'voice.micArmed':     { en: 'Mic ready — hold the button and ask.',
-                          de: 'Mikrofon bereit — halte die Taste und frag.' },
-  'voice.micOff':       { en: 'Mic off. Tap or hold the mic button to talk again.',
-                          de: 'Mikrofon aus. Tippe oder halte die Mikrofontaste, um wieder zu sprechen.' },
+  'voice.arming':       { en: 'Mic…',                          de: 'Mikro…' },
+  'voice.micOff':       { en: 'Mic off. Hold the mic button to talk again.',
+                          de: 'Mikrofon aus. Halte die Mikrofontaste, um wieder zu sprechen.' },
   'voice.handsfreeOn':  { en: 'Hands-free on — just talk, no button. Less reliable in a noisy room.',
                           de: 'Freihändig an — einfach sprechen, ohne Taste. In lauter Umgebung weniger zuverlässig.' },
   'voice.handsfreeOff': { en: 'Hands-free off — hold the mic button to talk.',
