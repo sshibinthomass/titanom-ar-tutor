@@ -123,7 +123,13 @@ All 5 modes ride the **same core** (explode + isolate/highlight + visibility);
 only the card content and which parts are lit change:
 
 1. **Explore** — tap a part → isolate + name it.
-2. **Fix** — ordered repair steps; Next/Back spotlights each step's part(s).
+2. **Fix** — **voice-first**: the user says (or taps a suggested symptom for)
+   what's wrong; `generateFixPlan` (tutor.js) has DGPT draft a step plan as
+   strict JSON, grounded in `knowledgeDigest` and constrained to the live part
+   names; `resolvePlanParts` maps each step's part names to indices and the
+   walkthrough rides the same isolate + fly-to + TTS pipeline (Next/Back).
+   The authored `CONTENT[*].fix` procedure is the fallback when DGPT is
+   unconfigured or unreachable — never the only path.
 3. **Assemble** — a **drag-to-build puzzle** (see below); the user places each group.
 4. **Diagnose** — pick a symptom chip → highlight the likely part.
 5. **Quiz** — highlight a part, ask the user to name it.
@@ -255,7 +261,11 @@ The mic (🎤 Ask) is a **pure question channel** — a spoken phrase is never
 parsed into an app command, so misheard noise can't switch modes or "act on
 its own". Don't reintroduce voice commands; the two strictly-matched
 exceptions in `handleSpeech` (a bare mute phrase, and "move it" inside an AR
-session, which has no button) are deliberate and complete.
+session, which has no button) are deliberate and complete. One *mode-scoped
+content route* also exists and is not a command: while Fix mode is waiting for
+a problem (`fixState === 'ask' | 'planning'`), the utterance is the fix
+request itself — it feeds `startFixRequest` (the DGPT planner), exactly like
+tapping a suggestion chip, and never navigates or switches modes.
 
 Capture (`voice.js`) is an always-on pipeline, not the Web Speech API: a
 WebAudio **VAD** (band-limited 300–3400 Hz energy over an adaptive noise

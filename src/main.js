@@ -4,13 +4,14 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { buildExplodedView, setExplode, setPartExplode, isolateParts, clearPartStates, setHighlight, findParts } from './explode.js';
 import { updateTweens, tweenTo, cancelTween, isTweening, easeInOutCubic, flyToParts, moveCamera } from './animate.js';
 import { attachPicker, attachDragger } from './select.js';
-import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest } from './modes.js';
+import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest, fixSuggestions, resolvePlanParts } from './modes.js';
 import { isARSupported, startAR, updateAR, endAR, requestMove, setInteractor, setManipulationEnabled, setPivotScale, getFitScale } from './ar.js';
 import { startPuzzle, stopPuzzle, updatePuzzle, puzzleInteractor, isPuzzleActive, puzzleAutoPlace, puzzleHintIndices, puzzleStatus } from './puzzle.js';
 import { speak, stop as stopSpeaking, isSpeaking } from './tts.js';
 import { primeSfx, playSfx } from './sfx.js';
 import { createRecognizer } from './voice.js';
-import { answerQuestion, answerDiagnosis, explainNextPart } from './tutor.js';
+import { answerQuestion, answerDiagnosis, explainNextPart, generateFixPlan } from './tutor.js';
+import { aiAvailable } from './ai.js';
 import { initTelemetry, track } from './telemetry.js';
 
 // ---- Model registry --------------------------------------------------------
@@ -635,14 +636,87 @@ function addCardExplodeSlider() {
   cardExplode = { slider, val };
 }
 
-// --- Fix / Assemble: ordered steps ---
+// --- Fix: voice-first, DGPT-planned repair ------------------------------------
+// The user says (or taps a suggested) problem; DeutschlandGPT drafts a step plan
+// grounded in the authored knowledge digest and constrained to the live part
+// names, and the app walks it with the same isolate + camera-flight + TTS
+// pipeline the authored procedure used. Without DGPT the authored procedure
+// runs exactly as before — the fallback, not the feature.
+let fixState = 'ask';   // 'ask' (waiting for a problem) | 'planning' | 'guided'
+let fixSeq = 0;         // newest fix request wins if two plans race
+
 function enterFix() {
-  const proc = resolveFix(currentKey(), parts);
-  steps = proc.steps; stepIndex = 0; stepTitle = proc.title; stepKicker = 'Fix';
-  mildExplode();
-  renderStep();
+  fixSeq++; // drop any plan still in flight from a previous visit / old part list
+  if (!aiAvailable()) {
+    const proc = resolveFix(currentKey(), parts);
+    steps = proc.steps; stepIndex = 0; stepTitle = proc.title; stepKicker = 'Fix';
+    fixState = 'guided';
+    mildExplode();
+    renderStep();
+    return;
+  }
+  showFixAsk();
 }
-function renderStep() {
+
+// The ask-screen: what problem are we solving? The chips are authored symptoms
+// (fixSuggestions) but they are only canned voice inputs — tapping one and
+// speaking a phrase feed the same planner. `lead` lets a finished or failed
+// plan re-ask with its own line instead of the default question.
+function showFixAsk(lead = '') {
+  fixState = 'ask';
+  steps = [];
+  focusedPart = null;
+  clearPartStates(parts);
+  setExplodeAmount(0, { animate: true });
+  const chips = fixSuggestions(currentKey()).map((label) => ({
+    label: `🔧 ${label}`,
+    onClick: () => startFixRequest(label),
+  }));
+  showCard(
+    'Fix',
+    `<b>${lead || 'What should we fix?'}</b><span class="partdesc">Tap 🎤 and describe the problem — or pick one below.</span>`,
+    '',
+    { chips }
+  );
+  say(lead || 'What should we fix? Describe the problem, or pick a suggestion.');
+}
+
+/** A problem arrived (spoken or tapped): plan it with DGPT and start the walkthrough. */
+async function startFixRequest(request) {
+  const my = ++fixSeq;
+  fixState = 'planning';
+  track('fix-request', { input: request, metadata: { model: ui.model.value } });
+  showCard('Fix', `<b>“${request}”</b><span class="partdesc">…planning the repair</span>`);
+  showCaption(`“${request}” · …planning`);
+
+  const plan = await generateFixPlan(getContext(), request);
+  if (my !== fixSeq || currentMode !== 'fix') return; // superseded, or the mode was left
+
+  if (!plan || !plan.steps.length) {
+    if (plan?.intro) { showFixAsk(plan.intro); return; } // "that's not fixable here, because…"
+    // AI unreachable mid-request: run the authored procedure so the demo never dead-ends.
+    const proc = resolveFix(currentKey(), parts);
+    steps = proc.steps; stepIndex = 0; stepTitle = proc.title; stepKicker = 'Fix';
+    fixState = 'guided';
+    track('fix-plan-fallback', { metadata: { model: ui.model.value } });
+    mildExplode();
+    renderStep();
+    return;
+  }
+
+  steps = plan.steps.map((s) => ({ indices: resolvePlanParts(parts, s.parts), text: s.text }));
+  stepIndex = 0;
+  stepTitle = plan.title || `Fix: ${request}`;
+  stepKicker = 'Fix';
+  fixState = 'guided';
+  track('fix-plan', { metadata: { model: ui.model.value, steps: steps.length, request } });
+  mildExplode();
+  if (plan.intro) showCaption(plan.intro);
+  renderStep(plan.intro);
+}
+
+// `preface` is the plan's intro sentence, spoken once ahead of the first step.
+function renderStep(preface = '') {
   const title = stepTitle, kicker = stepKicker;
   if (!steps.length) { showCard(kicker, 'No procedure for this model yet.'); return; }
   const s = steps[stepIndex];
@@ -653,18 +727,26 @@ function renderStep() {
 
   const partName = stepIndices.length ? parts[stepIndices[0]].name : null;
   focusedPart = partName;
+  const chips = kicker === 'Fix' && aiAvailable()
+    ? [{ label: '🎤 Fix something else', onClick: () => { stopSpeaking(); showFixAsk(); } }]
+    : null;
   showCard(
     kicker,
     `<b>${title}</b><br>${s.text}`,
     `Step ${stepIndex + 1} of ${steps.length}` + (partName ? ` · ${partName}` : ' · (part not matched)'),
-    { nav: true }
+    { nav: true, chips }
   );
   ui.stepPrev.disabled = stepIndex === 0;
   ui.stepNext.textContent = stepIndex === steps.length - 1 ? 'Done ✔' : 'Next ▶';
-  say(s.text);
+  say(preface ? `${preface} ${s.text}` : s.text);
 }
 function goStep(delta) {
   if (!steps.length) return;
+  // 'Done ✔' on the last Fix step closes the plan and asks for the next problem.
+  if (delta > 0 && stepIndex === steps.length - 1) {
+    if (stepKicker === 'Fix' && aiAvailable()) showFixAsk('Done — that should sort it. Anything else to fix?');
+    return;
+  }
   stepIndex = Math.max(0, Math.min(steps.length - 1, stepIndex + delta));
   renderStep();
 }
@@ -989,6 +1071,15 @@ async function handleSpeech(text) {
     return;
   }
 
+  // Fix mode, waiting for a problem: the utterance IS the fix request — the
+  // content input this mode exists to receive (a Diagnose chip, spoken), not a
+  // command; it never navigates or switches modes. Speaking again while a plan
+  // is still being drafted simply replaces it (fixSeq — newest request wins).
+  if (currentMode === 'fix' && (fixState === 'ask' || fixState === 'planning') && aiAvailable()) {
+    startFixRequest(t);
+    return;
+  }
+
   const my = ++askSeq;
   showCaption(`“${t}” · …thinking`);
   track('voice-question', { input: t, metadata: { mode: currentMode, part: focusedPart } });
@@ -1028,6 +1119,10 @@ function highlightPartByName(name) {
   }
   return true;
 }
+
+// DEBUG: simulate a spoken phrase from the console (no mic needed) — exercises
+// the exact same routing as real speech, incl. Fix-mode planning.
+window.__ask = handleSpeech;
 
 const recognizer = createRecognizer({
   onResult: handleSpeech,
