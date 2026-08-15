@@ -60,6 +60,79 @@ export async function answerDiagnosis(ctx, { symptom, part, reference, question 
 }
 
 /**
+ * Fix mode's planner: turn a spoken problem ("it keeps sinking", "the armrest
+ * wobbles") into a step-by-step repair plan the app can *animate* — each step
+ * names the exact parts to spotlight, so isolate + camera flight + TTS all ride
+ * the same guided-step pipeline as before. The plan is grounded in the authored
+ * knowledge digest (the real IKEA manual for the Markus) and constrained to the
+ * live part list, so DGPT can only reference parts that actually exist in the
+ * split model.
+ *
+ * Returns { title, intro, steps:[{ parts:[names], text }] } — steps may be []
+ * when the model judges the request unfixable on this object (intro then says
+ * why, spoken). Returns null on any AI/parse failure so the caller can fall
+ * back to the authored procedure; the demo never dead-ends.
+ */
+export async function generateFixPlan(ctx, request) {
+  const trace = startTrace('ai-fix-plan', {
+    input: request,
+    metadata: { model: ctx.modelLabel, partCount: (ctx.parts || []).length },
+  });
+
+  if (!aiAvailable()) {
+    trace.end({ output: null, metadata: { aiAvailable: false } });
+    return null;
+  }
+
+  const partNames = [...new Set(ctx.parts || [])].filter(Boolean);
+  const system = [
+    'You are an augmented-reality repair tutor. Produce a step-by-step repair plan that an app will animate on a 3D exploded model, highlighting the named parts and speaking each step out loud.',
+    `The object is a ${ctx.modelLabel}. Its parts, with the EXACT names the app knows them by: ${partNames.join('; ')}.`,
+    ctx.diagnostics && `Ground truth about this exact object — prefer it and never contradict it: ${ctx.diagnostics}`,
+    'Reply with ONLY a JSON object — no markdown fences, no prose before or after — in exactly this shape:',
+    '{"title":"short plan title","intro":"one spoken sentence saying what we will do and why","steps":[{"parts":["exact part name"],"text":"one or two short spoken sentences of instruction"}]}',
+    'Rules: 3 to 7 steps, in the real repair order. Every entry in "parts" MUST be copied verbatim from the part list above — the part(s) the user physically works on in that step; use [] only if genuinely none apply.',
+    'Keep instructions practical and grounded in the ground truth; do NOT invent tools, torque values, measurements, or part numbers it does not support. Plain spoken language, no markdown.',
+    'If the request cannot be repaired on this object (wrong object, not a repair, nonsense), return {"title":"","intro":"<one spoken sentence explaining why and what they could ask instead>","steps":[]}.',
+  ].filter(Boolean).join(' ');
+
+  try {
+    const raw = await chat(
+      [{ role: 'system', content: system }, { role: 'user', content: `Fix request: ${request}` }],
+      { temperature: 0.2, maxTokens: 900, trace, name: 'fix-plan' }
+    );
+    const plan = extractFixPlan(raw);
+    trace.end({ output: plan, metadata: { steps: plan?.steps?.length ?? 0, parsed: !!plan } });
+    return plan;
+  } catch (e) {
+    console.warn('generateFixPlan failed:', e.message);
+    trace.end({ output: null, metadata: { error: e.message } });
+    return null;
+  }
+}
+
+// Tolerant JSON extraction: models sometimes wrap the object in fences or a
+// stray sentence, so slice from the first '{' to the last '}' before parsing.
+function extractFixPlan(raw) {
+  const m = String(raw || '').match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  let obj;
+  try { obj = JSON.parse(m[0]); } catch { return null; }
+  if (!obj || !Array.isArray(obj.steps)) return null;
+  const steps = obj.steps
+    .filter((s) => s && typeof s.text === 'string' && s.text.trim())
+    .map((s) => ({
+      parts: Array.isArray(s.parts) ? s.parts.filter((p) => typeof p === 'string' && p.trim()) : [],
+      text: s.text.trim(),
+    }));
+  return {
+    title: typeof obj.title === 'string' ? obj.title.trim() : '',
+    intro: typeof obj.intro === 'string' ? obj.intro.trim() : '',
+    steps,
+  };
+}
+
+/**
  * Assemble-puzzle guidance, spoken when a piece doesn't go in.
  *
  * Phrased as an **instruction, not a correction**: name the part that goes on

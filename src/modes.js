@@ -83,7 +83,7 @@ export function applyNames(modelKey, parts) {
 
 export const MODE_LIST = [
   { id: 'explore', label: '🔍 Explore', hint: 'Tap any part to isolate and read it.' },
-  { id: 'fix', label: '🔧 Fix', hint: 'Step-by-step repair — Next / Back.' },
+  { id: 'fix', label: '🔧 Fix', hint: 'Say what\'s wrong — the tutor plans and walks the repair.' },
   { id: 'assemble', label: '🧩 Assemble', hint: 'Build it up one part at a time.' },
   { id: 'diagnose', label: '🩺 Diagnose', hint: 'Pick a symptom — find the likely part.' },
   { id: 'quiz', label: '❓ Quiz', hint: 'Name the highlighted part.' },
@@ -387,6 +387,52 @@ const ASSEMBLE_STEPS = {
     { group: 'Headrest', text: 'The fixed headrest tops the backrest frame. Now the two-person lift: lower the whole chair onto the gas cylinder (step 10). Done!' },
   ],
 };
+
+/**
+ * Suggestion chips for Fix's ask-screen ("What should we fix?"). Derived from
+ * the authored diagnose symptoms — the problems we already know this object
+ * has — so the suggestions ride the existing authored knowledge instead of
+ * becoming a second, parallel hardcode. They are just canned voice inputs:
+ * tapping one feeds the same DGPT planner a spoken phrase would.
+ */
+export function fixSuggestions(modelKey) {
+  const c = CONTENT[modelKey];
+  const out = [];
+  for (const d of c?.diagnose ?? []) {
+    const label = d.symptoms[0];
+    if (!out.includes(label)) out.push(label);
+    if (out.length >= 4) break;
+  }
+  if (!out.length && c?.fix?.title) out.push(c.fix.title);
+  if (!out.length) out.push('Take it apart step by step');
+  return out;
+}
+
+/**
+ * Resolve a DGPT plan step's part names → live part indices. Exact-name match
+ * first (case-insensitive), collecting EVERY part that shares the name or
+ * extends it ("Caster" → Caster wheels / stem / brake hood ×5, "Armrest" →
+ * both frames and pads) — the same family rule Assemble uses. A name the model
+ * bent slightly ("Casters", "the gas lift") falls back to keyword matching so
+ * a near-miss still lights the right part instead of nothing.
+ */
+export function resolvePlanParts(parts, names) {
+  const out = new Set();
+  for (const raw of names || []) {
+    const n = String(raw).trim().toLowerCase();
+    if (!n) continue;
+    let hit = false;
+    parts.forEach((p, i) => {
+      const pn = (p.name || p.label || '').toLowerCase();
+      if (pn === n || pn.startsWith(n + ' ')) { out.add(i); hit = true; }
+    });
+    if (!hit) {
+      const words = n.split(/[^a-z]+/).filter((w) => w.length > 2);
+      for (const i of findParts(parts, words)) out.add(i);
+    }
+  }
+  return [...out].sort((a, b) => a - b);
+}
 
 /** Fix procedure → { title, steps:[{ indices, text }] }. */
 export function resolveFix(modelKey, parts) {
