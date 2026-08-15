@@ -4,7 +4,7 @@
  * channel — spoken phrases are never parsed into app commands (that used to
  * live here as classifyCommand and made the app act on misheard noise).
  */
-import { aiAvailable, chat } from './ai.js';
+import { aiAvailable, chat, PLAN_MODEL } from './ai.js';
 import { startTrace } from './telemetry.js';
 import { FIX_ACTIONS, FIX_ACTION_GUIDE } from './fixanim.js';
 
@@ -98,11 +98,19 @@ export async function generateFixPlan(ctx, request) {
     'If the request cannot be repaired on this object (wrong object, not a repair, nonsense), return {"title":"","intro":"<one spoken sentence explaining why and what they could ask instead>","steps":[]}.',
   ].filter(Boolean).join(' ');
 
+  const messages = [{ role: 'system', content: system }, { role: 'user', content: `Fix request: ${request}` }];
   try {
-    const raw = await chat(
-      [{ role: 'system', content: system }, { role: 'user', content: `Fix request: ${request}` }],
-      { temperature: 0.2, maxTokens: 900, trace, name: 'fix-plan' }
-    );
+    let raw;
+    try {
+      // Planning gets the strongest model (PLAN_MODEL, Opus by default) — a
+      // one-shot structured task where quality beats latency.
+      raw = await chat(messages, { temperature: 0.2, maxTokens: 900, trace, name: 'fix-plan', model: PLAN_MODEL });
+    } catch (e) {
+      // The premium tier can be rate-limited or momentarily down; one retry on
+      // the everyday model before giving up to the authored fallback.
+      console.warn(`fix-plan on ${PLAN_MODEL} failed (${e.message}), retrying on the default model`);
+      raw = await chat(messages, { temperature: 0.2, maxTokens: 900, trace, name: 'fix-plan-retry' });
+    }
     const plan = extractFixPlan(raw);
     trace.end({ output: plan, metadata: { steps: plan?.steps?.length ?? 0, parsed: !!plan } });
     return plan;

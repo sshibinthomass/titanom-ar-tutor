@@ -16,6 +16,11 @@ const BASE_ENV = import.meta.env.VITE_DGPT_BASE_URL;
 const BASE = (BASE_ENV || (import.meta.env.DEV ? '/dgpt-api' : 'https://api.deutschlandgpt.de/v2')).replace(/\/$/, '');
 const KEY = import.meta.env.VITE_DGPT_API_KEY;
 const MODEL = import.meta.env.VITE_DGPT_MODEL || 'claude-4.5-sonnet';
+// The Fix planner's model. Planning is a one-shot structured task where quality
+// beats latency (the user watches a "…planning" card, not a silent pause in
+// speech), so it gets the strongest model; conversational answers stay on the
+// faster default above.
+export const PLAN_MODEL = import.meta.env.VITE_DGPT_PLAN_MODEL || 'claude-opus-5';
 // Speech-to-text model for /audio/transcriptions. whisper-1 is verified against
 // the live API; the platform also offers voxtral-mini-2507, chirp-3, scribe_v1/v2.
 const STT_MODEL = import.meta.env.VITE_DGPT_STT_MODEL || 'whisper-1';
@@ -68,7 +73,7 @@ export async function transcribe(blob, { filename = 'utterance.webm', trace = nu
  * this call as a generation — model, I/O, token usage and latency all land in
  * Langfuse. It's optional; without it the call is untraced but identical.
  */
-export async function chat(messages, { temperature = 0.4, maxTokens = 320, trace = null, name = 'deutschlandgpt' } = {}) {
+export async function chat(messages, { temperature = 0.4, maxTokens = 320, trace = null, name = 'deutschlandgpt', model = MODEL } = {}) {
   if (!aiAvailable()) throw new Error('DeutschlandGPT not configured (set VITE_DGPT_API_KEY)');
   const startTime = new Date().toISOString();
   const modelParameters = { temperature, max_completion_tokens: maxTokens };
@@ -79,16 +84,16 @@ export async function chat(messages, { temperature = 0.4, maxTokens = 320, trace
       // Send the key only if we have one; a key-holding Worker adds it instead.
       ...(KEY ? { Authorization: `Bearer ${KEY}` } : {}),
     },
-    body: JSON.stringify({ model: MODEL, messages, temperature, max_completion_tokens: maxTokens }),
+    body: JSON.stringify({ model, messages, temperature, max_completion_tokens: maxTokens }),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     const msg = `DeutschlandGPT ${res.status}: ${body.slice(0, 200)}`;
-    trace?.generation({ name, model: MODEL, modelParameters, input: messages, startTime, level: 'ERROR', statusMessage: msg });
+    trace?.generation({ name, model, modelParameters, input: messages, startTime, level: 'ERROR', statusMessage: msg });
     throw new Error(msg);
   }
   const data = await res.json();
   const text = (data.choices?.[0]?.message?.content || '').trim();
-  trace?.generation({ name, model: MODEL, modelParameters, input: messages, output: text, usage: data.usage, startTime });
+  trace?.generation({ name, model, modelParameters, input: messages, output: text, usage: data.usage, startTime });
   return text;
 }
