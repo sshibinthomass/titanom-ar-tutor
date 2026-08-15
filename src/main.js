@@ -8,7 +8,7 @@ import { MODE_LIST, resolveFix, resolveAssemble, resolveQuiz, applyNames, knowle
 import { LANGS, getLang, setLang, onLangChange, t, locale, applyStaticTranslations } from './i18n.js';
 import { isARSupported, startAR, updateAR, endAR, requestMove, setInteractor, setManipulationEnabled, setPivotScale, getFitScale } from './ar.js';
 import { startPuzzle, stopPuzzle, updatePuzzle, puzzleInteractor, isPuzzleActive, puzzleAutoPlace, puzzleHintIndices, puzzleStatus, puzzleAnswerByName, puzzleAnswerCandidates } from './puzzle.js';
-import { speak, stop as stopSpeaking, isSpeaking } from './tts.js';
+import { speak, stop as stopSpeaking, isSpeaking, setMuted } from './tts.js';
 import { primeSfx, playSfx } from './sfx.js';
 import { createRecognizer } from './voice.js';
 import { answerQuestion, explainNextPart, generateFixPlan, resolveSpokenPart } from './tutor.js';
@@ -1653,10 +1653,14 @@ window.__gesture = (action, indices = []) => {
 // VAD's guess is still available (the Controls toggle) for when both hands are
 // on the object, which is the case AR exists for.
 //
-// One button, two gestures:
-//   hold  → talk; the release sends what was said
-//   tap   → arm the mic (so the next hold records from the first millisecond),
-//           or mute it again if it was already armed
+// The button owns the whole microphone, not just the recording: the press opens
+// it, the release closes it (voice.js explains why — a track that outlives the
+// question moves the tutor's voice to the earpiece). So the hold is the only
+// gesture that does anything under push-to-talk; a tap is an off switch only
+// while hands-free is the thing holding the mic open.
+//
+//   hold  → talk; the release sends what was said and shuts the mic
+//   tap   → nothing (hands-free: mute)
 const MIC_TAP_MS = 250; // shorter than this was a tap, not a question
 
 // Mirrored from onStateChange so a language switch can relabel the mic button
@@ -1686,15 +1690,45 @@ const recognizer = createRecognizer({
     else if (phase === 'arming') showCaption(t('voice.arming'));
   },
   onError: (msg) => showCaption(esc(msg)),
-  onStateChange: (listening) => { micListening = listening; paintMic(); },
+  // The mic closing is the moment routing can go back to the loudspeaker — and
+  // it happens a beat *after* the release, once the recorder has handed over its
+  // audio, so this is the signal to hang it off rather than the button-up.
+  onStateChange: (listening) => {
+    micListening = listening;
+    if (!listening) preferLoudspeaker();
+    paintMic();
+  },
 });
 if (!recognizer) {
   ui.micBtn.disabled = true;
   ui.micBtn.title = t('btn.micTitle');
 }
 
-// Three states worth telling apart: held (recording right now), hands-free and
-// armed (the VAD is deciding), armed but idle (a hold will be instant).
+/**
+ * Ask the platform to treat this page as playback again.
+ *
+ * Closing the microphone is what actually restores loudspeaker routing (see
+ * voice.js's header), but iOS Safari also exposes the audio session directly
+ * (16.4+) and will keep the page in `play-and-record` — earpiece — until told
+ * otherwise. Feature-detected and best-effort: on every other browser this is a
+ * no-op, and nothing depends on it having worked.
+ */
+function preferLoudspeaker() {
+  // Hands-free keeps the mic open on purpose; claiming a playback-only session
+  // under a live capture is the one way this could do harm.
+  if (recognizer?.isListening()) return;
+  try {
+    if (navigator.audioSession && navigator.audioSession.type !== 'playback') {
+      navigator.audioSession.type = 'playback';
+    }
+  } catch { /* read-only or unsupported — the closed mic is the real fix */ }
+}
+preferLoudspeaker();
+
+// Two states worth telling apart: held (the mic is open and recording right
+// now) and hands-free (the VAD has it open and is deciding). The third class,
+// `armed`, is what a mic that outlives an utterance would look like — only
+// reachable now while hands-free is coming up.
 function paintMic() {
   const hands = micListening && ui.handsfree.checked;
   ui.micBtn.textContent = t(micHeld ? 'btn.micHold' : hands ? 'btn.micListening' : 'btn.mic');
@@ -1714,8 +1748,15 @@ function micDown(e) {
   micHeld = true;
   micHoldStart = performance.now();
   micWasArmed = recognizer.isListening();
-  stopSpeaking(); // the tutor yields even before the first syllable arrives
+  // The floor is the user's for as long as the button is down: stop what is
+  // audible, cancel the walkthrough, and refuse anything that tries to start.
+  setMuted(true);
   cancelBeats();
+  // A press retires the question in flight. Otherwise the previous answer —
+  // generated while the user was already asking the next thing — lands in the
+  // gap between the release and the new transcript, and the tutor answers a
+  // question that has been superseded before answering the real one.
+  askSeq++;
   paintMic();
   showCaption(t('voice.holdHint'));
   recognizer.press();
@@ -1727,15 +1768,19 @@ function micUp(e) {
   try { ui.micBtn.releasePointerCapture?.(e?.pointerId); } catch { /* never captured */ }
   const held = performance.now() - micHoldStart;
   const sent = recognizer.release();
+  // The tutor has the floor again. (Routing back to the loudspeaker is handled
+  // by onStateChange, which fires when the mic has actually closed.)
+  setMuted(false);
   paintMic();
   if (sent) return;                       // on its way to the transcriber
-  if (held < MIC_TAP_MS && micWasArmed) { // a tap on a live mic mutes it
+  // A tap only means something while hands-free holds the mic open: there it is
+  // the off switch. Under push-to-talk there is no live mic to switch off — the
+  // release already closed it — so a tap is just a hold that was too short.
+  if (held < MIC_TAP_MS && micWasArmed && ui.handsfree.checked) {
     recognizer.stop();
     showCaption(t('voice.micOff'));
   } else {
-    // Either a tap that armed the mic, or a hold too short to be a question —
-    // both want the same sentence.
-    showCaption(t(micWasArmed ? 'voice.holdHint' : 'voice.micArmed'));
+    showCaption(t('voice.holdHint'));
   }
 }
 

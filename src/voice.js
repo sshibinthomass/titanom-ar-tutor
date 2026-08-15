@@ -16,8 +16,27 @@
  *    usable with both hands on the object — the whole point in AR — but it is a
  *    guess, and a guess that is wrong cuts a sentence in half or never fires.
  *
- * Both share one armed mic, so switching between them costs no getUserMedia and
- * a hold always works even with hands-free on.
+ * **Who holds the microphone open** follows from that, and it is not a detail:
+ * a live capture track puts the phone's audio session into *communication* mode
+ * (Android needs it for the platform echo canceller; iOS's PlayAndRecord
+ * category is the same story), and that mode routes playback to the **earpiece**
+ * — the tutor's voice suddenly comes out of the receiver you hold to your ear
+ * instead of the loudspeaker, and stays there for as long as the track lives.
+ * So:
+ *
+ *  - Under push-to-talk the mic is opened by the press and **closed by the
+ *    release**, as soon as the recorder has handed over its audio. Nothing is
+ *    kept warm between questions, which is what puts the answer back on the
+ *    loudspeaker. It costs the opening moments of the first syllable while
+ *    getUserMedia resolves — the caption says the mic is coming up.
+ *  - Hands-free is the one mode that genuinely needs a track that outlives an
+ *    utterance, so there it stays open (and earpiece routing with it) until the
+ *    toggle goes off.
+ *
+ * Echo cancellation follows the same split: it is what the VAD needs to hear the
+ * user over the tutor, and it is also what forces communication mode, so only
+ * hands-free asks for it. Push-to-talk has nothing to cancel — main.js keeps the
+ * tutor silent while the button is down.
  *
  * Fallback: the Web Speech API, used only when neither remote STT is
  * configured (Android Chrome + desktop Chrome only). It supports the same two
@@ -119,6 +138,7 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
   let freq = null;
   let bandLo = 1, bandHi = 1;
   let tick = null;
+  let capTimer = null;      // push-to-talk runaway cap (no VAD ticker to carry it)
 
   let rec = null;           // current MediaRecorder
   let recStartedAt = 0;
@@ -262,7 +282,18 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
   function flushUtterance() {
     const mySession = session;
     const done = stopRecorder(rec);
-    if (listening) startRecorder(); // keep the mic hot for the next question
+    rec = null;
+    if (handsFree) {
+      if (listening) startRecorder(); // the VAD needs a live recorder for the next question
+    } else {
+      // Push-to-talk: the utterance is over, so the microphone must actually
+      // close — a live track holds the audio session in communication mode and
+      // the answer would come out of the earpiece. Wait for the recorder's final
+      // blob first: pulling the tracks out from under an open MediaRecorder
+      // truncates it. `releaseStream` leaves `session` alone, so the audio
+      // already on its way to the transcriber still gets answered.
+      done.then(() => { if (mySession === session && !pressed) releaseStream(); });
+    }
     onStatus?.('transcribing');
     sendChain = sendChain.then(async () => {
       const blob = await done;
@@ -284,10 +315,11 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
   // ---- Push-to-talk -------------------------------------------------------
 
   /**
-   * The button went down. Arms the mic first if it isn't already — the very
-   * first press has to pay for getUserMedia (and possibly a permission prompt),
-   * which is why main.js also arms on a tap: after that, a hold records from
-   * the first millisecond.
+   * The button went down: open the microphone (unless hands-free already has it
+   * open) and start recording. The press pays for getUserMedia — that is the
+   * price of a mic that isn't left running between questions, and the reason
+   * `onStatus('arming')` fires: the caption tells the user the mic is coming up
+   * rather than letting them talk into a stream that doesn't exist yet.
    */
   async function press() {
     if (pressed) return;
@@ -295,17 +327,24 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
     pressFlushed = false;
     if (!listening) {
       onStatus?.('arming');
-      await start();
-      if (!pressed) return;               // let go while the mic was coming up
-      if (!listening) { pressed = false; return; } // getUserMedia refused; start() reported it
+      await openMic(handsFree);
+      // Let go while the mic was coming up: release() found nothing to end, so
+      // closing it is on us — otherwise a stray tap leaves the track running.
+      if (!pressed) { if (!handsFree && listening) releaseStream(); return; }
+      if (!listening) { pressed = false; return; } // getUserMedia refused; openMic reported it
+    } else {
+      // Hands-free already had the mic: a fresh recorder, so the blob is this
+      // utterance and nothing else. The gap between stopping the old one and
+      // starting this one is a few lines of JS — no one begins a sentence that
+      // fast after pressing a button.
+      restartRecorder();
     }
-    // A fresh recorder, so the blob is the utterance and nothing else. The gap
-    // between stopping the old one and starting this one is a few lines of JS —
-    // no one begins a sentence that fast after pressing a button.
-    restartRecorder();
     speechActive = true;
     speechStartAt = performance.now();
     lastVoiceAt = speechStartAt;
+    // Without the VAD's ticker there is nothing watching a button held down by a
+    // pocket, so push-to-talk carries its own runaway cap.
+    if (!handsFree) capTimer = setTimeout(() => { if (pressed) release(); }, MAX_UTTER_MS);
     onSpeechStart?.();                    // barge-in: the tutor yields the floor
   }
 
@@ -319,35 +358,53 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
     // release doesn't tell the user their question went nowhere.
     if (!pressed) return pressFlushed;
     pressed = false;
-    if (!speechActive) return false;      // released before the mic finished arming
+    clearTimeout(capTimer);
+    capTimer = null;
+    if (!speechActive) return false;      // released before the mic finished opening
     const duration = performance.now() - speechStartAt;
     speechActive = false;
     aboveCount = 0;
     if (duration >= MIN_PUSH_MS) { pressFlushed = true; flushUtterance(); return true; }
-    restartRecorder();                    // a tap, not a question
+    // A tap, not a question: throw the audio away — and under push-to-talk let
+    // the microphone go with it, so a mis-tap doesn't leave the tutor talking
+    // into the earpiece for the rest of the session.
+    if (handsFree) restartRecorder();
+    else releaseStream();
     return false;
   }
 
   function setHandsFree(on) {
     handsFree = !!on;
     aboveCount = 0;
-    // Turning it off mid-utterance would otherwise leave the VAD's capture open
-    // forever — nothing is left to close it.
-    if (!handsFree && speechActive && !pressed) { speechActive = false; restartRecorder(); }
+    if (pressed) return; // a hold owns the mic; its release will apply the new rule
+    // Turning it off ends the VAD's business with the microphone — nothing else
+    // is left to close it, and leaving it open would keep the tutor's voice in
+    // the earpiece for a mode that no longer needs to hear anything.
+    if (!handsFree && listening) stop();
   }
 
-  async function start() {
+  // Arming the mic ahead of a press is a hands-free-only idea now: under
+  // push-to-talk the press opens it and the release closes it.
+  async function start() { return openMic(true); }
+
+  /**
+   * Open the microphone. `vad` also builds the WebAudio analysis graph on top —
+   * under push-to-talk there is nothing to detect (the button states both
+   * boundaries), so the analyser, the worklet and its output node are skipped
+   * entirely rather than left running against a mic that closes in a second.
+   */
+  async function openMic(vad) {
     if (listening) return;
     listening = true;
     const mySession = ++session;
     onStateChange?.(true);
     try {
-      // The three constraints are the noise strategy's first line: the browser's
-      // echo canceller keeps the tutor's own TTS out of the mic (what makes
-      // barge-in usable on a phone speaker), and noise suppression + AGC clean
-      // the signal before the VAD ever sees it.
+      // Noise suppression + AGC clean the signal before either the VAD or the
+      // transcriber sees it. Echo cancellation is asked for only by hands-free:
+      // it is what keeps the tutor's own voice out of the VAD, and it is also
+      // what forces the phone into communication mode (see the module header).
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        audio: { echoCancellation: !!vad, noiseSuppression: true, autoGainControl: true },
       });
     } catch (e) {
       listening = false;
@@ -362,6 +419,8 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
       stream = null;
       return;
     }
+    [blobType, ext] = pickMime();
+    if (!vad) { startRecorder(); return; }
     const AC = window.AudioContext || window.webkitAudioContext;
     audioCtx = new AC();
     await audioCtx.resume().catch(() => {}); // mobile: context starts suspended until a gesture
@@ -376,7 +435,6 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
     const binHz = audioCtx.sampleRate / analyser.fftSize;
     bandLo = Math.max(1, Math.round(SPEECH_BAND[0] / binHz));
     bandHi = Math.min(analyser.frequencyBinCount - 1, Math.round(SPEECH_BAND[1] / binHz));
-    [blobType, ext] = pickMime();
     floor = 8;
     winMin = Infinity;
     winCount = 0;
@@ -426,14 +484,19 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
     if (listening && mySession === session) tick = setInterval(step, FRAME_MS);
   }
 
-  function stop() {
+  /**
+   * Let the microphone go: tracks stopped, audio graph closed. It deliberately
+   * does NOT bump `session`, so an utterance already on its way to the
+   * transcriber still comes back and gets answered — this runs *because* that
+   * utterance was captured, not to cancel it.
+   */
+  function releaseStream() {
     listening = false;
-    pressed = false;
-    pressFlushed = false;
-    session++;
     speechActive = false;
     clearInterval(tick);
     tick = null;
+    clearTimeout(capTimer);
+    capTimer = null;
     if (rec && rec.state !== 'inactive') { try { rec.stop(); } catch { /* already stopped */ } }
     rec = null;
     stream?.getTracks().forEach((t) => t.stop());
@@ -442,6 +505,15 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
     audioCtx = null;
     analyser = null;
     onStateChange?.(false);
+  }
+
+  // The hard stop: everything above, plus a session bump that discards whatever
+  // was in flight. This is mute, and mute means "forget what I just said too".
+  function stop() {
+    pressed = false;
+    pressFlushed = false;
+    session++;
+    releaseStream();
   }
 
   return {
