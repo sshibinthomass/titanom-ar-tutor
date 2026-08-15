@@ -505,9 +505,15 @@ const PART_INFO = {
   'markus-chair': MARKUS_INFO,
 };
 
-/** One-line description for a part in Explore mode, or '' if none authored. */
-export function describePart(modelKey, name) {
-  return PART_INFO[modelKey]?.[name] || '';
+/**
+ * Every authored part fact as one "Name: facts" digest — handed to the LLM so
+ * it can answer about (and name) whichever part a question concerns, without
+ * the app having to guess the part from keywords first.
+ */
+export function partInfoDigest(modelKey) {
+  const info = PART_INFO[modelKey];
+  if (!info) return '';
+  return Object.entries(info).map(([name, desc]) => `${name}: ${desc}`).join(' | ');
 }
 
 /** Quiz entries → [{ indices, question, answer }] (only those that matched parts). */

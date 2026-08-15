@@ -117,76 +117,77 @@ export async function explainNextPart(ctx, { attempted, expected, stepText }) {
 
 /**
  * Answer a free-form question about the current object via DeutschlandGPT.
- * context: { modelLabel, parts:[names], mode, focusedPart }
- * opts.focusOnly: constrain the answer to `context.focusedPart` alone — used by
- *   Explore mode, where the user selects one part and asks about *that part only*.
- * Returns a short spoken answer, or a graceful fallback if AI is unavailable.
+ * context: { modelLabel, parts:[names], mode, focusedPart, partInfo, diagnostics }
+ *
+ * Returns { part, answer }: `part` is the part the question turned out to be
+ * about (a name from context.parts, or null) so the app can highlight it, and
+ * `answer` is the short spoken reply. The LLM decides the part — a question
+ * about ANY part is answered (and that part spotlighted), even while another
+ * is selected; `focusedPart` only resolves "this"/"it". The tutor declines
+ * only when the question has nothing to do with the object at all.
  */
-export async function answerQuestion(context, question, { focusOnly = false } = {}) {
+export async function answerQuestion(context, question) {
   const focusPart = context.focusedPart;
-  // Scope the answer to a single part only when we actually have one selected.
-  const scoped = focusOnly && !!focusPart;
 
   // One trace per answer — carries the question, the context the tutor saw, and
   // (when AI is reached) a child generation with the model call + token usage.
   const trace = startTrace('ai-answer', {
     input: question,
-    metadata: { model: context.modelLabel, mode: context.mode, focusedPart: focusPart, partCount: (context.parts || []).length, scoped },
+    metadata: { model: context.modelLabel, mode: context.mode, focusedPart: focusPart, partCount: (context.parts || []).length },
   });
 
   if (!aiAvailable()) {
-    const fallback = scoped
-      ? `I can't reach the AI tutor right now, but you have the ${focusPart} selected.`
-      : `I can't reach the AI tutor right now, but you're looking at the ${focusPart || context.modelLabel}.`;
-    trace.end({ output: fallback, metadata: { aiAvailable: false } });
-    return fallback;
-  }
-  let system;
-  if (scoped) {
-    // Explore: pin the tutor to the one selected part. It must not wander onto
-    // other parts, and must decline (briefly) anything that isn't about it.
-    system = [
-      'You are an augmented-reality repair and assembly tutor speaking out loud to a user.',
-      `The user is looking at a ${context.modelLabel} and has selected exactly one part: the "${focusPart}".`,
-      `Answer ONLY about the "${focusPart}". Do not describe, compare, or mention any other part of the ${context.modelLabel}.`,
-      // The authored per-part facts (materials, part numbers, behaviours) are
-      // the ground truth for this part — prefer them over general knowledge.
-      context.focusedPartInfo && `Authored facts about the "${focusPart}" — ground your answer in them and do not contradict them: ${context.focusedPartInfo}`,
-      `If the question is not about the "${focusPart}", reply in one sentence that you can only talk about the selected ${focusPart} right now, and suggest they select the part they mean.`,
-      'Answer in at most two short sentences, plain spoken language, practical and friendly. No markdown, no lists.',
-    ].filter(Boolean).join(' ');
-  } else {
-    const parts = [...new Set(context.parts || [])].join(', ');
-    system = [
-      'You are an augmented-reality repair and assembly tutor speaking out loud to a user.',
-      `The user is looking at a ${context.modelLabel} through their phone camera.`,
-      parts && `Its parts are: ${parts}.`,
-      focusPart && `They currently have the "${focusPart}" highlighted.`,
-      focusPart && context.focusedPartInfo && `Authored facts about the "${focusPart}" — prefer them when the question touches this part: ${context.focusedPartInfo}`,
-      context.mode === 'diagnose' && 'They are in Diagnose mode, troubleshooting a fault: name the most likely faulty part and the key fix.',
-      // Ground answers in the authored fix/fault knowledge when it applies; fall
-      // back to general repair sense otherwise. This is what lets Diagnose answer
-      // any spoken question, not just the pre-authored symptom chips.
-      context.diagnostics && `Reference knowledge for THIS model — prefer it when relevant, and answer in your own words: ${context.diagnostics}`,
-      'Answer in at most two short sentences, plain spoken language, practical and friendly.',
-      'If they ask how to fix or replace a part, give the key step. Do not use markdown or lists.',
-    ].filter(Boolean).join(' ');
+    const answer = `I can't reach the AI tutor right now, but you're looking at the ${focusPart || context.modelLabel}.`;
+    trace.end({ output: answer, metadata: { aiAvailable: false } });
+    return { part: null, answer };
   }
 
+  const partNames = [...new Set(context.parts || [])];
+  const system = [
+    'You are an augmented-reality repair and assembly tutor speaking out loud to a user.',
+    `The user is looking at a ${context.modelLabel} through their phone camera.`,
+    partNames.length && `Its parts are: ${partNames.join(', ')}.`,
+    focusPart && `The "${focusPart}" is currently highlighted — words like "this", "it" or "that part" refer to it unless the question names a different part.`,
+    // The authored per-part facts (materials, part numbers, behaviours) are the
+    // ground truth. Giving the LLM ALL of them lets it answer about whichever
+    // part the question concerns without the app guessing from keywords first.
+    context.partInfo && `Reference facts per part — treat these as ground truth and never contradict them: ${context.partInfo}`,
+    context.mode === 'diagnose' && 'They are in Diagnose mode, troubleshooting a fault: name the most likely faulty part and the key fix.',
+    context.diagnostics && `Repair and fault knowledge for THIS model — prefer it when relevant, and answer in your own words: ${context.diagnostics}`,
+    'First work out which single part from the parts list the question is mainly about, if any.',
+    'Reply in EXACTLY this format: a first line reading PART: <that part\'s name copied exactly from the parts list, or NONE>, then the spoken answer on the next line.',
+    'The spoken answer is at most two short sentences, plain spoken language, practical and friendly. No markdown, no lists.',
+    `Answer questions about the ${context.modelLabel} as a whole with PART: NONE and a normal answer.`,
+    `Only if the question is unrelated to the ${context.modelLabel} and its parts entirely (small talk, other objects, other topics), reply PART: NONE and one sentence saying you can only answer questions about this ${context.modelLabel}.`,
+  ].filter(Boolean).join(' ');
+
   try {
-    const answer = await chat(
+    const raw = await chat(
       [
         { role: 'system', content: system },
         { role: 'user', content: question },
       ],
-      { temperature: 0.4, maxTokens: 160, trace, name: 'tutor-answer' }
+      { temperature: 0.4, maxTokens: 200, trace, name: 'tutor-answer' }
     );
-    trace.end({ output: answer });
-    return answer;
+
+    // Parse the PART: header; tolerate a missing or malformed one by treating
+    // the whole reply as the answer (the highlight is a bonus, never a blocker).
+    let part = null;
+    let answer = raw.trim();
+    const m = raw.match(/^\s*PART:\s*([^\n]+)\n+([\s\S]+)$/i);
+    if (m) {
+      const named = m[1].trim();
+      if (!/^none$/i.test(named)) part = named;
+      answer = m[2].trim();
+    } else {
+      answer = raw.replace(/^\s*PART:\s*[^\n]*\n?/i, '').trim() || raw.trim();
+    }
+    trace.end({ output: answer, metadata: { part } });
+    return { part, answer };
   } catch (e) {
     console.warn('answerQuestion failed:', e.message);
-    const fallback = `Sorry, I couldn't reach the tutor. That part is the ${context.focusedPart || 'one you tapped'}.`;
-    trace.end({ output: fallback, metadata: { error: e.message } });
-    return fallback;
+    const answer = `Sorry, I couldn't reach the tutor. That part is the ${context.focusedPart || 'one you tapped'}.`;
+    trace.end({ output: answer, metadata: { error: e.message } });
+    return { part: null, answer };
   }
 }

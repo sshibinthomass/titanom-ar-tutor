@@ -263,9 +263,14 @@ only as the fallback when DGPT is unconfigured; with DGPT the pipeline works
 on any browser with a mic, iOS Safari included.
 
 Answering: `tutor.answerQuestion()` builds a system prompt with the current
-model, its part names, active mode, and focused part (pinned to the selected
-part in Explore), calls DeutschlandGPT, and speaks the ≤2-sentence answer via
-`tts.speak()`.
+model, its part names, active mode, focused part (resolves "this"/"it"), and
+ALL authored per-part facts (`partInfoDigest` — never shown in the UI, LLM
+grounding only), calls DeutschlandGPT, and speaks the ≤2-sentence answer via
+`tts.speak()`. The LLM also names which part the question was about
+(`PART: <name>` header) and main.js spotlights it — so asking about the gas
+lift while the seat is selected highlights the gas lift and answers. It
+declines only questions unrelated to the whole object, never "wrong part"
+questions.
 
 **Nothing ever overlaps.** Three interlocking guards — don't regress them:
 1. **Barge-in**: the VAD's `onSpeechStart` fires the instant the user talks

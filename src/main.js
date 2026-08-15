@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { buildExplodedView, setExplode, setPartExplode, isolateParts, clearPartStates, setHighlight } from './explode.js';
+import { buildExplodedView, setExplode, setPartExplode, isolateParts, clearPartStates, setHighlight, findParts } from './explode.js';
 import { updateTweens, tweenTo, cancelTween, isTweening, easeInOutCubic, flyToParts, moveCamera } from './animate.js';
 import { attachPicker, attachDragger } from './select.js';
-import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames, knowledgeDigest, describePart } from './modes.js';
+import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest } from './modes.js';
 import { isARSupported, startAR, updateAR, endAR, requestMove, setInteractor, setManipulationEnabled, setPivotScale, getFitScale } from './ar.js';
 import { startPuzzle, stopPuzzle, updatePuzzle, puzzleInteractor, isPuzzleActive, puzzleAutoPlace, puzzleHintIndices, puzzleStatus } from './puzzle.js';
 import { speak, stop as stopSpeaking, isSpeaking } from './tts.js';
@@ -910,8 +910,8 @@ attachPicker(renderer, camera, () => parts, (index) => {
     if (index >= 0) {
       const name = parts[index].name;
       focusedPart = name;
-      // Just the name — the authored description (describePart) is deliberately
-      // NOT shown or spoken here. It goes to the LLM as grounding (getContext),
+      // Just the name — the authored part facts (partInfoDigest) are deliberately
+      // NOT shown or spoken here. They go to the LLM as grounding (getContext),
       // so the detail surfaces only when the user actually asks about the part.
       showCard(
         'Explore',
@@ -944,9 +944,9 @@ function getContext() {
     parts: parts.map((p) => p.name).filter(Boolean),
     mode: currentMode,
     focusedPart,
-    // The authored description of the focused part (MARKUS_INFO). Never shown
-    // or spoken directly — it grounds the LLM's answer when the user asks.
-    focusedPartInfo: focusedPart ? describePart(currentKey(), focusedPart) : '',
+    // ALL authored per-part facts (MARKUS_INFO). Never shown or spoken directly
+    // — they ground the LLM's answer about whichever part the question concerns.
+    partInfo: partInfoDigest(currentKey()),
     // Authored fix + diagnosis knowledge for this model, so the AI tutor grounds
     // free-form answers in the real faults instead of guessing.
     diagnostics: knowledgeDigest(currentKey()),
@@ -987,14 +987,41 @@ async function handleSpeech(text) {
   const my = ++askSeq;
   showCaption(`“${t}” · …thinking`);
   track('voice-question', { input: t, metadata: { mode: currentMode, part: focusedPart } });
-  // In Explore with a part selected, pin the answer to that part — that's the
-  // thing the user is asking about. Otherwise answer about the whole object.
-  const scoped = currentMode === 'explore' && selectedPart >= 0 && !!focusedPart;
-  const ans = await answerQuestion(getContext(), t, { focusOnly: scoped });
+  // The LLM answers about whichever part the question concerns and names it —
+  // the app then spotlights that part, so asking about the gas lift while the
+  // seat is selected highlights the gas lift and answers about it.
+  const { part, answer } = await answerQuestion(getContext(), t);
   if (my !== askSeq) return;             // a newer question superseded this answer
   if (recognizer?.isCapturing()) return; // the user is mid-question — never talk over them
-  showCaption(ans);
-  say(ans);
+  if (part) highlightPartByName(part);
+  showCaption(answer);
+  say(answer);
+}
+
+/**
+ * Spotlight the part the tutor just answered about. Exact-name match first
+ * (the LLM copies names from the parts list), keyword fallback for near
+ * misses. Only Explore rewrites the card/selection — the other modes keep
+ * their own step/symptom isolation, we just don't fight it mid-flow.
+ */
+function highlightPartByName(name) {
+  const target = (name || '').toLowerCase().trim();
+  if (!target) return false;
+  const exact = parts.find((p) => (p.name || '').toLowerCase() === target);
+  const indices = exact ? findParts(parts, [exact.name]) : findParts(parts, [target]);
+  if (!indices.length) return false;
+  focusedPart = parts[indices[0]].name;
+  if (currentMode === 'explore') {
+    selectedPart = indices[0];
+    isolateParts(parts, indices, { highlight: false }); // match the tap look: textured part, rest ghosted
+    showCard(
+      'Explore',
+      `<b>${focusedPart}</b>`,
+      `${indices.length > 1 ? indices.length + ' pieces' : parts[indices[0]].triangleCount.toLocaleString() + ' triangles'} · ask 🎤 about this part`
+    );
+    addCardExplodeSlider();
+  }
+  return true;
 }
 
 const recognizer = createRecognizer({
