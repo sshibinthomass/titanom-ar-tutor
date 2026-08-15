@@ -548,6 +548,13 @@ function showCard(kicker, bodyHtml, meta = '', { chips = null, nav = false } = {
       ui.cardChips.appendChild(el);
     }
   }
+  // Every card carries its own explode slider. The Controls panel's copy is
+  // unreachable exactly where it is most wanted — it is a gear-tap bottom sheet
+  // on a phone, and hidden outright during AR — so the card is the only place
+  // the spread can be adjusted on the surfaces the app is actually used on.
+  // Skipped while the puzzle owns part positions, where the slider is a no-op
+  // (see onExplodeChange) and would just be a dead control.
+  if (!isPuzzleActive()) addCardExplodeSlider();
   ui.card.classList.add('show');
 }
 function hideCard() { ui.card.classList.remove('show'); }
@@ -565,6 +572,22 @@ function resetParts() {
 // Spread parts a little so the highlighted one is easy to see in a procedure.
 function mildExplode() {
   setExplodeAmount(parseFloat(ui.explode.max) * 0.35, { animate: true });
+}
+
+/**
+ * Fix opens barely exploded — just enough separation to see a part, while the
+ * object still reads as a chair. The gestures are the point in Fix, and they
+ * only make sense against something recognisable: tipping a chair that has been
+ * blown 35% apart looks like debris rotating, not a chair going on its side.
+ *
+ * 7 is a slider value, not a ratio, so it means the same physical gap however
+ * far a model's own range happens to run — but it is capped at a fraction of
+ * the range so a model authored in small units (the slider max scales with the
+ * model radius) can't be thrown wide open by it.
+ */
+const FIX_EXPLODE = 7;
+function fixExplode() {
+  setExplodeAmount(Math.min(FIX_EXPLODE, parseFloat(ui.explode.max) * 0.15), { animate: true });
 }
 
 /**
@@ -610,12 +633,12 @@ function enterMode(id) {
 // --- Explore: tap a part, isolate + name it ---
 function enterExplore() {
   showCard('Explore', 'Tap any part to isolate it, then tap 🎤 and ask about it. Drag the slider to spread the parts apart.', `${parts.length} parts`);
-  addCardExplodeSlider();
 }
 
-// An explode slider right inside the Explore card, so parts can be spread apart
-// without opening the Controls sheet (hidden on mobile and during AR). It mirrors
-// the panel slider — both drive onExplodeChange, which keeps the two in sync.
+// The explode slider that rides inside every card (appended by showCard), so
+// parts can be spread apart without the Controls sheet — which is a gear tap
+// away on mobile and hidden entirely in AR. It mirrors the panel slider; both
+// drive onExplodeChange, which keeps the two in sync.
 function addCardExplodeSlider() {
   const wrap = document.createElement('div');
   wrap.className = 'card-explode';
@@ -665,7 +688,7 @@ function runAuthoredFix() {
   }));
   stepIndex = 0; stepTitle = proc.title; stepKicker = 'Fix';
   fixState = 'guided';
-  mildExplode();
+  fixExplode();
   renderStep();
 }
 
@@ -679,7 +702,7 @@ function showFixAsk(lead = '') {
   focusedPart = null;
   cancelBeats();
   clearPartStates(parts);
-  setExplodeAmount(0, { animate: true });
+  fixExplode(); // Fix sits at its own spread throughout, including while asking
   const chips = fixSuggestions(currentKey()).map((label) => ({
     label: `🔧 ${label}`,
     onClick: () => startFixRequest(label),
@@ -718,7 +741,7 @@ async function startFixRequest(request) {
   stepKicker = 'Fix';
   fixState = 'guided';
   track('fix-plan', { metadata: { model: ui.model.value, steps: steps.length, request } });
-  mildExplode();
+  fixExplode();
   if (plan.intro) showCaption(plan.intro);
   renderStep(plan.intro);
 }
@@ -1163,7 +1186,6 @@ attachPicker(renderer, camera, () => parts, (index) => {
       focusedPart = null;
       showCard('Explore', 'Tap any part to isolate it, then tap 🎤 and ask about it. Drag the slider to spread the parts apart.', `${parts.length} parts`);
     }
-    addCardExplodeSlider(); // showCard rebuilt the body — re-add the inline explode slider
   }
   else if (currentMode === 'quiz' && index >= 0) {
     // Tapping a part in quiz mode is a shortcut to reveal.
@@ -1301,7 +1323,6 @@ function highlightPartByName(name) {
       `<b>${focusedPart}</b>`,
       `${indices.length > 1 ? indices.length + ' pieces' : parts[indices[0]].triangleCount.toLocaleString() + ' triangles'} · ask 🎤 about this part`
     );
-    addCardExplodeSlider();
   }
   return indices;
 }
@@ -1309,10 +1330,13 @@ function highlightPartByName(name) {
 // DEBUG: simulate a spoken phrase from the console (no mic needed) — exercises
 // the exact same routing as real speech, incl. Fix-mode planning.
 window.__ask = handleSpeech;
-// DEBUG: advance the gesture layer by hand. The render loop is the only caller
-// in real use, but a hidden or backgrounded tab gets no rAF at all, so this is
-// how the animations stay testable headlessly.
-window.__tick = (dt = 1 / 60) => updateFixAnim(dt, parseFloat(ui.explode.value) || 0);
+// DEBUG: advance the animation stack by hand, in the render loop's own order.
+// The loop is the only caller in real use, but a hidden or backgrounded tab
+// gets no rAF at all, so this is how the animations stay testable headlessly.
+window.__tick = (dt = 1 / 60) => {
+  updateTweens(dt);
+  updateFixAnim(dt, parseFloat(ui.explode.value) || 0);
+};
 // DEBUG: the walkthrough currently loaded — which beats, gestures and parts the
 // planner produced, and where we are in it.
 window.__plan = () => ({

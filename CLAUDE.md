@@ -125,14 +125,24 @@ All 5 modes ride the **same core** (explode + isolate/highlight + visibility);
 only the card content and which parts are lit change:
 
 1. **Explore** — tap a part → isolate + name it.
+Every card carries its own **explode slider** (appended by `showCard`, skipped
+only while the Assemble puzzle owns part positions). The Controls panel's copy
+is unreachable exactly where it is most wanted — a gear-tap bottom sheet on a
+phone, and `display:none` during AR — so the card is the only place the spread
+can be adjusted on the surfaces the app is actually used on.
+
 2. **Fix** — **voice-first**: the user says (or taps a suggested symptom for)
    what's wrong; `generateFixPlan` (tutor.js) has DGPT draft a step plan as
    strict JSON, grounded in `knowledgeDigest` and constrained to the live part
    names; `resolvePlanParts` maps each step's part names to indices and the
    walkthrough rides the same isolate + fly-to + TTS pipeline (Next/Back).
-   Each step is a list of **beats** — one spoken sentence plus the gesture that
-   illustrates it — so the model does what the voice is describing, sentence by
-   sentence. See "Fix's narrated gestures" below. The authored `CONTENT[*].fix`
+   Fix opens at a deliberately small spread (`FIX_EXPLODE`, a slider value of 7
+   capped at 15% of the model's range) rather than Diagnose/Quiz's 35%: the
+   gestures are the point here and they only read against something still
+   recognisable as a chair — tipping a model blown 35% apart looks like debris
+   rotating. Each step is a list of **beats** — one spoken sentence plus the
+   gesture that illustrates it — so the model does what the voice is describing,
+   sentence by sentence. See "Fix's narrated gestures" below. The authored `CONTENT[*].fix`
    procedure (one beat per step, carrying an authored verb) is the fallback when
    DGPT is unconfigured or unreachable — never the only path.
 3. **Assemble** — a **drag-to-build puzzle** (see below); the user places each group.
