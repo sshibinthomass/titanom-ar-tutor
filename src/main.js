@@ -1046,7 +1046,7 @@ const recognizer = createRecognizer({
 });
 if (!recognizer) {
   ui.micBtn.disabled = true;
-  ui.micBtn.title = 'Voice needs a microphone plus a DeutschlandGPT key (or Chrome).';
+  ui.micBtn.title = 'Voice needs a microphone plus an ElevenLabs or DeutschlandGPT key (or Chrome).';
 }
 ui.micBtn.addEventListener('click', () => {
   if (!recognizer) return;

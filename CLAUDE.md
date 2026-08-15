@@ -54,9 +54,10 @@ modules are focused, mostly-pure helpers it calls.
 | [src/puzzle.js](src/puzzle.js) | Assemble's drag-to-build engine: scatter, ghost slots, snap magnetism, reject. Surface-agnostic — driven by a world-space ray. |
 | [src/select.js](src/select.js) | Raycast tap/click part-picking (drag threshold so orbiting ≠ tapping) + the desktop part-dragger. |
 | [src/ar.js](src/ar.js) | WebXR `immersive-ar` session: hit-test reticle, tap-to-place, long-press to grab then one-finger drag-to-move / pinch scale + twist rotate; voice "move it" re-places on a fresh anchor. Also hands the finger's target ray to an **interactor** (the puzzle). |
-| [src/tts.js](src/tts.js) | Text-to-speech. ElevenLabs primary, browser `speechSynthesis` fallback; race-proof (one voice at a time) and interruptible. |
+| [src/tts.js](src/tts.js) | Text-to-speech. ElevenLabs primary (streamed via MediaSource so audio starts on the first chunk), browser `speechSynthesis` fallback; race-proof (one voice at a time) and interruptible. |
 | [src/sfx.js](src/sfx.js) | The puzzle's sound cues (snap / reject / dismantle). ElevenLabs **sound generation**, pre-generated + cached; WebAudio synth fallback. |
-| [src/voice.js](src/voice.js) | Speech-to-text: WebAudio VAD + MediaRecorder → DGPT Whisper (noise-robust, works on iOS); Web Speech API fallback. Fires barge-in the moment the user speaks. |
+| [src/voice.js](src/voice.js) | Mic capture: WebAudio VAD + MediaRecorder → the stt.js provider chain (noise-robust, works on iOS); Web Speech API fallback. Fires barge-in the moment the user speaks. |
+| [src/stt.js](src/stt.js) | Transcription provider chain: ElevenLabs **Scribe v2** primary (browser-direct, no proxy hop) → DGPT Whisper fallback. |
 | [src/ai.js](src/ai.js) | DeutschlandGPT chat client (OpenAI-compatible `/chat/completions`). |
 | [src/tutor.js](src/tutor.js) | "Brain" glue: classify a spoken phrase into an app command vs. a free-form question, then answer via AI with context. |
 | [src/telemetry.js](src/telemetry.js) | Langfuse tracing. Batches ingestion events to a credential-free proxy (Vite in dev, Worker in prod). No-op when unconfigured. |
@@ -260,12 +261,16 @@ session, which has no button) are deliberate and complete.
 Capture (`voice.js`) is an always-on pipeline, not the Web Speech API: a
 WebAudio **VAD** (band-limited 300–3400 Hz energy over an adaptive noise
 floor, with hysteresis + a minimum-duration gate) finds utterances,
-`MediaRecorder` captures them, and DGPT's Whisper endpoint
-(`ai.transcribe()`, `/v2/audio/transcriptions`, model `whisper-1` via
-`VITE_DGPT_STT_MODEL`) transcribes them. Transcripts that are only a Whisper
-filler-hallucination ("you", "thank you") are dropped. Web Speech survives
-only as the fallback when DGPT is unconfigured; with DGPT the pipeline works
-on any browser with a mic, iOS Safari included.
+`MediaRecorder` captures them, and the `stt.js` provider chain transcribes
+them: **ElevenLabs Scribe v2** first (`/v1/speech-to-text`, model
+`scribe_v2` via `VITE_ELEVENLABS_STT_MODEL` — browser-direct because
+ElevenLabs serves CORS, so no proxy hop), DGPT Whisper as fallback
+(`ai.transcribe()`, `/v2/audio/transcriptions`, `VITE_DGPT_STT_MODEL`). A
+4xx from Scribe retires it for the session; network errors fall back
+per-utterance. Transcripts that are only an STT filler-hallucination
+("you", "thank you") are dropped. Web Speech survives only as the fallback
+when neither remote STT is configured; otherwise the pipeline works on any
+browser with a mic, iOS Safari included.
 
 Answering: `tutor.answerQuestion()` builds a system prompt with the current
 model, its part names, active mode, focused part (resolves "this"/"it"), and
@@ -289,7 +294,8 @@ questions.
    question arrived (`askSeq`) or the user is mid-utterance (`isCapturing`).
 
 TTS, STT and AI all **degrade gracefully**: no ElevenLabs key → browser
-speech; no DeutschlandGPT → Web Speech recognition + a canned local answer.
+speech + Whisper STT; no DeutschlandGPT → Web Speech recognition + a canned
+local answer.
 
 ### Telemetry (`telemetry.js`)
 
