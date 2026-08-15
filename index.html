@@ -815,7 +815,40 @@
         --text: #eaf2ff;
         --muted: rgba(216, 228, 250, 0.86);
         --faint: rgba(180, 205, 240, 0.7);
+
+        /* The chrome sits on a dark scrim over a camera feed, so it is white
+           here whatever theme the user is in. The light theme's chip ink is a
+           near-black navy (#1f3358) chosen to read on pale glass — left alone it
+           put dark text on the selected mode and made the one button telling you
+           where you are the hardest one to read. The selected fill goes solid
+           for the same reason: a 16%-opacity tint has nothing to sit on when the
+           backdrop is somebody's floor. */
+        --chip-idle-ink: rgba(255, 255, 255, 0.72);
+        --chip-idle: rgba(255, 255, 255, 0.08);
+        --chip-idle-border: rgba(255, 255, 255, 0.16);
+        --chip-sel: rgba(91, 157, 255, 0.85);
+        --chip-sel-border: rgba(200, 226, 255, 0.6);
+        --chip-sel-ink: #ffffff;
+        --chip-sel-glow: 0 0 18px rgba(91, 157, 255, 0.45);
+        --accent-text: #cfe2ff;
       }
+      /* The mode bar paints its colours *directly* rather than through the tokens
+         above. Chrome does not reliably re-resolve a `var()` substitution in an
+         inherited property when the custom property is redefined on an ancestor:
+         under body.ar-active the buttons inherit --chip-idle-ink as white and
+         still compute `color` from the old value (verified — inherited token
+         white, computed colour unchanged). The result was the one control that
+         tells you which mode you are in being the hardest thing on screen to
+         read. Descendant selectors, literal colours, no substitution to miss. */
+      body.ar-active .modebtn { color: rgba(255, 255, 255, 0.75); }
+      body.ar-active .modebtn.active {
+        background: rgba(91, 157, 255, 0.85);
+        border-color: rgba(200, 226, 255, 0.6);
+        color: #ffffff;
+        box-shadow: 0 0 18px rgba(91, 157, 255, 0.45);
+      }
+      body.ar-active .bar-tools > button { color: rgba(255, 255, 255, 0.85); }
+      body.ar-active .card .kicker { color: #cfe2ff; }
 
       /* Modal backdrop behind the mobile controls sheet. Off on desktop. */
       #sheetBackdrop {
