@@ -181,7 +181,7 @@
       /* ---- Glass surfaces ----------------------------------------------------
          One recipe, used by the panel, the card, the fabs and the captions. */
       .panel, .card, .status, .voice-caption, .modebar,
-      .fab, #panelToggle, .corner-controls > button {
+      .fab, .corner-controls > button, .place-guide-inner, .loader-dial {
         background: var(--panel);
         border: 1px solid var(--border);
         backdrop-filter: blur(var(--glass-blur));
@@ -367,6 +367,28 @@
         color: var(--chip-idle-ink);
       }
       .modebtn:hover { background: var(--chip-idle); border-color: var(--chip-idle-border); color: var(--text); }
+      /* The app-level tools at the bar's right end. `order` keeps them after the
+         mode buttons main.js appends, whatever the DOM order. */
+      .bar-tools {
+        order: 2; margin-left: auto; display: flex; align-items: center; gap: 2px;
+        padding-left: 6px; border-left: 1px solid var(--border);
+      }
+      .modebtn { order: 1; }
+      /* 38px, not 40: German "Zusammenbauen" selected is what decides this row,
+         and at 40 it overflowed by 2px — which scrolls the Home button half off
+         rather than looking like a bar you can scroll. */
+      .bar-tools > button {
+        width: 38px; min-height: 38px; margin: 0; padding: 0;
+        border-radius: 50%; justify-content: center;
+        background: transparent; border: 1px solid transparent;
+        color: var(--muted); box-shadow: none;
+      }
+      .bar-tools > button:hover { background: var(--input-bg); border-color: var(--border); color: var(--text); }
+      .bar-tools > button .lbl { display: none; }   /* icon-only: the row is tight */
+      #exitAR { display: none; }
+      #panelToggle { display: none; }   /* desktop: the panel is always open */
+      .modebar { align-items: center; }
+
       .modebtn.active {
         background: var(--chip-sel); border-color: var(--chip-sel-border);
         color: var(--chip-sel-ink); font-weight: 600; box-shadow: var(--chip-sel-glow);
@@ -392,6 +414,8 @@
         box-shadow: var(--shadow); display: none;
       }
       .card.show { display: block; }
+      /* Nothing on the card applies until the object is in the room. */
+      .card.await-place { display: none; }
       .card .kicker {
         font: 600 10px/1 var(--font-mono); letter-spacing: 0.24em; text-transform: uppercase;
         color: var(--accent-text); margin-bottom: 9px;
@@ -530,13 +554,65 @@
         padding: 8px 15px; border-radius: var(--r-pill); transition: opacity 0.3s;
         text-align: center;
       }
+      /* What you asked and what came back, pinned under the header rather than
+         in the dock. Down there it sat on top of the card it was answering
+         *about*, and in AR it covered the object it was describing — the two
+         places you are actually looking. Click-through, so it never eats a tap
+         meant for the scene or a WebXR select. */
       .voice-caption {
-        max-width: min(560px, 100%); font-size: 14.5px; line-height: 1.45; color: var(--text); text-align: center;
+        position: fixed; z-index: 22;
+        top: calc(80px + env(safe-area-inset-top, 0px));
+        left: 50%; transform: translateX(-50%);
+        width: max-content; max-width: min(560px, calc(100vw - 32px));
+        font-size: 14.5px; line-height: 1.45; color: var(--text); text-align: center;
         padding: 11px 17px; border-radius: var(--r-card); display: none;
-        box-shadow: var(--shadow);
+        box-shadow: var(--shadow); pointer-events: none;
       }
       .voice-caption.show { display: block; }
       .voice-caption b { color: var(--accent-text); font-weight: 600; }
+
+      /* ---- AR placement guide -------------------------------------------
+         Shown from the moment a session starts until the object is down. The
+         mic and part-tapping are disabled for exactly that window, so this is
+         the only thing asking for input — there is nothing else to do yet, and
+         nothing else that would work. */
+      .place-guide {
+        position: fixed; z-index: 24; left: 16px; right: 16px;
+        /* Clears the dock: the mic stays on screen while disabled — greyed out
+           says "not yet", a missing button says "gone" — so the guide sits
+           above it rather than on it. */
+        bottom: calc(104px + env(safe-area-inset-bottom, 0px));
+        display: flex; justify-content: center; pointer-events: none;
+      }
+      .place-guide[hidden] { display: none; }
+      .place-guide-inner {
+        max-width: 420px; padding: 16px 20px 17px; border-radius: var(--r-card);
+        text-align: center; box-shadow: var(--shadow);
+      }
+      .place-guide-icon {
+        width: 42px; height: 42px; margin: 0 auto 10px; border-radius: 50%;
+        display: grid; place-items: center;
+        background: var(--chip-sel); border: 1px solid var(--chip-sel-border);
+        color: var(--accent-text);
+        animation: guidepulse 2s ease-in-out infinite;
+      }
+      .place-guide-icon .ico { width: 22px; height: 22px; }
+      .place-guide-title { font-size: 17px; font-weight: 600; margin-bottom: 5px; color: var(--text); }
+      .place-guide-hint { font-size: 13.5px; line-height: 1.45; color: var(--muted); }
+      /* Ready to tap: the prompt goes blue and steadies, matching the ring that
+         has just appeared on the floor. */
+      .place-guide.ready .place-guide-icon {
+        background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+        animation: guideready 1.4s ease-in-out infinite;
+      }
+      @keyframes guidepulse {
+        0%, 100% { transform: scale(1); opacity: 0.75; }
+        50%      { transform: scale(1.07); opacity: 1; }
+      }
+      @keyframes guideready {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(91, 157, 255, 0.5); }
+        50%      { box-shadow: 0 0 0 12px rgba(91, 157, 255, 0); }
+      }
 
       /* ---- Model loading dial ------------------------------------------
          A ring that fills once, with the number inside it. The old readout was
@@ -595,21 +671,6 @@
       }
 
       /* ---- Corner controls (independent of the dock) ---- */
-      /* Right end of the header row, in the seat .corner-controls vacates for a
-         session — so AR reads as the same bar with one button swapped, instead
-         of a pill dropped on top of the mode switcher. */
-      #exitAR {
-        position: fixed; z-index: 40; display: none;
-        top: calc(16px + env(safe-area-inset-top, 0px));
-        right: calc(16px + env(safe-area-inset-right, 0px));
-        width: auto; margin: 0; min-height: 40px; padding: 0 13px;
-        border-radius: var(--r-pill);
-      }
-      #panelToggle {
-        position: fixed; top: 16px; left: 16px; z-index: 25; width: auto; margin: 0;
-        min-height: 40px; padding: 0 15px; border-radius: var(--r-pill); display: none;
-        box-shadow: var(--shadow);
-      }
       .panel.collapsed { display: none; }
 
       /* Language + theme share one flex cluster so neither has to know the
@@ -730,11 +791,12 @@
       /* ---- AR mode: hide the dev chrome, show exit ---- */
       body.ar-active .panel,
       body.ar-active #panelToggle,
+      body.ar-active #homeBtn,
       body.ar-active .corner-controls,
       body.ar-active .status,
       body.ar-active .ambient,
       body.ar-active .fab.ar { display: none !important; }
-      body.ar-active #exitAR { display: flex; }
+      body.ar-active #exitAR { display: inline-flex; }
       /* Over a live camera feed the glass has to stop being expensive: an 18px
          backdrop blur on every surface costs real frames on a mid-range phone,
          and lost frames read as the anchor drifting. One knob, because every
@@ -764,7 +826,7 @@
          still glow rather than none — the depth is the point, the breathing is
          the flourish. */
       @media (prefers-reduced-motion: reduce) {
-        .ambient .dome, .home::after, .fab.mic.listening,
+        .ambient .dome, .home::after, .fab.mic.listening, .place-guide-icon,
         .loader-dial, .loader.spin .loader-arc { animation: none; }
       }
 
@@ -788,39 +850,23 @@
          (gear · theme) sit on their own line; the mode bar gets its own row
          below so nothing overlaps, and the notch/home-bar are respected. */
       @media (max-width: 720px) {
-        /* ONE header row: Controls · the modes · Home. Everything a phone user
-           navigates with, on the line the notch already costs them — and nothing
-           else. Preferences (language, theme) moved inside Controls; a second
-           row of them was eating a third of the viewport above the object. */
-        #panelToggle {
-          display: flex;
-          top: calc(10px + env(safe-area-inset-top, 0px)); left: 12px;
-          padding: 0 12px; min-height: 42px;
-        }
-        #panelToggle .lbl { display: none; }   /* gear only — the row is tight */
+        /* ONE header row, and the bar *is* the row: modes on the left, the
+           Controls/Home tools on the right of the same pill. Preferences
+           (language, theme) live inside Controls; a second row of them was
+           eating a third of the viewport above the object. */
+        #panelToggle { display: inline-flex; }
 
         .corner-controls { top: calc(10px + env(safe-area-inset-top, 0px)); right: 12px; gap: 6px; }
         .corner-controls > button { padding: 0 11px; font-size: 12px; min-height: 42px; }
-        /* Inside an object the panel's Language select is the language control,
-           so the corner keeps Home alone. On the home screen there is no panel to
-           open — and no object yet — so the language toggle comes back, which is
-           the one place a German speaker most needs to find it. */
+        /* Inside an object the panel's Language select is the language control.
+           On the home screen there is no panel to open — and no object yet — so
+           the toggle comes back, the one place a German speaker most needs it. */
         #langToggle { display: none; }
         body.home-open #langToggle { display: flex; }
 
-        /* In a session Exit AR takes the Home button's exact seat, so the header
-           stays the one row it is everywhere else. */
-        #exitAR {
-          top: calc(10px + env(safe-area-inset-top, 0px)); right: 12px;
-          min-height: 42px; padding: 0 12px;
-        }
-        #exitAR .lbl { display: none; }
-
-        /* Mode bar: the middle of that row, scrolling within it if a long
-           selected label (German "Zusammenbauen") outgrows the space. */
         .modebar {
           top: calc(10px + env(safe-area-inset-top, 0px));
-          left: 58px; right: 58px; transform: none; max-width: none;
+          left: 12px; right: 12px; transform: none; max-width: none;
           gap: 4px; padding: 4px; scroll-snap-type: x proximity;
           -webkit-overflow-scrolling: touch; scrollbar-width: none;
         }
@@ -955,7 +1001,22 @@
       </details>
     </div>
 
-    <div class="modebar" id="modebar"></div>
+    <!-- One header row. The modes are built into #modebar by main.js; the tools
+         that act on the whole app rather than on a mode ride along at its right
+         end, behind a divider. Exit AR sits in the same group and simply swaps
+         in for the other two during a session — so AR is the same bar, not a
+         pill dropped on top of it.
+
+         `.bar-tools` is a child of #modebar but ordered after the buttons main.js
+         appends (CSS `order`), so the JS can keep appending without knowing it is
+         here. -->
+    <div class="modebar" id="modebar">
+      <div class="bar-tools">
+        <button id="panelToggle" data-i18n-title="btn.controls" title="Controls"><span data-icon="controls"></span><span class="lbl" data-i18n="btn.controls">Controls</span></button>
+        <button id="homeBtn" data-i18n-title="btn.homeTitle" title="Home"><span data-icon="home"></span><span class="lbl" data-i18n="btn.home">Home</span></button>
+        <button id="exitAR" data-i18n-title="btn.exitAR" title="Exit AR"><span data-icon="close"></span><span class="lbl" data-i18n="btn.exitAR">Exit AR</span></button>
+      </div>
+    </div>
 
     <!-- Bottom dock: voice caption → fabs → card → status, stacked so they never
          collide on narrow screens. -->
@@ -984,6 +1045,18 @@
       </div>
 
       <div class="status" id="status" data-i18n="status.init">Initialising…</div>
+    </div>
+
+    <!-- AR placement guide. Persistent (the caption self-hides after 7s, and
+         this instruction has to outlast that), and the only thing on screen
+         until the object is down — the mic and part-tapping are both off until
+         then, because neither has anything to act on yet. -->
+    <div class="place-guide" id="placeGuide" hidden>
+      <div class="place-guide-inner">
+        <div class="place-guide-icon"><span data-icon="place"></span></div>
+        <div class="place-guide-title" id="placeGuideTitle" data-i18n="ar.guideScanTitle">Point at the floor</div>
+        <div class="place-guide-hint" id="placeGuideHint" data-i18n="ar.guideScanHint">Hold your phone up and sweep it slowly across the floor in front of you.</div>
+      </div>
     </div>
 
     <!-- Model loading. Centred over the scene rather than a line of text in the
@@ -1047,19 +1120,14 @@
       </div>
     </div>
 
-    <button id="panelToggle"><span data-icon="controls"></span><span class="lbl" data-i18n="btn.controls">Controls</span></button>
-    <!-- Top-right cluster: Home, and the one-tap language switch. Language keeps
-         a corner seat because the home screen is the first thing a visitor sees
-         and a German speaker needs it there before anything else is reachable —
-         which is also why this cluster sits above the home overlay. On a phone
-         it collapses to Home alone once you are inside an object; the panel's
-         Language select covers the rest. -->
+    <!-- Only the language switch is left out here, and only for the home screen:
+         that is the first thing a visitor sees, there is no panel to open yet,
+         and a German speaker needs it before anything else is reachable — which
+         is why this cluster still sits above the home overlay's z-index. Inside
+         an object the panel's Language select takes over and this hides. -->
     <div class="corner-controls">
-      <button id="homeBtn" data-i18n-title="btn.homeTitle" title="Home"><span data-icon="home"></span><span class="lbl" data-i18n="btn.home">Home</span></button>
       <button id="langToggle" data-i18n-title="btn.langTitle" title="Switch language"><span data-icon="globe"></span><span class="lbl">EN</span></button>
     </div>
-
-    <button class="fab" id="exitAR"><span data-icon="close"></span><span class="lbl" data-i18n="btn.exitAR">Exit AR</span></button>
 
     <script type="module" src="/src/main.js"></script>
   </body>

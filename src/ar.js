@@ -55,6 +55,7 @@ import * as THREE from 'three';
 
 let session = null;
 let reticle = null;
+let reticleShown = false;      // last state reported to onReticle (edge-triggered)
 let anchor = null;
 let pivot = null;
 let hitTestSource = null;
@@ -190,7 +191,8 @@ function stabilizerUpdate(rawMatrix, dt) {
 
 /**
  * Start an AR session.
- * opts: { renderer, scene, camera, group, controls, overlay, onEnd, onPlaced, fitBox }
+ * opts: { renderer, scene, camera, group, controls, overlay, onEnd, onPlaced,
+ *         onReticle, fitBox }
  *
  * `fitBox` (optional) is the box to size the placement against, instead of the
  * group's live bounds — see the fit below for why that matters.
@@ -297,6 +299,22 @@ export async function startAR(opts) {
   overlayEl.addEventListener('touchend', onTouchEnd, { passive: false });
 }
 
+/**
+ * Show/hide the placement ring, telling the caller when it changes.
+ *
+ * The ring being visible *is* the "you may tap now" signal — it only appears
+ * once the surface estimate has converged (see the stabilizer) — so the UI
+ * guidance rides on exactly the same condition `place()` checks, rather than a
+ * second guess that could disagree with the ring the user is looking at.
+ */
+function setReticleVisible(v) {
+  if (reticle) reticle.visible = v;
+  if (v !== reticleShown) {
+    reticleShown = v;
+    refs?.onReticle?.(v);
+  }
+}
+
 /** Commit the current stable reticle pose as the model's floor anchor. */
 function placeAtReticle(stableMatrix) {
   // Show it immediately at the stable pose so there's no gap while the async
@@ -311,7 +329,7 @@ function placeAtReticle(stableMatrix) {
   refs.group.visible = true;
   placed = true;
   moveMode = false;
-  reticle.visible = false;
+  setReticleVisible(false);
   resetStabilizer();
   setSelected(false); // start unselected — a long-press is needed to manipulate
   refs.onPlaced?.();
@@ -470,7 +488,7 @@ export function updateAR(frame) {
 
   // 3) Reticle / hit-test only while we still need to place (or re-place).
   if (placed && !moveMode) {
-    if (reticle) reticle.visible = false;
+    setReticleVisible(false);
     return;
   }
   if (!hitTestSource) return;
@@ -482,18 +500,18 @@ export function updateAR(frame) {
       const raw = new THREE.Matrix4().fromArray(pose.transform.matrix);
       const stable = stabilizerUpdate(raw, dt);
       if (stable) {
-        reticle.visible = true;
+        setReticleVisible(true);
         reticle.matrix.copy(stable);
         reticle.matrixWorldNeedsUpdate = true;
       } else {
         // Converging: hide the ring until the pose settles so the user isn't
         // invited to tap on a wobbling target.
-        reticle.visible = false;
+        setReticleVisible(false);
       }
       return;
     }
   }
-  reticle.visible = false;
+  setReticleVisible(false);
   resetStabilizer();
 }
 
@@ -679,6 +697,7 @@ function onSessionEnd() {
   session = null;
   placed = false;
   moveMode = false;
+  reticleShown = false;
   resetStabilizer();
 
   refs.onEnd?.();

@@ -282,6 +282,14 @@ const STRINGS = {
   // -- AR --------------------------------------------------------------------
   'ar.needsAndroid':    { en: 'AR needs an Android phone. Tap the AR button for details.',
                           de: 'AR braucht ein Android-Telefon. Tippe auf die AR-Taste für Details.' },
+  // The placement guide. Two states: still looking for a surface, and a ring is
+  // on the floor waiting for a tap.
+  'ar.guideScanTitle':  { en: 'Point at the floor',        de: 'Auf den Boden richten' },
+  'ar.guideScanHint':   { en: 'Hold your phone up and sweep it slowly across the floor a couple of steps ahead of you.',
+                          de: 'Halte dein Handy hoch und schwenke es langsam über den Boden ein paar Schritte vor dir.' },
+  'ar.guideTapTitle':   { en: 'Tap to place the chair',    de: 'Zum Platzieren tippen' },
+  'ar.guideTapHint':    { en: 'The ring shows where it will land. Move the ring where you want it, then tap anywhere.',
+                          de: 'Der Ring zeigt, wo er landet. Schieb den Ring an die gewünschte Stelle und tippe dann irgendwohin.' },
   'ar.pointAtFloor':    { en: 'Point at the floor, then tap to place the chair.',
                           de: 'Richte die Kamera auf den Boden und tippe, um den Stuhl zu platzieren.' },
   'ar.failed':          { en: 'Could not start AR — tap the AR button to launch it.',

@@ -7,7 +7,7 @@ import { updateTweens, tweenTo, cancelTween, isTweening, easeInOutCubic, flyToPa
 import { attachPicker, attachDragger } from './select.js';
 import { MODE_LIST, resolveFix, resolveAssemble, applyNames, knowledgeDigest, partInfoDigest, planRules, matchFault, lintPlan, fixSuggestions, resolvePlanParts, partLabel, canonicalName } from './modes.js';
 import { LANGS, getLang, setLang, onLangChange, t, locale, applyStaticTranslations } from './i18n.js';
-import { isARSupported, startAR, updateAR, endAR, requestMove, setInteractor, setManipulationEnabled, setPivotScale, getFitScale } from './ar.js';
+import { isARSupported, startAR, updateAR, endAR, isPlaced, requestMove, setInteractor, setManipulationEnabled, setPivotScale, getFitScale } from './ar.js';
 import { startPuzzle, stopPuzzle, updatePuzzle, puzzleInteractor, isPuzzleActive, puzzleAutoPlace, puzzleHintIndices, puzzleStatus, puzzleAnswerByName, puzzleAnswerCandidates } from './puzzle.js';
 import { speak, stop as stopSpeaking, isSpeaking, setMuted } from './tts.js';
 import { primeSfx, playSfx } from './sfx.js';
@@ -195,6 +195,9 @@ const ui = {
   langToggle: document.getElementById('langToggle'),
   homeBtn: document.getElementById('homeBtn'),
   loader: document.getElementById('loader'),
+  placeGuide: document.getElementById('placeGuide'),
+  placeGuideTitle: document.getElementById('placeGuideTitle'),
+  placeGuideHint: document.getElementById('placeGuideHint'),
   loaderPct: document.getElementById('loaderPct'),
 };
 
@@ -663,15 +666,18 @@ for (const m of MODE_LIST) {
   btn.addEventListener('click', () => enterMode(m.id));
   ui.modebar.appendChild(btn);
 }
+// `.modebtn`, not `.children` — the bar also carries .bar-tools (Controls,
+// Home, Exit AR), and those are not modes.
+const modeButtons = () => ui.modebar.querySelectorAll('.modebtn');
 function relabelModes() {
-  for (const b of ui.modebar.children) {
+  for (const b of modeButtons()) {
     setLabel(b, t(`mode.${b.dataset.mode}`));
     b.title = t(`mode.${b.dataset.mode}`);
   }
 }
 
 function setModeButtons(active) {
-  for (const b of ui.modebar.children) b.classList.toggle('active', b.dataset.mode === active);
+  for (const b of modeButtons()) b.classList.toggle('active', b.dataset.mode === active);
 }
 
 function showCard(kicker, bodyHtml, meta = '', { chips = null, nav = false } = {}) {
@@ -1525,6 +1531,9 @@ function puzzleHint() {
 
 // --- Part picking (tap) — behaviour depends on the active mode ---
 attachPicker(renderer, camera, () => parts, (index) => {
+  // In AR before placement a tap *is* the placement gesture (see ar.js). Picking
+  // a part off it would fight that, and select something not yet in the room.
+  if (arAwaitingPlacement) return;
   if (currentMode === 'explore') {
     selectedPart = index;
     // No emissive glow here: keep the tapped part fully textured and just dim
@@ -1576,6 +1585,30 @@ function getContext() {
     // free-form answers in the real faults instead of guessing.
     faults: knowledgeDigest(currentKey()),
   };
+}
+
+/**
+ * Everything that needs the object to exist is off until it does.
+ *
+ * Before placement an AR session has a reticle and nothing else: the mic would
+ * be taking a question about a chair that is not in the room yet, and a tap is
+ * *the* placement gesture, so letting it also mean "select a part" would fight
+ * it. Turning both off leaves exactly one thing to do — which is what makes the
+ * guide an instruction rather than a suggestion.
+ */
+let arAwaitingPlacement = false;
+
+function setAwaitingPlacement(on, ready = false) {
+  arAwaitingPlacement = on;
+  ui.placeGuide.hidden = !on;
+  ui.placeGuide.classList.toggle('ready', on && ready);
+  // Don't re-enable a mic that has no recognizer to begin with.
+  ui.micBtn.disabled = on || !recognizer;
+  ui.card.classList.toggle('await-place', on);
+  if (on) {
+    ui.placeGuideTitle.textContent = t(ready ? 'ar.guideTapTitle' : 'ar.guideScanTitle');
+    ui.placeGuideHint.textContent = t(ready ? 'ar.guideTapHint' : 'ar.guideScanHint');
+  }
 }
 
 function showCaption(html) {
@@ -1737,6 +1770,13 @@ window.__tick = (dt = 1 / 60) => {
 };
 // DEBUG: the walkthrough currently loaded — which beats, gestures and parts the
 // planner produced, and where we are in it.
+// The pre-placement gate, which is otherwise only reachable inside a live AR
+// session — i.e. never on the machine this is developed on.
+window.__placeGate = (on = true, ready = false) => {
+  setAwaitingPlacement(on, ready);
+  return { awaiting: arAwaitingPlacement, micDisabled: ui.micBtn.disabled };
+};
+
 window.__plan = () => ({
   title: stepTitle,
   stepIndex,
@@ -1961,6 +2001,7 @@ async function startARFlow() {
       fitBox: restBounds(), // size to the assembled chair, not its exploded spread
       onPlaced: () => {
         track('ar-placed', { metadata: { model: ui.model.value } });
+        setAwaitingPlacement(false);
         applyARInteraction(); // pivot exists only once placed — size + lock it now
         if (isPuzzleActive()) {
           showCaption(t('ar.placedPuzzle'));
@@ -1970,12 +2011,17 @@ async function startARFlow() {
           say(t('ar.placedSpoken'));
         }
       },
+      // The ring only appears once the surface estimate has converged, which is
+      // the same test place() makes — so the prompt can never say "tap" at a
+      // moment a tap would be ignored.
+      onReticle: (visible) => { if (arAwaitingPlacement) setAwaitingPlacement(true, visible); },
       onSelectedChange: (sel) => {
         track(sel ? 'ar-select' : 'ar-deselect');
         showCaption(t(sel ? 'ar.grabbed' : 'ar.released'));
       },
       onEnd: () => {
         document.body.classList.remove('ar-active');
+        setAwaitingPlacement(false);
         arLifeSize = false;
         applyGhostTheme(); // back to the theme's ghost colour, off the camera feed
         track('ar-exit');
@@ -1983,10 +2029,11 @@ async function startARFlow() {
     });
     applyGhostTheme(); // the session is live now → the AR ghost colour
     setInteractor(puzzleInteractor); // the finger's target ray drives part dragging
-    showCaption(t('ar.pointAtFloor'));
+    setAwaitingPlacement(true);
   } catch (e) {
     console.error('AR failed', e);
     document.body.classList.remove('ar-active');
+    setAwaitingPlacement(false);
     track('ar-error', { metadata: { error: e.message }, level: 'ERROR' });
     showCaption(t('ar.failed'));
   }
@@ -1996,6 +2043,7 @@ async function startARFlow() {
 // Everyday nudging is just long-press + drag, so there's no on-screen button.
 function moveARFlow() {
   if (!renderer.xr.isPresenting) { showCaption(t('ar.moveFirst')); return; }
+  setAwaitingPlacement(true);
   requestMove();
   showCaption(t('ar.tapToMove'));
 }
