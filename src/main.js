@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { buildExplodedView, setExplode, setPartExplode, isolateParts, clearPartStates, setHighlight, setGhostStyle, findParts } from './explode.js';
 import { updateTweens, tweenTo, cancelTween, isTweening, easeInOutCubic, flyToParts, moveCamera } from './animate.js';
 import { attachPicker, attachDragger } from './select.js';
-import { MODE_LIST, resolveFix, resolveAssemble, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest, planRules, matchFault, lintPlan, fixSuggestions, resolvePlanParts, partLabel, canonicalName } from './modes.js';
+import { MODE_LIST, resolveFix, resolveAssemble, applyNames, knowledgeDigest, partInfoDigest, planRules, matchFault, lintPlan, fixSuggestions, resolvePlanParts, partLabel, canonicalName } from './modes.js';
 import { LANGS, getLang, setLang, onLangChange, t, locale, applyStaticTranslations } from './i18n.js';
 import { isARSupported, startAR, updateAR, endAR, requestMove, setInteractor, setManipulationEnabled, setPivotScale, getFitScale } from './ar.js';
 import { startPuzzle, stopPuzzle, updatePuzzle, puzzleInteractor, isPuzzleActive, puzzleAutoPlace, puzzleHintIndices, puzzleStatus, puzzleAnswerByName, puzzleAnswerCandidates } from './puzzle.js';
@@ -163,6 +163,7 @@ const ui = {
   tint: document.getElementById('tint'),
   wireframe: document.getElementById('wireframe'),
   autorotate: document.getElementById('autorotate'),
+  handsfree: document.getElementById('handsfree'),
   reset: document.getElementById('reset'),
   status: document.getElementById('status'),
   partCount: document.getElementById('partCount'),
@@ -486,8 +487,8 @@ function setExplodeAmount(amount, { animate = false, duration = 700 } = {}) {
     onExplodeChange();
     return;
   }
-  // Already there (e.g. Explore → Quiz, both at the same spread): don't collapse
-  // and re-expand for nothing.
+  // Already there (re-entering the mode you are already in): don't collapse and
+  // re-expand for nothing.
   if (Math.abs(to - from) < 1e-4) return;
 
   const n = parts.length;
@@ -589,9 +590,6 @@ let steps = [];        // fix / assemble: [{ index, text }]
 let stepIndex = 0;
 let stepTitle = '';
 let stepKicker = '';
-let quizItems = [];    // quiz: [{ index, question, answer }]
-let quizIndex = 0;
-let quizRevealed = false;
 let focusedPart = null; // name of the currently highlighted part (for the tutor)
 let cardExplode = null; // Explore card's inline explode slider { slider, val }, or null
 
@@ -649,18 +647,13 @@ function showCard(kicker, bodyHtml, meta = '', { chips = null, nav = false } = {
 function hideCard() { ui.card.classList.remove('show'); }
 
 // Reset all part visuals to a clean, fully-assembled, fully-visible state.
-// The collapse animates, but a mode that immediately re-spreads (Fix, Quiz)
-// replaces the tween before it ticks, so there's no collapse-then-expand
-// flicker on the way in — see setExplodeAmount's no-op guard.
+// The collapse animates, but Fix immediately re-spreads and replaces the tween
+// before it ticks, so there's no collapse-then-expand flicker on the way in —
+// see setExplodeAmount's no-op guard.
 function resetParts() {
   clearPartStates(parts);
   for (const p of parts) p.mesh.visible = true;
   setExplodeAmount(0, { animate: true });
-}
-
-// Spread parts a little so the highlighted one is easy to see in a procedure.
-function mildExplode() {
-  setExplodeAmount(parseFloat(ui.explode.max) * 0.35, { animate: true });
 }
 
 /**
@@ -716,7 +709,6 @@ function enterMode(id) {
   if (id === 'explore') return enterExplore();
   if (id === 'fix') return enterFix();
   if (id === 'assemble') return enterAssemble();
-  if (id === 'quiz') return enterQuiz();
 }
 
 // The card header for a mode. `stepKicker` holds the mode **id**, never this
@@ -1434,44 +1426,6 @@ function puzzleHint() {
   track('puzzle-hint');
 }
 
-// --- Quiz: highlight a part, ask you to name it ---
-function enterQuiz() {
-  quizItems = resolveQuiz(currentKey(), parts);
-  quizIndex = 0;
-  mildExplode();
-  if (!quizItems.length) { showCard(kicker('quiz'), t('quiz.none')); return; }
-  renderQuiz();
-}
-function quizMeta() {
-  return t('quiz.counter', { index: quizIndex + 1, total: quizItems.length });
-}
-function renderQuiz() {
-  const q = quizItems[quizIndex];
-  quizRevealed = false;
-  isolateParts(parts, q.indices);
-  flyTo(q.indices); // the part being asked about has to be visible to be answerable
-  focusedPart = q.indices.length ? partLabel(parts[q.indices[0]]) : focusedPart;
-  showCard(kicker('quiz'), esc(q.question), quizMeta(), {
-    chips: [
-      { label: t('quiz.reveal'), onClick: revealQuiz },
-      { label: t('quiz.next'), onClick: nextQuiz },
-    ],
-  });
-  say(q.question);
-}
-function revealQuiz() {
-  if (quizRevealed) return;
-  quizRevealed = true;
-  const q = quizItems[quizIndex];
-  showCard(kicker('quiz'), `${esc(q.question)}<br><b>${esc(t('quiz.answer', { answer: q.answer }))}</b>`, quizMeta(), {
-    chips: [{ label: t('quiz.next'), onClick: nextQuiz }],
-  });
-}
-function nextQuiz() {
-  quizIndex = (quizIndex + 1) % quizItems.length;
-  renderQuiz();
-}
-
 // --- Part picking (tap) — behaviour depends on the active mode ---
 attachPicker(renderer, camera, () => parts, (index) => {
   if (currentMode === 'explore') {
@@ -1495,10 +1449,6 @@ attachPicker(renderer, camera, () => parts, (index) => {
       focusedPart = null;
       showCard(kicker('explore'), t('explore.intro'), t('explore.partCount', { count: parts.length }));
     }
-  }
-  else if (currentMode === 'quiz' && index >= 0) {
-    // Tapping a part in quiz mode is a shortcut to reveal.
-    revealQuiz();
   }
 });
 
@@ -1706,12 +1656,35 @@ window.__gesture = (action, indices = []) => {
   return { action, indices };
 };
 
+// ---- The mic: push-to-talk, with hands-free as the opt-in ------------------
+//
+// Holding the button is the primary way to be heard, because press and release
+// ARE the utterance boundaries — nothing has to infer them from a signal, so a
+// quiet voice, a loud room and a mid-sentence pause all behave the same. The
+// VAD's guess is still available (the Controls toggle) for when both hands are
+// on the object, which is the case AR exists for.
+//
+// One button, two gestures:
+//   hold  → talk; the release sends what was said
+//   tap   → arm the mic (so the next hold records from the first millisecond),
+//           or mute it again if it was already armed
+const MIC_TAP_MS = 250; // shorter than this was a tap, not a question
+
 // Mirrored from onStateChange so a language switch can relabel the mic button
 // without asking the recognizer (which may not exist) what state it is in.
 let micListening = false;
+let micHeld = false;
+let micHoldStart = 0;
+let micWasArmed = false;
+
+// Hands-free is a preference, not a screen: it follows the user across links,
+// like theme and language. Default off — see the toggle's comment in index.html.
+const handsFreePref = () => localStorage.getItem('handsfree') === '1';
+ui.handsfree.checked = handsFreePref();
 
 const recognizer = createRecognizer({
   onResult: handleSpeech,
+  handsFree: ui.handsfree.checked,
   // Barge-in: the instant the user starts talking, the tutor yields — their next
   // question must never compete with a half-finished answer, and a Fix
   // walkthrough must not carry on to the next sentence over their voice.
@@ -1719,28 +1692,99 @@ const recognizer = createRecognizer({
   // Lets the VAD demand more sustained energy while the tutor is audible, so
   // speaker bleed the echo canceller misses can't trigger a false barge-in.
   isTtsSpeaking: isSpeaking,
-  onStatus: (phase) => { if (phase === 'transcribing') showCaption(t('voice.transcribing')); },
-  onError: (msg) => showCaption(esc(msg)),
-  onStateChange: (listening) => {
-    micListening = listening;
-    ui.micBtn.classList.toggle('listening', listening);
-    ui.micBtn.textContent = t(listening ? 'btn.micListening' : 'btn.mic');
+  onStatus: (phase) => {
+    if (phase === 'transcribing') showCaption(t('voice.transcribing'));
+    else if (phase === 'arming') showCaption(t('voice.arming'));
   },
+  onError: (msg) => showCaption(esc(msg)),
+  onStateChange: (listening) => { micListening = listening; paintMic(); },
 });
 if (!recognizer) {
   ui.micBtn.disabled = true;
   ui.micBtn.title = t('btn.micTitle');
 }
-ui.micBtn.addEventListener('click', () => {
-  if (!recognizer) return;
-  stopSpeaking();
-  if (recognizer.isListening()) {
+
+// Three states worth telling apart: held (recording right now), hands-free and
+// armed (the VAD is deciding), armed but idle (a hold will be instant).
+function paintMic() {
+  const hands = micListening && ui.handsfree.checked;
+  ui.micBtn.textContent = t(micHeld ? 'btn.micHold' : hands ? 'btn.micListening' : 'btn.mic');
+  ui.micBtn.classList.toggle('listening', micHeld || hands);
+  ui.micBtn.classList.toggle('holding', micHeld);
+  ui.micBtn.classList.toggle('armed', micListening && !micHeld && !hands);
+  if (recognizer) ui.micBtn.title = t('btn.micHint');
+}
+
+function micDown(e) {
+  if (!recognizer || ui.micBtn.disabled || micHeld) return;
+  // A held button is not a tap, a scroll or a text selection; claiming the
+  // pointer means a finger that slides off the button still ends the utterance
+  // here rather than silently cancelling it.
+  e.preventDefault();
+  try { ui.micBtn.setPointerCapture?.(e.pointerId); } catch { /* mouse on old Safari */ }
+  micHeld = true;
+  micHoldStart = performance.now();
+  micWasArmed = recognizer.isListening();
+  stopSpeaking(); // the tutor yields even before the first syllable arrives
+  cancelBeats();
+  paintMic();
+  showCaption(t('voice.holdHint'));
+  recognizer.press();
+}
+
+function micUp(e) {
+  if (!micHeld) return;
+  micHeld = false;
+  try { ui.micBtn.releasePointerCapture?.(e?.pointerId); } catch { /* never captured */ }
+  const held = performance.now() - micHoldStart;
+  const sent = recognizer.release();
+  paintMic();
+  if (sent) return;                       // on its way to the transcriber
+  if (held < MIC_TAP_MS && micWasArmed) { // a tap on a live mic mutes it
     recognizer.stop();
+    showCaption(t('voice.micOff'));
   } else {
-    recognizer.start();
-    showCaption(t('voice.askHint'));
+    // Either a tap that armed the mic, or a hold too short to be a question —
+    // both want the same sentence.
+    showCaption(t(micWasArmed ? 'voice.holdHint' : 'voice.micArmed'));
   }
+}
+
+ui.micBtn.addEventListener('pointerdown', micDown);
+ui.micBtn.addEventListener('pointerup', micUp);
+ui.micBtn.addEventListener('pointercancel', micUp);
+// A tab switch or an alt-tab mid-hold never delivers pointerup: close the
+// utterance rather than leaving the recorder open behind a hidden page.
+window.addEventListener('blur', () => micUp());
+// The button lives in the AR dom-overlay, where a touch also reaches WebXR as a
+// `select` — which is tap-to-place, or a puzzle drag. A hold lasts seconds, so
+// this is the difference between asking a question and re-placing the chair.
+ui.micBtn.addEventListener('beforexrselect', (e) => e.preventDefault());
+// Keyboard parity for the desktop viewer (and for anyone who can't hold a
+// pointer down): Space or Enter held on the focused button talks. `repeat`
+// filters the OS key-repeat, which would otherwise re-press every ~30 ms.
+ui.micBtn.addEventListener('keydown', (e) => {
+  if (e.key !== ' ' && e.key !== 'Enter') return;
+  e.preventDefault();
+  if (!e.repeat) micDown(e);
 });
+ui.micBtn.addEventListener('keyup', (e) => {
+  if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); micUp(e); }
+});
+
+ui.handsfree.addEventListener('change', () => {
+  const on = ui.handsfree.checked;
+  localStorage.setItem('handsfree', on ? '1' : '0');
+  recognizer?.setHandsFree(on);
+  // The change event is a user gesture, so this is a legal moment to ask for
+  // the mic — hands-free with a closed mic would just be a dead switch.
+  if (on && recognizer && !recognizer.isListening()) recognizer.start();
+  paintMic();
+  showCaption(t(on ? 'voice.handsfreeOn' : 'voice.handsfreeOff'));
+  track('handsfree', { metadata: { on } });
+});
+
+paintMic();
 
 // AR availability + start/exit. `arSupported` is kept so a language switch
 // knows which of the two AR-button captions applies.
@@ -1890,8 +1934,8 @@ onLangChange((next) => {
   refreshHome();                     // the home picker lists model names too
   ui.lang.value = next;
   applyTheme(isDark() ? 'dark' : 'light');   // re-label the theme button
-  ui.micBtn.textContent = t(micListening ? 'btn.micListening' : 'btn.mic');
-  ui.micBtn.title = recognizer ? '' : t('btn.micTitle');
+  paintMic();                        // caption + title, in whichever mic state we're in
+  if (!recognizer) ui.micBtn.title = t('btn.micTitle');
   if (!arSupported) { ui.startAR.textContent = t('btn.arUnsupported'); ui.startAR.title = t('btn.arTitle'); }
   ui.status.textContent = t(statusKey, statusVars);
   buildLegend();                     // part names are display names

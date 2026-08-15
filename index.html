@@ -162,7 +162,7 @@
       }
       .dock > * { pointer-events: auto; }
 
-      /* ---- Step / part-info / quiz card ---- */
+      /* ---- Step / part-info card ---- */
       .card {
         width: min(560px, 100%);
         background: var(--panel); border: 1px solid var(--border);
@@ -230,7 +230,14 @@
         backdrop-filter: blur(10px); box-shadow: var(--shadow); cursor: pointer;
       }
       .fab.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+      /* Push-to-talk: the button is held, so the browser must not treat the
+         hold as a scroll, a text selection or a long-press callout — any of
+         those steal the pointer mid-sentence and cancel the capture. */
+      .fab.mic { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+      /* Armed but idle: the mic is open and a hold will record instantly. */
+      .fab.mic.armed { border-color: var(--accent); }
       .fab.mic.listening { background: var(--danger); color: #fff; border-color: var(--danger); animation: pulse 1.2s infinite; }
+      .fab.mic.holding { transform: scale(0.97); }
       @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(224,82,79,0.5); } 50% { box-shadow: 0 0 0 10px rgba(224,82,79,0); } }
       .fab:disabled { opacity: 0.4; cursor: not-allowed; }
 
@@ -394,7 +401,7 @@
           border-radius: 999px; background: var(--border);
         }
 
-        /* Keep a long step/quiz card from eating the viewport; scroll inside. */
+        /* Keep a long step card from eating the viewport; scroll inside. */
         .card { max-height: 42vh; overflow-y: auto; }
         .fab { padding: 12px 16px; font-size: 14px; }
       }
@@ -444,6 +451,10 @@
 
       <div class="toggles">
         <label class="toggle"><input type="checkbox" id="autorotate" /> <span data-i18n="panel.autorotate">Auto-rotate</span></label>
+        <!-- Off by default: holding 🎤 is the reliable way to be heard, and the
+             VAD's guess at where a sentence starts and ends is what a noisy
+             demo hall breaks first. This is the opt-in for both hands busy. -->
+        <label class="toggle" data-i18n-title="panel.handsfreeHint"><input type="checkbox" id="handsfree" /> <span data-i18n="panel.handsfree">Hands-free mic</span></label>
       </div>
 
       <button id="reset" data-i18n="panel.reset">Reset view</button>

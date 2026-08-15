@@ -1,21 +1,30 @@
 /**
  * Speech-to-text: the tutor's ears.
  *
- * Primary: an always-on microphone pipeline — a WebAudio VAD (voice-activity
- * detector) finds utterances, MediaRecorder captures them, and the STT
- * provider chain (stt.js: ElevenLabs Scribe v2 first, DGPT Whisper fallback)
- * turns them into text. This replaces the Web Speech API as the main path
- * because it is far more reliable: it works on every browser with a mic
- * (including iOS Safari, which has no SpeechRecognition), it applies the
- * browser's echo cancellation + noise suppression to the capture, and the
- * VAD's adaptive noise floor keeps ambient noise from being mistaken for
- * speech.
+ * Capture is a MediaRecorder feeding the STT provider chain (stt.js: ElevenLabs
+ * Scribe v2 first, DGPT Whisper fallback). What differs is who decides where an
+ * utterance *starts and ends* — and there are two answers, because they fail in
+ * opposite ways:
+ *
+ *  - **Push-to-talk (the default).** The user holds the 🎤 button; press and
+ *    release ARE the boundaries. Nothing to tune, nothing to mis-hear: a quiet
+ *    voice, a noisy hall, a long thinking pause mid-sentence and an AGC-boosted
+ *    room all behave identically, because none of them are being interpreted.
+ *    This is the reliable path and the one a demo should stand on.
+ *  - **Hands-free (opt-in).** A WebAudio VAD guesses the boundaries from band-
+ *    limited energy against an adaptive noise floor. It is what makes the tutor
+ *    usable with both hands on the object — the whole point in AR — but it is a
+ *    guess, and a guess that is wrong cuts a sentence in half or never fires.
+ *
+ * Both share one armed mic, so switching between them costs no getUserMedia and
+ * a hold always works even with hands-free on.
  *
  * Fallback: the Web Speech API, used only when neither remote STT is
- * configured (Android Chrome + desktop Chrome only).
+ * configured (Android Chrome + desktop Chrome only). It supports the same two
+ * shapes: press/release map onto start/stop, hands-free onto its auto-restart.
  *
  * Both paths expose the same interface from createRecognizer():
- *   { start, stop, setLang, isListening, isCapturing }
+ *   { start, stop, press, release, setHandsFree, setLang, isListening, isCapturing }
  * and both fire onSpeechStart() the instant the user begins talking — main.js
  * uses that to interrupt the tutor's voice (barge-in), so the user can always
  * talk over an answer.
@@ -34,6 +43,8 @@ const HANG_MS = 650;                 // this much silence ends the utterance —
                                      // for a mid-sentence breath, short enough that the
                                      // answer doesn't feel like it waits on a timer
 const MIN_UTTER_MS = 300;            // shorter = a door slam / cough, not a question
+const MIN_PUSH_MS = 250;             // a held button is deliberate, so the bar is lower —
+                                     // but below this it was a tap, not a question
 const MAX_UTTER_MS = 15000;          // force-flush a monologue so it still gets answered
 const IDLE_RESTART_MS = 8000;        // recycle the recorder while silent → small uploads
 const FLOOR_MIN = 3;                 // noise-floor clamp: never fully deaf…
@@ -80,11 +91,14 @@ function isJunk(text) {
  * Create a recognizer. Returns null only if neither path is possible.
  *  onResult(transcript)        — a full utterance was heard and transcribed
  *  onSpeechStart()             — the user just started talking (fire barge-in here)
- *  onStateChange(listening)    — mic toggled on/off
- *  onStatus(phase)             — 'transcribing' while an utterance is at the API
+ *  onStateChange(listening)    — mic armed/disarmed
+ *  onStatus(phase)             — 'arming' while the mic is coming up,
+ *                                'transcribing' while an utterance is at the API
  *  onError(message)            — user-facing problem (mic blocked, network down)
  *  isTtsSpeaking()             — supplied by main.js; hardens the VAD while the
  *                                tutor's own voice is playing
+ *  handsFree                   — start with VAD utterance detection on (default off:
+ *                                push-to-talk is the reliable path)
  */
 export function createRecognizer(opts = {}) {
   if (remoteSttAvailable()) return createVadRecognizer(opts);
@@ -94,8 +108,10 @@ export function createRecognizer(opts = {}) {
 
 // ---- Primary: VAD + MediaRecorder + remote STT (Scribe v2 / Whisper) --------
 
-function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus, onError, isTtsSpeaking } = {}) {
+function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus, onError, isTtsSpeaking, handsFree = false } = {}) {
   let listening = false;
+  let pressed = false;      // the push-to-talk button is down right now
+  let pressFlushed = false; // …and whether this press already sent its audio
   let session = 0;          // bumped on stop(); async continuations check it
   let stream = null;
   let audioCtx = null;
@@ -188,6 +204,23 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
       winCount = 0;
     }
 
+    // Push-to-talk owns the boundaries while the button is down. The press
+    // already stated "speech starts now" and the release will state where it
+    // ends — which is exactly what everything below spends its effort guessing,
+    // so guessing alongside it could only overrule a fact with an estimate. The
+    // runaway cap still applies (a button held down by a pocket, or forgotten).
+    if (pressed) {
+      if (now - speechStartAt > MAX_UTTER_MS) release();
+      return;
+    }
+    // Mic armed, nobody holding: keep the floor calibrated above (so turning
+    // hands-free on mid-session isn't starting from cold) and keep recycling
+    // the recorder, but never open an utterance on our own.
+    if (!handsFree) {
+      if (now - recStartedAt > IDLE_RESTART_MS) restartRecorder();
+      return;
+    }
+
     // Hysteresis: harder to enter speech than to stay in it, so a word's quiet
     // tail doesn't chop the utterance while random peaks still can't start one.
     // The margins are deliberately modest — a soft or far-from-the-mic voice
@@ -246,6 +279,61 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
         if (mySession === session) onError?.(t('voice.sttFailed'));
       }
     });
+  }
+
+  // ---- Push-to-talk -------------------------------------------------------
+
+  /**
+   * The button went down. Arms the mic first if it isn't already — the very
+   * first press has to pay for getUserMedia (and possibly a permission prompt),
+   * which is why main.js also arms on a tap: after that, a hold records from
+   * the first millisecond.
+   */
+  async function press() {
+    if (pressed) return;
+    pressed = true;
+    pressFlushed = false;
+    if (!listening) {
+      onStatus?.('arming');
+      await start();
+      if (!pressed) return;               // let go while the mic was coming up
+      if (!listening) { pressed = false; return; } // getUserMedia refused; start() reported it
+    }
+    // A fresh recorder, so the blob is the utterance and nothing else. The gap
+    // between stopping the old one and starting this one is a few lines of JS —
+    // no one begins a sentence that fast after pressing a button.
+    restartRecorder();
+    speechActive = true;
+    speechStartAt = performance.now();
+    lastVoiceAt = speechStartAt;
+    onSpeechStart?.();                    // barge-in: the tutor yields the floor
+  }
+
+  /**
+   * The button came up. Returns true if an utterance was sent for
+   * transcription — main.js reads that to tell a real hold from a tap.
+   */
+  function release() {
+    // Already let go — which is what the MAX_UTTER_MS cap does to a button held
+    // down for a quarter of a minute. Report that press's outcome, so the real
+    // release doesn't tell the user their question went nowhere.
+    if (!pressed) return pressFlushed;
+    pressed = false;
+    if (!speechActive) return false;      // released before the mic finished arming
+    const duration = performance.now() - speechStartAt;
+    speechActive = false;
+    aboveCount = 0;
+    if (duration >= MIN_PUSH_MS) { pressFlushed = true; flushUtterance(); return true; }
+    restartRecorder();                    // a tap, not a question
+    return false;
+  }
+
+  function setHandsFree(on) {
+    handsFree = !!on;
+    aboveCount = 0;
+    // Turning it off mid-utterance would otherwise leave the VAD's capture open
+    // forever — nothing is left to close it.
+    if (!handsFree && speechActive && !pressed) { speechActive = false; restartRecorder(); }
   }
 
   async function start() {
@@ -340,6 +428,8 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
 
   function stop() {
     listening = false;
+    pressed = false;
+    pressFlushed = false;
     session++;
     speechActive = false;
     clearInterval(tick);
@@ -357,19 +447,22 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
   return {
     start,
     stop,
+    press,
+    release,
+    setHandsFree,
     // No-op by design: this path reads the app language straight from i18n on
     // every request (stt.js pins `language_code` per utterance), so a language
     // switch takes effect on the very next thing the user says — no restart,
     // no state to keep in sync here.
     setLang() {},
     isListening: () => listening,
-    isCapturing: () => speechActive, // mid-utterance right now?
+    isCapturing: () => speechActive, // mid-utterance right now? (held counts)
   };
 }
 
 // ---- Fallback: Web Speech API (Chrome only, no DGPT key needed) --------------
 
-function createWebSpeechRecognizer({ lang = null, onResult, onStateChange, onSpeechStart } = {}) {
+function createWebSpeechRecognizer({ lang = null, onResult, onStateChange, onSpeechStart, handsFree = false } = {}) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const rec = new SR();
   // Web Speech has no auto-detect worth the name, so it must be told the
@@ -381,6 +474,8 @@ function createWebSpeechRecognizer({ lang = null, onResult, onStateChange, onSpe
 
   let listening = false;
   let capturing = false;
+  let pressed = false;
+  let pressedAt = 0;
 
   rec.onspeechstart = () => { capturing = true; onSpeechStart?.(); };
   rec.onspeechend = () => { capturing = false; };
@@ -390,16 +485,19 @@ function createWebSpeechRecognizer({ lang = null, onResult, onStateChange, onSpe
   };
   rec.onend = () => {
     capturing = false;
-    // Auto-restart so it keeps listening until explicitly stopped.
-    if (listening) {
+    // Auto-restart so it keeps listening until explicitly stopped — but only in
+    // hands-free. Under push-to-talk the release is what ends the phrase, and
+    // restarting there would re-open the mic the user just closed.
+    if (listening && handsFree && !pressed) {
       try { rec.start(); } catch { /* already starting */ }
-    } else {
+    } else if (!listening) {
       onStateChange?.(false);
     }
   };
   rec.onerror = (e) => {
     if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
       listening = false;
+      pressed = false;
       onStateChange?.(false);
     }
   };
@@ -408,13 +506,44 @@ function createWebSpeechRecognizer({ lang = null, onResult, onStateChange, onSpe
     start() {
       if (listening) return;
       listening = true;
-      try { rec.start(); } catch { /* already started */ }
+      if (handsFree) { try { rec.start(); } catch { /* already started */ } }
       onStateChange?.(true);
     },
     stop() {
       listening = false;
+      pressed = false;
       try { rec.stop(); } catch { /* not running */ }
       onStateChange?.(false);
+    },
+    // Press/release map straight onto Web Speech's own phrase boundaries — the
+    // engine still decides where words are, we just decide when it may listen.
+    press() {
+      if (pressed) return;
+      pressed = true;
+      pressedAt = performance.now();
+      if (!listening) { listening = true; onStateChange?.(true); }
+      onSpeechStart?.();
+      try { rec.start(); } catch { /* already running from hands-free */ }
+    },
+    // Web Speech delivers asynchronously, so "did this produce words?" isn't
+    // knowable yet — report whether we asked it to, and let onResult fire when
+    // it lands. `stop()` finalises what it heard; below the threshold it was a
+    // tap, and `abort()` throws the fragment away instead of submitting it.
+    release() {
+      if (!pressed) return false;
+      pressed = false;
+      if (performance.now() - pressedAt < MIN_PUSH_MS) {
+        try { rec.abort(); } catch { /* not running */ }
+        return false;
+      }
+      try { rec.stop(); } catch { /* not running */ }
+      return true;
+    },
+    setHandsFree(on) {
+      handsFree = !!on;
+      if (!listening || pressed) return;
+      if (handsFree) { try { rec.start(); } catch { /* already running */ } }
+      else { try { rec.stop(); } catch { /* not running */ } }
     },
     // A live SpeechRecognition ignores a mid-session `lang` change, so bounce
     // it: onend's auto-restart picks the new language up on the next phrase.
@@ -425,6 +554,6 @@ function createWebSpeechRecognizer({ lang = null, onResult, onStateChange, onSpe
       if (listening) { try { rec.stop(); } catch { /* not running */ } }
     },
     isListening: () => listening,
-    isCapturing: () => capturing,
+    isCapturing: () => capturing || pressed,
   };
 }
