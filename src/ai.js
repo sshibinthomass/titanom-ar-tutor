@@ -41,11 +41,15 @@ export function sttAvailable() {
  * clip contained no speech). The filename extension matters: the server sniffs
  * the container from it, so pass one that matches the recorder's mime type.
  */
-export async function transcribe(blob, { filename = 'utterance.webm', trace = null } = {}) {
+export async function transcribe(blob, { filename = 'utterance.webm', language = null, trace = null } = {}) {
   if (!aiAvailable()) throw new Error('DeutschlandGPT not configured (set VITE_DGPT_API_KEY)');
   const form = new FormData();
   form.append('file', blob, filename);
   form.append('model', STT_MODEL);
+  // ISO-639-1 language hint (the OpenAI-compatible `language` field). The app
+  // is monolingual per selection, so telling Whisper which language to expect
+  // is both more accurate on short clips and enforces the product rule.
+  if (language) form.append('language', language);
   const startTime = new Date().toISOString();
   // No manual Content-Type — the browser must set the multipart boundary itself.
   const res = await fetch(`${BASE}/audio/transcriptions`, {

@@ -84,13 +84,15 @@ export function partsBounds(parts, indices) {
   return _box.getBoundingSphere(new THREE.Sphere());
 }
 
-// A ghosted part (isolateParts dims everything else to ~7% opacity) doesn't
-// really block the view, so it must not count as an occluder — otherwise every
-// Fix step, where all the *other* parts are ghosted, would read as "occluded"
-// and swing the camera around for no reason.
+// A ghosted part (isolateParts draws everything else as a see-through wireframe)
+// doesn't really block the view, so it must not count as an occluder — otherwise
+// every Fix step, where all the *other* parts are ghosted, would read as
+// "occluded" and swing the camera around for no reason. Wireframe is the test
+// that matters now; the opacity clause stays for any translucent solid.
 function isSolid(mesh) {
   const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-  return mats.some((m) => m && m.visible !== false && !(m.transparent && m.opacity < 0.5));
+  return mats.some((m) => m && m.visible !== false && !m.wireframe
+    && !(m.transparent && m.opacity < 0.5));
 }
 
 function isOccluded(camPos, target, parts, targetSet) {

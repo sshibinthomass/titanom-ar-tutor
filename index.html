@@ -262,16 +262,23 @@
       }
       .panel.collapsed { display: none; }
 
-      #themeToggle {
-        position: fixed; top: 16px; right: 16px; z-index: 25; width: auto; margin: 0;
-        padding: 9px 12px; border-radius: 10px;
+      /* Language + theme share one flex cluster so neither has to know the
+         other's width (the theme label changes with the theme, the language
+         label with the language). */
+      .corner-controls {
+        position: fixed; top: 16px; right: 16px; z-index: 25;
+        display: flex; gap: 8px; align-items: center;
+      }
+      .corner-controls > button {
+        width: auto; margin: 0; padding: 9px 12px; border-radius: 10px; white-space: nowrap;
         background: var(--panel); border: 1px solid var(--border); box-shadow: var(--shadow); backdrop-filter: blur(10px);
       }
+      #langToggle { font-weight: 600; }
 
       /* ---- AR mode: hide the dev chrome, show exit ---- */
       body.ar-active .panel,
       body.ar-active #panelToggle,
-      body.ar-active #themeToggle,
+      body.ar-active .corner-controls,
       body.ar-active .status,
       body.ar-active .fab.ar { display: none !important; }
       body.ar-active #exitAR { display: flex; }
@@ -297,7 +304,8 @@
           display: block;
           top: calc(10px + env(safe-area-inset-top, 0px)); left: 12px;
         }
-        #themeToggle { top: calc(10px + env(safe-area-inset-top, 0px)); right: 12px; }
+        .corner-controls { top: calc(10px + env(safe-area-inset-top, 0px)); right: 12px; gap: 6px; }
+        .corner-controls > button { padding: 9px 10px; font-size: 12px; }
 
         /* Mode bar: full-width scroll row on its own line under the header. */
         .modebar {
@@ -351,20 +359,27 @@
     <div id="sheetBackdrop"></div>
 
     <div class="panel">
-      <h1>Exploded View</h1>
+      <h1 data-i18n="panel.heading">Exploded View</h1>
       <div class="sub" id="credit">…</div>
 
       <!-- Primary, end-user controls: choose an object, spread it, look around. -->
       <div class="field">
-        <label>Model</label>
+        <label data-i18n="panel.model">Model</label>
         <!-- autocomplete=off: the app owns this value; Chrome form-restoration
              otherwise re-applies a stale selection mid-boot and desyncs the
              loaded model from the semantic name map. -->
         <select id="model" autocomplete="off"></select>
       </div>
 
+      <!-- Language: the app is strictly monolingual per selection — UI, voice,
+           transcription and every AI answer follow this one control. -->
       <div class="field">
-        <label>Explode amount</label>
+        <label data-i18n="panel.language">Language</label>
+        <select id="lang" autocomplete="off"></select>
+      </div>
+
+      <div class="field">
+        <label data-i18n="panel.explode">Explode amount</label>
         <div class="row">
           <input type="range" id="explode" min="0" max="2" step="0.01" value="0" />
         </div>
@@ -372,33 +387,33 @@
       </div>
 
       <div class="toggles">
-        <label class="toggle"><input type="checkbox" id="autorotate" /> Auto-rotate</label>
+        <label class="toggle"><input type="checkbox" id="autorotate" /> <span data-i18n="panel.autorotate">Auto-rotate</span></label>
       </div>
 
-      <button id="reset">Reset view</button>
+      <button id="reset" data-i18n="panel.reset">Reset view</button>
 
       <!-- Developer tools, collapsed by default on every device. Native
            <details> so it needs no JS; the ids stay identical so main.js
            wiring is unchanged wherever these controls live in the DOM. -->
       <details class="advanced">
-        <summary>Advanced</summary>
+        <summary data-i18n="panel.advanced">Advanced</summary>
 
         <div class="field">
-          <label>Split mode</label>
+          <label data-i18n="panel.splitMode">Split mode</label>
           <select id="mode" autocomplete="off">
-            <option value="group">By material group</option>
-            <option value="component">By connected piece</option>
+            <option value="group" data-i18n="panel.splitGroup">By material group</option>
+            <option value="component" data-i18n="panel.splitComp">By connected piece</option>
           </select>
         </div>
 
         <div class="toggles">
-          <label class="toggle"><input type="checkbox" id="tint" /> Tint parts by component</label>
-          <label class="toggle"><input type="checkbox" id="wireframe" /> Wireframe</label>
+          <label class="toggle"><input type="checkbox" id="tint" /> <span data-i18n="panel.tint">Tint parts by component</span></label>
+          <label class="toggle"><input type="checkbox" id="wireframe" /> <span data-i18n="panel.wireframe">Wireframe</span></label>
         </div>
 
         <hr />
 
-        <div class="stat"><span>Component parts</span><b id="partCount">–</b></div>
+        <div class="stat"><span data-i18n="panel.partCount">Component parts</span><b id="partCount">–</b></div>
         <div class="legend" id="legend"></div>
       </details>
     </div>
@@ -411,8 +426,8 @@
       <div class="voice-caption" id="voiceCaption"></div>
 
       <div class="fab-cluster">
-        <button class="fab ar primary" id="startAR">📱 View in AR</button>
-        <button class="fab mic" id="micBtn">🎤 Ask</button>
+        <button class="fab ar primary" id="startAR" data-i18n="btn.ar">📱 View in AR</button>
+        <button class="fab mic" id="micBtn" data-i18n="btn.mic">🎤 Ask</button>
       </div>
 
       <div class="card" id="card">
@@ -421,18 +436,23 @@
         <div class="meta" id="cardMeta"></div>
         <div class="chips" id="cardChips"></div>
         <div class="stepnav" id="cardNav">
-          <button id="stepPrev">◀ Back</button>
-          <button id="stepNext" class="primary">Next ▶</button>
+          <button id="stepPrev" data-i18n="btn.back">◀ Back</button>
+          <button id="stepNext" class="primary" data-i18n="btn.next">Next ▶</button>
         </div>
       </div>
 
-      <div class="status" id="status">Initialising…</div>
+      <div class="status" id="status" data-i18n="status.init">Initialising…</div>
     </div>
 
-    <button id="panelToggle">⚙︎ Controls</button>
-    <button id="themeToggle" title="Toggle light / dark theme">🌙 Dark</button>
+    <button id="panelToggle" data-i18n="btn.controls">⚙︎ Controls</button>
+    <!-- Top-right cluster. Language sits beside the theme switch because it is
+         the same kind of control: a global, one-tap preference. -->
+    <div class="corner-controls">
+      <button id="langToggle" data-i18n-title="btn.langTitle" title="Switch language">🌐 EN</button>
+      <button id="themeToggle" data-i18n-title="btn.themeTitle" title="Toggle light / dark theme">🌙 Dark</button>
+    </div>
 
-    <button class="fab" id="exitAR">✕ Exit AR</button>
+    <button class="fab" id="exitAR" data-i18n="btn.exitAR">✕ Exit AR</button>
 
     <script type="module" src="/src/main.js"></script>
   </body>
