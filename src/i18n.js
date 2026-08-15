@@ -121,6 +121,36 @@ const STRINGS = {
   'btn.next':           { en: 'Next ▶',                     de: 'Weiter ▶' },
   'btn.done':           { en: 'Done ✔',                     de: 'Fertig ✔' },
   'card.explode':       { en: 'Explode',                    de: 'Zerlegen' },
+  'btn.home':           { en: '⌂ Home',                     de: '⌂ Start' },
+  'btn.homeTitle':      { en: 'Back to the object chooser',  de: 'Zurück zur Objektauswahl' },
+
+  // -- Home screen -----------------------------------------------------------
+  'home.sub':           { en: 'What are we working on?',     de: 'Woran arbeiten wir?' },
+  'home.scan':          { en: 'Scan an object',              de: 'Objekt scannen' },
+  'home.scanSub':       { en: "Point your camera at it and I'll recognise it.",
+                          de: 'Richte die Kamera darauf — ich erkenne es.' },
+  'home.select':        { en: 'Select an object',            de: 'Objekt auswählen' },
+  'home.selectSub':     { en: 'Choose from the objects I know.',
+                          de: 'Wähle aus den Objekten, die ich kenne.' },
+
+  // -- Object scan (camera → vision) ----------------------------------------
+  'scan.capture':       { en: '📸 Capture',                  de: '📸 Aufnehmen' },
+  'scan.retake':        { en: '↺ Retake',                    de: '↺ Neu aufnehmen' },
+  'scan.chooseInstead': { en: '📋 Pick from the list',       de: '📋 Aus der Liste wählen' },
+  'scan.starting':      { en: 'Starting the camera…',        de: 'Kamera wird gestartet…' },
+  'scan.hint':          { en: 'Point at the whole object, then capture.',
+                          de: 'Richte die Kamera auf das ganze Objekt und nimm auf.' },
+  'scan.identifying':   { en: '…identifying',                de: '…wird erkannt' },
+  'scan.found':         { en: 'Looks like a {object} — opening it.',
+                          de: 'Sieht aus wie: {object} — wird geöffnet.' },
+  'scan.none':          { en: "I couldn't tell what that is. Retake the photo, or pick from the list.",
+                          de: 'Ich konnte es nicht erkennen. Nimm neu auf oder wähle aus der Liste.' },
+  'scan.noCamera':      { en: 'No camera available here. Pick from the list instead.',
+                          de: 'Hier ist keine Kamera verfügbar. Wähle stattdessen aus der Liste.' },
+  'scan.blocked':       { en: 'Camera blocked — allow camera access for this site, then try again.',
+                          de: 'Kamera blockiert — erlaube den Kamerazugriff für diese Seite und versuch es nochmal.' },
+  'scan.noFrame':       { en: 'The camera has no picture yet — give it a moment.',
+                          de: 'Die Kamera liefert noch kein Bild — kurz warten.' },
 
   // -- Status line -----------------------------------------------------------
   'status.init':        { en: 'Initialising…',              de: 'Wird initialisiert…' },

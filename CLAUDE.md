@@ -15,9 +15,11 @@ The app runs in **English or German** — one at a time, everywhere (see
 
 **The object is the IKEA Markus chair.** It is the default selection, the only
 model fetched on boot, and the one every mode's content is authored for. The
-office chair, bicycle and bed are secondary demos that prove the splitter is
-model-agnostic — they load lazily, only if the user picks them from the
-dropdown. **Build every new feature for the Markus first**: author its content in
+bicycle and bed are secondary demos that prove the splitter is model-agnostic —
+they load lazily, only if the user picks them on the home screen or the
+dropdown. (The office chair is still in the registry, flagged `hidden`: a second
+chair beside the hero makes both the picker and the scan's "chair" answer
+ambiguous for no teaching value.) **Build every new feature for the Markus first**: author its content in
 `CONTENT['markus-chair']` / `MARKUS_INFO`, name its parts in
 `SEMANTIC_NAMES['markus-chair']`, and demo it on the Markus. A feature that only
 works on another model is not done. Porting to the other models afterwards is
@@ -51,6 +53,8 @@ modules are focused, mostly-pure helpers it calls.
 | File | Responsibility |
 |------|----------------|
 | [src/main.js](src/main.js) | App shell: renderer/scene/camera/lights, model registry, UI wiring, mode state machine, voice + AR glue, render loop. |
+| [src/home.js](src/home.js) | The **home screen** — the front door. Scan the real object with the camera, or pick from the list. Owns the overlay's views and the camera lifecycle. |
+| [src/vision.js](src/vision.js) | The scan itself: rear camera → one JPEG frame → DGPT vision → one of `chair` / `bicycle` / `bed` / `none`. |
 | [src/explode.js](src/explode.js) | The **core**. Splits a glTF into parts and drives the exploded view + per-part highlight/dim/isolate. |
 | [src/animate.js](src/animate.js) | Tween engine (keyed channels, driven from the render loop) + the camera flight that frames a part. |
 | [src/fixanim.js](src/fixanim.js) | Fix's gesture library: 22 part gestures (remove/lift_off/unscrew/tap_loose/press_fit/align/tug/spin/grease/wipe/…) + 6 whole-object ones (tip_over/flip_over/stand_up/sit_test/rock_test/roll_away). The LLM picks the verb per spoken beat; this module owns the motion. |
@@ -66,6 +70,41 @@ modules are focused, mostly-pure helpers it calls.
 | [src/tutor.js](src/tutor.js) | "Brain" glue: classify a spoken phrase into an app command vs. a free-form question, then answer via AI with context. |
 | [src/i18n.js](src/i18n.js) | **Language.** The selected language (`en`/`de`), the UI dictionary, the authored-content resolver `tr()`, and the locale codes the speech stack needs. One switch flips chrome, content, voice, transcription and every LLM prompt. |
 | [src/telemetry.js](src/telemetry.js) | Langfuse tracing. Batches ingestion events to a credential-free proxy (Vite in dev, Worker in prod). No-op when unconfigured. |
+
+### The home screen (`home.js` + `vision.js`)
+
+The app opens on a chooser, not on a model: **Scan an object** or **Select an
+object**. It is an opaque full-screen overlay over the live scene, not a
+separate page or route — the renderer, the modes and the model registry all stay
+mounted underneath, so choosing costs one `loadModel()` and coming back (the
+`⌂` corner button) costs nothing.
+
+- **Scan** opens the rear camera (`facingMode: { ideal: 'environment' }` — not
+  `exact`, or a laptop with only a front camera has no scan at all), takes one
+  still, and asks DGPT vision which object it is. The frame is downscaled to
+  768 px on the long edge: telling a chair from a bed does not need 1280, and
+  these models are billed and slowed by pixels. The shot **replaces the live
+  preview** while the answer is generated — a preview that keeps moving invites
+  the user to re-aim at something the model is no longer looking at.
+- The answer is a **closed set** — `chair` / `bicycle` / `bed` / `none` — mapped
+  to model keys by `SCAN_MODELS` in main.js. `chair` lands on the hero Markus.
+  `none` is a first-class outcome, not an error: it is also what an unconfigured
+  or unreachable AI returns, so "couldn't tell" has exactly one path — retake,
+  or use the list. Never guess a model from a bad frame.
+- Those four labels are **fixed English identifiers**, exempt from the
+  one-language rule for the same reason as tutor.js's `PART:` / `ACTION:`
+  headers; the prompt says so, and `normalizeLabel()` still reads a German or
+  synonym near-miss rather than throwing the photo away.
+- **The camera must never outlive the view.** Every exit — capture, Back, a
+  pick, closing the overlay, the tab being hidden — runs `releaseCamera()`. A
+  stream left open keeps the phone's camera indicator lit, which reads as the
+  app watching the room.
+- The **language/theme cluster sits above the overlay** (z-index) on purpose:
+  the home screen is the first thing a visitor sees, so that is exactly where a
+  German speaker needs the 🌐 toggle.
+- The Markus starts loading **behind** the overlay rather than after a choice —
+  it is both the default and where a `chair` scan lands, so it is usually built
+  by the time the user has framed a photo.
 
 ### The part-splitting core (`explode.js`)
 
@@ -610,9 +649,9 @@ Then the site is at `https://<owner>.github.io/titanom_hack_2026/`.
   app state and does the wiring.
 - The boot model is `DEFAULT_MODEL` in [src/main.js](src/main.js) (`markus-chair`),
   and the Markus is listed **first** in `MODELS` so it heads the dropdown. Don't
-  preload the other models — one glTF fetch on boot. Voice model-switching
-  (`MODEL_KEYWORDS`) gives a bare "chair" to the Markus; the office chair only
-  answers to its multi-word phrases.
+  preload the other models — one glTF fetch on boot. `selectableModels()` (the
+  registry minus anything `hidden`) is the single list behind **both** pickers,
+  so the home screen and the dropdown can never disagree about what exists.
 - Refer to parts by **keyword match**, never by hard-coded index in content —
   indices are only pinned in `SEMANTIC_NAMES` for the fused hero model.
 - **No user-facing string literals outside the dictionaries.** UI text goes in
