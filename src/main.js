@@ -195,6 +195,8 @@ const ui = {
   langSeg: document.getElementById('langSeg'),
   themeSeg: document.getElementById('themeSeg'),
   partChips: document.getElementById('partChips'),
+  spread: document.getElementById('spread'),
+  spreadRow: document.getElementById('spreadRow'),
   fixHead: document.getElementById('fixHead'),
   fixHeadKicker: document.getElementById('fixHeadKicker'),
   fixBars: document.getElementById('fixBars'),
@@ -427,6 +429,11 @@ function frameModel() {
   ui.explode.max = (modelRadius * 2.5).toFixed(3);
   ui.explode.step = (modelRadius * 0.004).toFixed(4);
   ui.explode.value = 0;
+  // The visible slider mirrors the engine input's range for this model.
+  ui.spread.min = ui.explode.min;
+  ui.spread.max = ui.explode.max;
+  ui.spread.step = ui.explode.step;
+  ui.spread.value = 0;
 }
 
 // The default framing, captured by frameModel() when the model was built.
@@ -496,10 +503,13 @@ function onExplodeChange() {
   updateExplodeReadout(amount);
 }
 
-// Numeric readout (hidden — the Otto system has no explode slider; the app
-// decides the spread). Kept because the tween and the hidden input feed it.
+// Keep the visible spread slider and the hidden engine input in step. The
+// hidden #explode input stays the engine's source of truth; #spread is the
+// user's handle on it, one glass pill present in every view (the Assemble
+// puzzle hides it — there the slider is a deliberate no-op, see onExplodeChange).
 function updateExplodeReadout(amount) {
   ui.explodeVal.textContent = amount.toFixed(2);
+  ui.spread.value = ui.explode.value;
 }
 
 // Fraction of the tween spent handing off between parts. Each part eases over
@@ -590,6 +600,11 @@ function groundExploded() {
 }
 // A direct drag wins over any animation still in flight.
 ui.explode.addEventListener('input', () => { cancelTween('explode'); onExplodeChange(); });
+ui.spread.addEventListener('input', () => {
+  cancelTween('explode');
+  ui.explode.value = ui.spread.value;
+  onExplodeChange();
+});
 
 // Picking a model is a navigation, not a load: it goes through the router (which
 // then loads), so the address bar, the Back button and the dropdown can never
@@ -727,6 +742,17 @@ function mildExplode() {
 }
 
 /**
+ * Explore's opening spread. A slider value (like FIX_EXPLODE), not a ratio, so
+ * it means the same physical gap on the hero regardless of tuning — capped at
+ * 35% of the model's own range so a model authored in small units can't be
+ * blown wide open by it.
+ */
+const EXPLORE_EXPLODE = 25;
+function exploreExplode() {
+  setExplodeAmount(Math.min(EXPLORE_EXPLODE, parseFloat(ui.explode.max) * 0.35), { animate: true });
+}
+
+/**
  * Fix opens barely exploded — just enough separation to see a part, while the
  * object still reads as a chair. The gestures are the point in Fix, and they
  * only make sense against something recognisable: tipping a chair that has been
@@ -774,6 +800,9 @@ function enterMode(id) {
   clearCallout();
   setFixChrome(null); // step header + culprit badge belong to Fix's own states
   setPartChips(null); // rebuilt by enterExplore; hidden everywhere else
+  // The spread slider rides every view except the puzzle, where the engine
+  // ignores it (the puzzle owns part positions) and a dead control would lie.
+  ui.spreadRow.hidden = id === 'assemble';
   applyARInteraction();
   resetParts();
   selectedPart = -1;
@@ -794,7 +823,7 @@ const kicker = (id) => t(`kicker.${id}`);
 // There is no explode slider anywhere: the app decides. Explore opens the
 // object part-way so the regions read as separate things to tap.
 function enterExplore() {
-  mildExplode();
+  exploreExplode();
   exploreChips = resolveExploreChips(currentKey(), parts);
   setPartChips(exploreChips);
   showExploreIntro();

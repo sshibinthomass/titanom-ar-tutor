@@ -86,10 +86,14 @@ must not regress:
   cards. Primary buttons are **frosted glass** (translucent white), not filled
   blue — blue fill is reserved for *selection* (active chip, selected mode
   circle) and Otto's glows.
-- **No explode slider, no debug chrome**: the app decides the spread. The old
-  engine inputs (`#explode`, `#mode`, `#tint`, `#wireframe`, `#autorotate`,
-  legend, part count) stay mounted **hidden** in the controls sheet because the
-  3D core reads them — don't delete them, and don't resurface them.
+- **One explode control, no debug chrome**: the app decides each mode's opening
+  spread, and the user can override it with the glass **spread pill**
+  (`#spreadRow` in the dock — a deliberate owner override of the design
+  README's "no slider" rule; it mirrors the hidden `#explode` engine input and
+  hides during the Assemble puzzle, where the engine ignores it). The other
+  engine inputs (`#mode`, `#tint`, `#wireframe`, `#autorotate`, legend, part
+  count) stay mounted **hidden** in the controls sheet because the 3D core
+  reads them — don't delete them, and don't resurface them.
 - **Stroke SVG icons only, never emoji** — including in `STRINGS`.
 - Two themes as CSS tokens on `:root` (dark default) /
   `[data-theme='light']`; the WebGL canvas is **transparent**
@@ -288,12 +292,13 @@ All 4 modes ride the **same core** (explode + isolate/highlight + visibility);
 only the card content and which parts are lit change. The chrome follows the
 **Otto UI system** (see "The Otto UI" below): the pill switcher top-right holds
 exactly **three** modes — Explore / Fix / Assemble; Quiz keeps its content and
-its deep link (`#/<model>/quiz`) but earns no tab. **There is no explode slider
-anywhere** — the app decides the spread (`mildExplode` on Explore/Quiz,
-`FIX_EXPLODE` in Fix, 0 in Assemble); the hidden `#explode` input remains the
-engine's source of truth but has no UI.
+its deep link (`#/<model>/quiz`) but earns no tab. The app decides each mode's
+opening spread (`EXPLORE_EXPLODE` = 25 in Explore, `FIX_EXPLODE` = 7 in Fix,
+35% in Quiz, 0 in Assemble); the dock's **spread pill** slider lets the user
+override it in every view except the puzzle. The hidden `#explode` input
+remains the engine's source of truth; the visible `#spread` mirrors it.
 
-1. **Explore** — opens auto-exploded (35% of range). Tap a part (or one of the
+1. **Explore** — opens gently exploded (`EXPLORE_EXPLODE`). Tap a part (or one of the
    five authored region chips — `resolveExploreChips`, `EXPLORE_CHIPS` for the
    Markus) → isolate it, blue **callout** (ring → leader → glass label) on it,
    and the card shows its name as the mono kicker with its authored `partInfo`

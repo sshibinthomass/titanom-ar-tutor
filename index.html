@@ -469,6 +469,23 @@
       .otto-text { font-size: 19px; line-height: 1.5; font-weight: 500; color: var(--ink); }
       .otto-hint { margin-top: 2px; }
 
+      /* The explode slider: one glass pill, present in every view (the puzzle
+         hides it — there it would fight the scatter and do nothing). */
+      .spread-row {
+        display: flex; align-items: center; gap: 12px;
+        height: 40px; padding: 0 16px; border-radius: 999px;
+        background: var(--glass-bg); border: 1px solid var(--glass-border);
+        backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      }
+      .spread-label {
+        font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600;
+        letter-spacing: 0.2em; color: var(--kicker); white-space: nowrap;
+      }
+      .spread-row input[type='range'] {
+        flex: 1; margin: 0; height: 18px;
+        accent-color: var(--otto); background: transparent; cursor: pointer;
+      }
+
       .part-chips { display: none; gap: 7px; justify-content: center; flex-wrap: wrap; }
       .part-chips.show { display: flex; }
       .pchip {
@@ -961,6 +978,11 @@
       </div>
 
       <div class="part-chips" id="partChips"></div>
+
+      <div class="spread-row" id="spreadRow">
+        <span class="spread-label" data-i18n="spread.label">EXPLODE</span>
+        <input type="range" id="spread" min="0" max="2" step="0.01" value="0" data-i18n-title="spread.title" title="" />
+      </div>
 
       <div class="card" id="card">
         <div class="kicker-mono card-kicker" id="cardKicker"></div>

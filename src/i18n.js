@@ -185,6 +185,8 @@ const STRINGS = {
   'explore.partMeta':   { en: '{tris} triangles',            de: '{tris} Dreiecke' },
   'explore.groupMeta':  { en: '{count} pieces',              de: '{count} Einzelstücke' },
   'explore.askAbout':   { en: 'Ask me anything about it.',   de: 'Frag mich alles darüber.' },
+  'spread.label':       { en: 'EXPLODE',                     de: 'ZERLEGEN' },
+  'spread.title':       { en: 'Spread the parts apart',      de: 'Teile auseinanderziehen' },
 
   // -- Fix -------------------------------------------------------------------
   'fix.ask':            { en: 'What should we fix?',         de: 'Was sollen wir reparieren?' },
