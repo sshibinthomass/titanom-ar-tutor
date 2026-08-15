@@ -192,6 +192,17 @@ const STRINGS = {
   'fix.askSpoken':      { en: 'What should we fix? Describe the problem, or pick a suggestion.',
                           de: 'Was sollen wir reparieren? Beschreibe das Problem oder wähle einen Vorschlag.' },
   'fix.planning':       { en: '…planning the repair',       de: '…die Reparatur wird geplant' },
+  // Shown and spoken the instant a request matches an authored fault, while the
+  // plan is still generating — the one true thing the app can say in the ~20 s
+  // the planner takes.
+  'fix.knownCause':     { en: 'Known fault: {symptom} · …planning the repair',
+                          de: 'Bekannter Fehler: {symptom} · …die Reparatur wird geplant' },
+  'fix.knownCauseSpoken':{ en: 'That one\'s documented — {symptom}. Let me plan the repair.',
+                          de: 'Das ist ein bekannter Fehler — {symptom}. Ich plane die Reparatur.' },
+  // Every beat broke a hard constraint and was dropped; better to ask again than
+  // to narrate a repair this chair cannot have.
+  'fix.unsafePlan':     { en: 'I couldn\'t put together a plan I trust for that one. Try describing the problem another way.',
+                          de: 'Dafür konnte ich keinen verlässlichen Plan erstellen. Beschreib das Problem gern nochmal anders.' },
   'fix.planningCaption':{ en: '“{request}” · …planning',    de: '„{request}“ · …wird geplant' },
   'fix.done':           { en: 'Done — that should sort it. Anything else to fix?',
                           de: 'Fertig — das sollte es beheben. Sonst noch etwas zu reparieren?' },

@@ -4,14 +4,14 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { buildExplodedView, setExplode, setPartExplode, isolateParts, clearPartStates, setHighlight, setGhostStyle, findParts } from './explode.js';
 import { updateTweens, tweenTo, cancelTween, isTweening, easeInOutCubic, flyToParts, moveCamera } from './animate.js';
 import { attachPicker, attachDragger } from './select.js';
-import { MODE_LIST, resolveFix, resolveAssemble, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest, fixSuggestions, resolvePlanParts, partLabel, canonicalName } from './modes.js';
+import { MODE_LIST, resolveFix, resolveAssemble, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest, planRules, matchFault, lintPlan, fixSuggestions, resolvePlanParts, partLabel, canonicalName } from './modes.js';
 import { LANGS, getLang, setLang, onLangChange, t, locale, applyStaticTranslations } from './i18n.js';
 import { isARSupported, startAR, updateAR, endAR, requestMove, setInteractor, setManipulationEnabled, setPivotScale, getFitScale } from './ar.js';
 import { startPuzzle, stopPuzzle, updatePuzzle, puzzleInteractor, isPuzzleActive, puzzleAutoPlace, puzzleHintIndices, puzzleStatus, puzzleAnswerByName, puzzleAnswerCandidates } from './puzzle.js';
 import { speak, stop as stopSpeaking, isSpeaking } from './tts.js';
 import { primeSfx, playSfx } from './sfx.js';
 import { createRecognizer } from './voice.js';
-import { answerQuestion, explainNextPart, generateFixPlan, resolveSpokenPart } from './tutor.js';
+import { answerQuestion, explainNextPart, generateFixPlan, repairFixPlan, resolveSpokenPart } from './tutor.js';
 import { startFixAnim, stopFixAnim, updateFixAnim, isObjectAction } from './fixanim.js';
 import { aiAvailable } from './ai.js';
 // `homeView` here is the *camera's* default framing; the home screen's current
@@ -815,29 +815,87 @@ async function startFixRequest(request) {
   const my = ++fixSeq;
   fixState = 'planning';
   track('fix-request', { input: request, metadata: { model: ui.model.value, lang: getLang() } });
-  showCard(kicker('fix'), `<b>“${esc(request)}”</b><span class="partdesc">${t('fix.planning')}</span>`);
-  showCaption(esc(t('fix.planningCaption', { request })));
 
-  const plan = await generateFixPlan(getContext(), request);
+  // Retrieval first, and locally. Twelve faults on this chair are documented
+  // with a real cause and remedy, and the planner used to reinvent one from
+  // scratch every time — which is where both the run-to-run variance and the
+  // physically impossible procedures came from. A match costs no AI call, so it
+  // also buys the one thing a 20-second plan cannot: something true to say
+  // immediately.
+  const fault = matchFault(currentKey(), request);
+  showCard(kicker('fix'), `<b>“${esc(request)}”</b><span class="partdesc">${
+    fault ? esc(t('fix.knownCause', { symptom: fault.symptom })) : t('fix.planning')}</span>`);
+  showCaption(esc(t('fix.planningCaption', { request })));
+  if (fault) say(t('fix.knownCauseSpoken', { symptom: fault.symptom }));
+
+  let plan = await generateFixPlan(getContext(), request, { fault });
   if (my !== fixSeq || currentMode !== 'fix') return; // superseded, or the mode was left
 
   if (!plan || !plan.steps.length) {
     if (plan?.intro) { showFixAsk(plan.intro); return; } // "that's not fixable here, because…"
-    // AI unreachable mid-request: run the authored procedure so the demo never dead-ends.
-    track('fix-plan-fallback', { metadata: { model: ui.model.value } });
+    track('fix-plan-fallback', { metadata: { model: ui.model.value, matched: fault?.symptom || null } });
+    // AI unreachable mid-request. The authored procedure is the gas-lift repair
+    // whatever was asked, so it is only the right fallback for the faults it
+    // actually treats — otherwise the retrieved fault's own cause and remedy is
+    // both true and on-topic, which the teardown would not be.
+    if (fault && !fault.procedure) { showFixAsk(fault.text); return; }
     runAuthoredFix();
     return;
   }
 
-  steps = plan.steps.map(toStep);
+  // Everything above this line asked the model to behave; this is where the app
+  // checks. lintPlan grades the resolved walkthrough — the beats that will
+  // actually play, with their parts and gestures — against the constraints that
+  // can be checked mechanically.
+  let built = plan.steps.map(toStep);
+  let violations = lintPlan(currentKey(), parts, built);
+  if (violations.length) {
+    track('fix-plan-violation', {
+      metadata: { model: ui.model.value, count: violations.length, rules: violations.map((v) => v.rule.slice(0, 60)) },
+    });
+    const repaired = await repairFixPlan(getContext(), request, plan, violations, { fault });
+    if (my !== fixSeq || currentMode !== 'fix') return;
+    if (repaired?.steps?.length) {
+      const rebuilt = repaired.steps.map(toStep);
+      const left = lintPlan(currentKey(), parts, rebuilt);
+      // Only take the rewrite if it actually improved things — a "repair" that
+      // trades one violation for another is not worth the swap.
+      if (left.length < violations.length) { plan = repaired; built = rebuilt; violations = left; }
+    }
+    // Last net. A model that has ignored the same rule twice will not honour a
+    // third ask, so the offending beats are simply not spoken: what remains is
+    // still on-topic and no longer teaches something the chair cannot do.
+    if (violations.length) {
+      built = dropBeats(built, violations);
+      track('fix-plan-pruned', { metadata: { model: ui.model.value, dropped: violations.length } });
+    }
+    if (!built.length) { showFixAsk(t('fix.unsafePlan')); return; }
+  }
+
+  steps = built;
   stepIndex = 0;
   stepTitle = plan.title || t('fix.titleFor', { request });
   stepKicker = 'fix';
   fixState = 'guided';
-  track('fix-plan', { metadata: { model: ui.model.value, lang: getLang(), steps: steps.length, request } });
+  track('fix-plan', {
+    metadata: { model: ui.model.value, lang: getLang(), steps: steps.length, request, kind: plan.kind, matched: fault?.symptom || null },
+  });
   fixExplode();
   if (plan.intro) showCaption(esc(plan.intro));
   renderStep(plan.intro);
+}
+
+/**
+ * Drop the beats a lint violation names, and any step left empty by it.
+ * Indices are recomputed, since `step.indices` is what the whole step
+ * spotlights and it must not keep pointing at a beat that no longer plays.
+ */
+function dropBeats(built, violations) {
+  const doomed = new Set(violations.map((v) => `${v.step}:${v.beat}`));
+  return built
+    .map((step, si) => step.beats.filter((_, bi) => !doomed.has(`${si}:${bi}`)))
+    .filter((beats) => beats.length)
+    .map((beats) => ({ beats, indices: [...new Set(beats.flatMap((b) => b.indices))] }));
 }
 
 /**
@@ -1463,6 +1521,10 @@ function getContext() {
     // ALL authored per-part facts (MARKUS_INFO). Never shown or spoken directly
     // — they ground the LLM's answer about whichever part the question concerns.
     partInfo: partInfoDigest(currentKey()),
+    // The checkable subset of the above, restated as short imperatives. Kept a
+    // separate field because the planner puts it LAST in its prompt — see
+    // planSystemPrompt in tutor.js for why that placement is the point.
+    rules: planRules(currentKey()),
     // Authored repair + fault knowledge for this model, so the AI tutor grounds
     // free-form answers in the real faults instead of guessing.
     faults: knowledgeDigest(currentKey()),
