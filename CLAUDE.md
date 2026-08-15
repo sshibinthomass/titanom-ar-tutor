@@ -72,6 +72,51 @@ modules are focused, mostly-pure helpers it calls.
 | [src/i18n.js](src/i18n.js) | **Language.** The selected language (`en`/`de`), the UI dictionary, the authored-content resolver `tr()`, and the locale codes the speech stack needs. One switch flips chrome, content, voice, transcription and every LLM prompt. |
 | [src/telemetry.js](src/telemetry.js) | Langfuse tracing. Batches ingestion events to a credential-free proxy (Vite in dev, Worker in prod). No-op when unconfigured. |
 
+### The Otto UI (index.html + main.js chrome)
+
+The chrome implements the **Otto UI system** (design handoff
+`design_handoff_otto_ui_system/`, README = source of truth). The rules that
+must not regress:
+
+- **Cool blue (`--otto`) is Otto** — presence, listening, selection, guidance.
+  **Warm amber is the problem only** — the diagnose badge/callout, the current
+  fix step's bar, kicker, beat marker and callout. When the fix is done, amber
+  is gone. Amber appears nowhere else.
+- **Glass everywhere**: translucent panels with backdrop blur, never opaque
+  cards. Primary buttons are **frosted glass** (translucent white), not filled
+  blue — blue fill is reserved for *selection* (active chip, selected mode
+  circle) and Otto's glows.
+- **No explode slider, no debug chrome**: the app decides the spread. The old
+  engine inputs (`#explode`, `#mode`, `#tint`, `#wireframe`, `#autorotate`,
+  legend, part count) stay mounted **hidden** in the controls sheet because the
+  3D core reads them — don't delete them, and don't resurface them.
+- **Stroke SVG icons only, never emoji** — including in `STRINGS`.
+- Two themes as CSS tokens on `:root` (dark default) /
+  `[data-theme='light']`; the WebGL canvas is **transparent**
+  (`scene.background = null`) so the CSS ambient layers — background gradient,
+  masked dot grid, breathing dome glow, the lavender arc while Otto speaks —
+  read through it. `body.ar-active` clears the body background so the
+  dom-overlay never covers the camera feed.
+- Chrome layout: back + gear circles top-left; AR quick-toggle pill + the
+  three-mode **pill switcher** top-right (selected mode = filled blue circle +
+  label, others collapse to icon circles; it wraps under the AR pill when
+  German labels need the room). Transient mono pills (status / listening /
+  culprit found) sit under the header. The bottom dock stacks Otto's speech
+  block → part chips → the glass card → the mic row (back circle + "say next"
+  pill in Fix, the single ASK mic circle always) → the type-to-Otto bar when
+  no recognizer exists.
+- **Voice presence, never an avatar**: the mic's VAD opens the listening sheet
+  (kicker, transcript flash, 9-bar waveform, "tap anywhere to stop" = mic
+  off); answers render in the OTTO-wordmark speech block, and the dome +
+  lavender arc breathe while TTS is audible (`updateOttoPresence`).
+- **Part callout** (`setCallout`/`updateCallout`): ring → leader → glass label,
+  re-projected every frame from the part's bounding sphere (through
+  `renderer.xr.getCamera()` in AR), blue for information, amber for the
+  problem; the label picks the roomier side and never leaves the screen.
+- **Never a dead end**: no AR → the AR pill hides, `body.no-ar` shows the
+  spin-it chevrons, the 3D viewer does the same job; no voice → the
+  "Type to Otto" bar feeds `handleSpeech` the same as speech.
+
 ### Links (`router.js`)
 
 **Every screen has its own address**, so a mode can be bookmarked, shared, or
@@ -138,12 +183,20 @@ The app opens on a chooser, not on a model: **Scan an object** or **Select an
 object**. It is an opaque full-screen overlay over the live scene rather than a
 separate document — the renderer, the modes and the model registry all stay
 mounted underneath, so choosing costs one `loadModel()` and coming back (the
-`⌂` corner button) costs nothing. Its three views are still *pages* in the link
-sense: each has an address, and `home.js` **asks** for a view (`onView(name)`)
-instead of switching to one itself. Main routes, and the route calls
-`openHome(view)` back. One direction only — otherwise a click would change the
-view and the navigation it caused would change it a second time, restarting the
-camera.
+header's back circle) costs nothing. Its three views are still *pages* in the
+link sense: each has an address, and `home.js` **asks** for a view
+(`onView(name)`) instead of switching to one itself. Main routes, and the route
+calls `openHome(view)` back. One direction only — otherwise a click would change
+the view and the navigation it caused would change it a second time, restarting
+the camera. The capture view is **full-bleed** (Otto 4c): the feed fills the
+screen under top/bottom scrims, a viewfinder (corner brackets + expanding scan
+ring) frames the aim, a white shutter takes the still (and re-arms as Retake
+after a `none`), and "Pick from the list" is the scrim-pill escape hatch. A
+successful scan reports `onPick(key, 'scan')`, which is what earns the
+**Arrival** greeting (1a) — scan rings + checkmark pill + "Found it — …
+What's it doing?" card over the freshly built model; *Look inside* stays in
+Explore, *Ask Otto* jumps to Fix with the mic armed. A plain list pick greets
+nobody.
 
 - **Scan** opens the rear camera (`facingMode: { ideal: 'environment' }` — not
   `exact`, or a laptop with only a front camera has no scan at all), takes one
@@ -165,9 +218,10 @@ camera.
   pick, closing the overlay, the tab being hidden — runs `releaseCamera()`. A
   stream left open keeps the phone's camera indicator lit, which reads as the
   app watching the room.
-- The **language/theme cluster sits above the overlay** (z-index) on purpose:
-  the home screen is the first thing a visitor sees, so that is exactly where a
-  German speaker needs the 🌐 toggle.
+- The **gear (controls sheet) stays reachable above the overlay** (z-index) on
+  purpose: language and theme live in that sheet now, the home screen is the
+  first thing a visitor sees, and that is exactly where a German speaker needs
+  the language switch.
 - The Markus starts loading **behind** the overlay rather than after a choice —
   it is both the default and where a `chair` scan lands, so it is usually built
   by the time the user has framed a photo.
@@ -231,32 +285,47 @@ Three things keep it from fighting other systems — don't regress them:
 ### Modes (`modes.js` + state in `main.js`)
 
 All 4 modes ride the **same core** (explode + isolate/highlight + visibility);
-only the card content and which parts are lit change:
+only the card content and which parts are lit change. The chrome follows the
+**Otto UI system** (see "The Otto UI" below): the pill switcher top-right holds
+exactly **three** modes — Explore / Fix / Assemble; Quiz keeps its content and
+its deep link (`#/<model>/quiz`) but earns no tab. **There is no explode slider
+anywhere** — the app decides the spread (`mildExplode` on Explore/Quiz,
+`FIX_EXPLODE` in Fix, 0 in Assemble); the hidden `#explode` input remains the
+engine's source of truth but has no UI.
 
-1. **Explore** — tap a part → isolate + name it.
-Every card carries its own **explode slider** (appended by `showCard`, skipped
-only while the Assemble puzzle owns part positions). The Controls panel's copy
-is unreachable exactly where it is most wanted — a gear-tap bottom sheet on a
-phone, and `display:none` during AR — so the card is the only place the spread
-can be adjusted on the surfaces the app is actually used on.
-
+1. **Explore** — opens auto-exploded (35% of range). Tap a part (or one of the
+   five authored region chips — `resolveExploreChips`, `EXPLORE_CHIPS` for the
+   Markus) → isolate it, blue **callout** (ring → leader → glass label) on it,
+   and the card shows its name as the mono kicker with its authored `partInfo`
+   fact as the body. The per-part facts are therefore now user-visible in
+   Explore *and* still feed the LLM whole via `partInfoDigest`.
 2. **Fix** — **voice-first**: the user says (or taps a suggested symptom for)
    what's wrong; `generateFixPlan` (tutor.js) has DGPT draft a step plan as
    strict JSON, grounded in `knowledgeDigest` and constrained to the live part
-   names; `resolvePlanParts` maps each step's part names to indices and the
-   walkthrough rides the same isolate + fly-to + TTS pipeline (Next/Back).
-   Fix opens at a deliberately small spread (`FIX_EXPLODE`, a slider value of 7
-   capped at 15% of the model's range) rather than Quiz's 35%: the
-   gestures are the point here and they only read against something still
-   recognisable as a chair — tipping a model blown 35% apart looks like debris
-   rotating. Each step is a list of **beats** — one spoken sentence plus the
-   gesture that illustrates it — so the model does what the voice is describing,
-   sentence by sentence. See "Fix's narrated gestures" below. The authored `CONTENT[*].fix`
-   procedure (one beat per step, carrying an authored verb) is the fallback when
-   DGPT is unconfigured or unreachable — never the only path.
+   names; `resolvePlanParts` maps each step's part names to indices. The flow is
+   ask → planning → **diagnose** (amber "culprit found" badge, amber callout on
+   the first step's part, "Found it." card, *Fix it with me / not now*) →
+   **guided** (step header with mono counter + pause pill + progress bars —
+   done blue, current amber breathing; the card kicker names the step; the
+   *"say next when it's done"* pill doubles as the tap target for Next, the
+   back circle beside it goes back) → **done** ("FIX · COMPLETE", all bars
+   blue, "Holding steady.", stat chips, *Done / what we did* recap). Spoken
+   navigation exists **only** in the guided state, strictly anchored single
+   words in both languages (`NEXT_RE`/`BACK_RE`/`AGAIN_RE`; "pause" rides
+   MUTE_RE and freezes the step), and yes/no answers in diagnose
+   (`YES_RE`/`NO_RE`) — everything longer is still a question for the tutor.
+   Fix sits at a deliberately small spread (`FIX_EXPLODE`, a slider value of 7
+   capped at 15% of the model's range): the gestures are the point here and
+   they only read against something still recognisable as a chair. Each step is
+   a list of **beats** — one spoken sentence plus the gesture that illustrates
+   it; the amber callout follows the sentence. See "Fix's narrated gestures"
+   below. The authored `CONTENT[*].fix` procedure is the fallback when DGPT is
+   unconfigured or unreachable (it skips diagnose — there is no diagnosis text —
+   and goes straight to guided); never the only path.
 3. **Assemble** — a **drag-to-build puzzle** (see below); the user places each
    group, by dragging it or by **saying what it is**.
-4. **Quiz** — highlight a part, ask the user to name it.
+4. **Quiz** — highlight a part, ask the user to name it. Reachable only by
+   link; the switcher shows no active circle there.
 
 Authored content in `CONTENT` (keyed by model id) references parts by **keyword**
 (`match: ['cylinder','gas','lift']`), resolved against the live part list at
@@ -586,8 +655,11 @@ every LLM prompt is told to reply in it regardless of what language the question
 arrived in. (A tutor that silently changes language mid-session is worse than
 one that answers in the language you chose.)
 
-Chosen with the 🌐 corner toggle or the panel's Language select, persisted in
-`localStorage`, defaulting to the browser locale on a first visit.
+Chosen with the controls sheet's segmented **English | Deutsch** pill (gear,
+top-left — reachable from the home screen too), persisted in `localStorage`,
+defaulting to the browser locale on a first visit. Theme sits beside it as a
+segmented **Dark | Light** pill; **dark is the default** (the Otto system's
+midnight-indigo), persisted the same way.
 
 Three layers, and the split between them is what keeps it maintainable:
 

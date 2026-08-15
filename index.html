@@ -1,562 +1,1183 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>AR Repair Tutor</title>
+    <!-- Theme before first paint: dark is the product default (Otto UI system);
+         an explicit light choice is restored here so there is no dark flash. -->
+    <script>
+      try { document.documentElement.dataset.theme = localStorage.getItem('theme') === 'light' ? 'light' : 'dark'; } catch (e) {}
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
     <style>
-      /* ---- Theme tokens ------------------------------------------------------
-         Light is the default (bare :root). Dark overrides only what changes,
-         under [data-theme="dark"] set by main.js. We deliberately do NOT key off
-         prefers-color-scheme — the product default is light regardless of OS. */
+      /* =====================================================================
+         Otto UI system — design tokens.
+         Dark is the default theme (bare :root); light overrides below.
+         One rule everywhere: cool blue is Otto (presence, selection, guidance),
+         warm amber is the problem — the part that's wrong or the part your
+         hands touch next. Amber appears nowhere else.
+         ===================================================================== */
       :root {
-        --bg: #e9ecf1;                       /* body + 3D scene backdrop */
-        --panel: rgba(255, 255, 255, 0.82);  /* frosted panels / cards / fabs */
-        --panel-solid: #ffffff;
-        --border: #d3d8e0;
-        --text: #1b1f27;
-        --muted: #5c6472;
-        --accent: #2fbfb3;        /* fills & focus rings (paired with --accent-ink) */
-        --accent-ink: #06322d;    /* text/icon sitting on an --accent fill */
-        --accent-text: #0c8379;   /* accent used as text on a panel (needs contrast) */
-        --input-bg: #ffffff;
-        --input-hover: #eef1f5;
-        --danger: #e0524f;
-        --shadow: 0 10px 40px rgba(20, 30, 50, 0.18);
+        --bg-grad: linear-gradient(180deg, #05070E 0%, #0A0D1F 55%, #111634 100%);
+        --grid-dot: rgba(150, 185, 255, 0.26);
+
+        --otto: #5B9DFF;               /* Otto blue — selection fills, glows */
+        --otto-tint: #8FC0FF;          /* light-blue icon tint */
+        --otto-on: #071022;            /* icon sitting on a filled blue circle */
+        --otto-bright: #EAF2FF;        /* bright text */
+
+        --ink: #F2F6FF;                /* titles */
+        --body: #E9EFFA;               /* body text */
+        --secondary: rgba(216, 228, 250, 0.82);
+        --mono-dim: rgba(165, 190, 230, 0.5);
+        --kicker: rgba(160, 195, 250, 0.65);
+        --kicker-amber: rgba(255, 205, 140, 0.8);
+
+        --glass-bg: linear-gradient(155deg, rgba(120, 170, 255, 0.11), rgba(120, 170, 255, 0.03));
+        --glass-border: rgba(150, 195, 255, 0.17);
+        --glass-shadow: 0 14px 44px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+
+        --frost-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.07));
+        --frost-border: rgba(255, 255, 255, 0.42);
+        --frost-ink: #EAF2FF;
+        --frost-shadow: 0 8px 26px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+
+        --sec-bg: rgba(120, 170, 255, 0.05);
+        --sec-border: rgba(160, 195, 255, 0.18);
+        --sec-ink: rgba(205, 220, 245, 0.6);
+
+        --chip-bg: rgba(120, 170, 255, 0.05);
+        --chip-border: rgba(160, 195, 255, 0.13);
+        --chip-ink: rgba(200, 216, 244, 0.55);
+        --chip-sel-bg: rgba(120, 170, 255, 0.22);
+        --chip-sel-border: rgba(170, 205, 255, 0.5);
+        --chip-sel-ink: #EAF2FF;
+        --chip-sel-glow: 0 0 16px rgba(90, 150, 255, 0.25);
+
+        --circle-bg: rgba(120, 170, 255, 0.08);
+        --circle-border: rgba(160, 195, 255, 0.2);
+        --circle-ink: rgba(200, 220, 250, 0.8);
+
+        --switch-bg: rgba(14, 22, 42, 0.72);
+        --switch-border: rgba(150, 195, 255, 0.22);
+        --switch-idle-ico: rgba(170, 195, 235, 0.55);
+        --switch-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+
+        --seg-bg: rgba(120, 170, 255, 0.06);
+        --seg-border: rgba(160, 195, 255, 0.16);
+
+        --scrim-bg: rgba(10, 16, 32, 0.62);
+        --scrim-border: rgba(160, 195, 255, 0.3);
+        --scrim-ink: rgba(222, 234, 254, 0.9);
+
+        --sheet-bg: linear-gradient(180deg, rgba(24, 32, 62, 0.92), rgba(9, 14, 30, 0.98));
+        --sheet-border: rgba(150, 195, 255, 0.28);
+        --sheet-shadow: 0 -30px 90px rgba(30, 55, 140, 0.35);
+        --row-bg: rgba(120, 170, 255, 0.07);
+        --row-border: rgba(160, 195, 255, 0.2);
+
+        --amber-dot: #FFBF66;
+        --amber-ring: rgba(255, 185, 90, 0.55);
+        --amber-ring-glow: 0 0 26px rgba(255, 165, 60, 0.4), inset 0 0 20px rgba(255, 165, 60, 0.2);
+        --amber-halo: rgba(255, 175, 70, 0.5);
+        --amber-label-bg: rgba(28, 18, 8, 0.72);
+        --amber-label-border: rgba(255, 190, 110, 0.4);
+        --amber-label-ink: #FFE3BC;
+        --amber-label-mono: rgba(255, 205, 150, 0.7);
+        --amber-badge-bg: rgba(255, 170, 60, 0.1);
+        --amber-badge-border: rgba(255, 190, 110, 0.32);
+        --amber-badge-ink: #FFD9A0;
+        --bar-todo: rgba(200, 220, 255, 0.12);
+
+        --co-ring: rgba(150, 195, 255, 0.45);
+        --co-ring-glow: 0 0 22px rgba(90, 150, 255, 0.35), inset 0 0 18px rgba(90, 150, 255, 0.18);
+        --co-leader: rgba(160, 200, 255, 0.5);
+        --co-label-bg: rgba(10, 18, 38, 0.75);
+        --co-label-border: rgba(160, 200, 255, 0.35);
+        --co-label-ink: #DCEAFE;
+
+        --dome-opacity: 1;
+        --listen-sheet-bg: linear-gradient(180deg, rgba(28, 32, 76, 0.62), rgba(10, 13, 36, 0.92));
+        --wave-grad: linear-gradient(180deg, #CCC5FF, #5B9DFF);
+        --arc-rim: rgba(196, 188, 255, 0.8);
       }
-      :root[data-theme='dark'] {
-        --bg: #14161c;
-        --panel: rgba(26, 29, 38, 0.92);
-        --panel-solid: #21252f;
-        --border: #2a2e3a;
-        --text: #e6e8ee;
-        --muted: #9aa0ad;
-        --accent: #4ecdc4;
-        --accent-ink: #0b0d12;
-        --accent-text: #4ecdc4;
-        --input-bg: #21252f;
-        --input-hover: #2a2f3b;
-        --danger: #ff6b6b;
-        --shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+      :root[data-theme='light'] {
+        --bg-grad: linear-gradient(180deg, #F7F9FD 0%, #EFF3FB 55%, #E7EDF9 100%);
+        --grid-dot: rgba(70, 110, 210, 0.2);
+
+        --otto: #3566E3;
+        --otto-tint: #3566E3;
+        --otto-on: #FFFFFF;
+        --otto-bright: #1F3358;
+
+        --ink: #1B2334;
+        --body: #2A3650;
+        --secondary: #45536E;
+        --mono-dim: rgba(90, 106, 140, 0.75);
+        --kicker: rgba(53, 102, 227, 0.75);
+        --kicker-amber: #9A5C0E;
+
+        --glass-bg: linear-gradient(155deg, rgba(228, 238, 253, 0.85), rgba(210, 226, 250, 0.6));
+        --glass-border: rgba(90, 130, 220, 0.24);
+        --glass-shadow: 0 14px 40px rgba(50, 80, 160, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+
+        --frost-bg: linear-gradient(180deg, rgba(214, 228, 252, 0.92), rgba(190, 212, 248, 0.55));
+        --frost-border: rgba(90, 130, 220, 0.4);
+        --frost-ink: #1F3358;
+        --frost-shadow: 0 8px 24px rgba(50, 80, 160, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+
+        --sec-bg: rgba(222, 233, 251, 0.65);
+        --sec-border: rgba(90, 120, 190, 0.3);
+        --sec-ink: #5A6A8C;
+
+        --chip-bg: rgba(222, 233, 251, 0.6);
+        --chip-border: rgba(90, 130, 220, 0.22);
+        --chip-ink: #5A6A8C;
+        --chip-sel-bg: rgba(53, 102, 227, 0.12);
+        --chip-sel-border: rgba(53, 102, 227, 0.45);
+        --chip-sel-ink: #1B2334;
+        --chip-sel-glow: 0 0 14px rgba(53, 102, 227, 0.18);
+
+        --circle-bg: rgba(222, 233, 251, 0.75);
+        --circle-border: rgba(90, 130, 220, 0.28);
+        --circle-ink: rgba(50, 70, 110, 0.75);
+
+        --switch-bg: rgba(222, 233, 251, 0.85);
+        --switch-border: rgba(90, 130, 220, 0.24);
+        --switch-idle-ico: #7A8AA8;
+        --switch-shadow: 0 10px 26px rgba(50, 80, 160, 0.14);
+
+        --seg-bg: rgba(222, 233, 251, 0.6);
+        --seg-border: rgba(90, 130, 220, 0.22);
+
+        --scrim-bg: rgba(10, 16, 32, 0.62);      /* over a camera feed, stays dark */
+        --scrim-border: rgba(160, 195, 255, 0.3);
+        --scrim-ink: rgba(222, 234, 254, 0.9);
+
+        --sheet-bg: linear-gradient(180deg, rgba(240, 245, 253, 0.96), rgba(224, 233, 249, 0.98));
+        --sheet-border: rgba(90, 130, 220, 0.3);
+        --sheet-shadow: 0 -30px 90px rgba(50, 80, 160, 0.22);
+        --row-bg: rgba(222, 233, 251, 0.6);
+        --row-border: rgba(90, 130, 220, 0.26);
+
+        --amber-dot: #E08A1E;
+        --amber-ring: rgba(217, 122, 22, 0.55);
+        --amber-ring-glow: 0 0 24px rgba(255, 150, 40, 0.35), inset 0 0 20px rgba(255, 150, 40, 0.15);
+        --amber-halo: rgba(255, 165, 50, 0.42);
+        --amber-label-bg: rgba(255, 248, 240, 0.94);
+        --amber-label-border: rgba(217, 122, 22, 0.4);
+        --amber-label-ink: #7A4A0C;
+        --amber-label-mono: rgba(160, 100, 25, 0.85);
+        --amber-badge-bg: rgba(255, 244, 230, 0.9);
+        --amber-badge-border: rgba(217, 122, 22, 0.35);
+        --amber-badge-ink: #9A5C0E;
+        --bar-todo: rgba(53, 102, 227, 0.12);
+
+        --co-ring: rgba(53, 102, 227, 0.5);
+        --co-ring-glow: 0 0 22px rgba(53, 102, 227, 0.25), inset 0 0 18px rgba(53, 102, 227, 0.12);
+        --co-leader: rgba(53, 102, 227, 0.45);
+        --co-label-bg: rgba(222, 233, 251, 0.85);
+        --co-label-border: rgba(90, 130, 220, 0.34);
+        --co-label-ink: #24304A;
+
+        --dome-opacity: 0.7;
+        --listen-sheet-bg: linear-gradient(180deg, rgba(238, 244, 253, 0.9), rgba(222, 232, 249, 0.97));
+        --wave-grad: linear-gradient(180deg, #8B82F0, #3566E3);
+        --arc-rim: rgba(122, 110, 235, 0.55);
       }
 
-      * { box-sizing: border-box; }
+      /* ---- Base ---------------------------------------------------------- */
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      [hidden] { display: none !important; }
       html, body { margin: 0; height: 100%; overflow: hidden; }
       body {
-        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        background-color: var(--bg);
-        color: var(--text);
-        /* No CSS transition here: Chrome won't re-evaluate a var()-based
-           background/color through a transition when the custom property flips,
-           so the body would stick on the old theme. The swap is instant, matching
-           the panels (which also flip instantly). */
+        font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+        background: var(--bg-grad);
+        color: var(--body);
       }
-      #view { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
-
-      .panel {
-        position: fixed;
-        top: 16px;
-        left: 16px;
-        width: 300px;
-        max-height: calc(100vh - 32px);
-        overflow-y: auto;
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 14px;
-        padding: 18px;
-        backdrop-filter: blur(10px);
-        box-shadow: var(--shadow);
-        z-index: 15;
-      }
-      .panel h1 { font-size: 16px; margin: 0 0 2px; letter-spacing: 0.2px; }
-      .panel .sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
-      .panel .sub a { color: var(--accent-text); text-decoration: none; }
-
-      .field { margin-bottom: 16px; }
-      .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 7px; }
-      .row { display: flex; align-items: center; justify-content: space-between; }
-      input[type='range'] { width: 100%; accent-color: var(--accent); }
-      select {
-        width: 100%;
-        padding: 8px 10px;
-        border: 1px solid var(--border);
-        border-radius: 9px;
-        background: var(--input-bg);
-        color: var(--text);
-        font-size: 13px;
-        cursor: pointer;
-      }
-      select:hover { border-color: var(--accent); }
-      .val { font-variant-numeric: tabular-nums; color: var(--accent-text); font-size: 12px; }
-
-      .toggles { display: flex; flex-direction: column; gap: 9px; }
-      .toggle { display: flex; align-items: center; gap: 9px; font-size: 13px; cursor: pointer; }
-      .toggle input { accent-color: var(--accent); width: 15px; height: 15px; }
-
       button {
-        width: 100%;
-        margin-top: 4px;
-        padding: 9px;
-        border: 1px solid var(--border);
-        border-radius: 9px;
-        background: var(--input-bg);
-        color: var(--text);
-        font-size: 13px;
-        cursor: pointer;
+        font-family: inherit; font-size: inherit; color: inherit;
+        background: none; border: none; padding: 0; margin: 0; cursor: pointer;
+        text-align: center;
       }
-      button:hover { background: var(--input-hover); border-color: var(--accent); }
+      button:disabled { opacity: 0.4; cursor: not-allowed; }
+      .mono { font-family: 'JetBrains Mono', monospace; }
 
-      hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
-
-      /* ---- Advanced (developer) disclosure — collapsed by default ---- */
-      .advanced { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 12px; }
-      .advanced > summary {
-        list-style: none; cursor: pointer; user-select: none;
-        display: flex; align-items: center; gap: 6px;
-        font-size: 12px; color: var(--muted); padding: 4px 0; margin-bottom: 4px;
+      /* Motion primitives (Otto UI system) */
+      @keyframes glowb { 0%, 100% { opacity: 0.6; transform: translateY(12px) scale(1); } 50% { opacity: 1; transform: translateY(0) scale(1.03); } }
+      @keyframes obx { 0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 0.75; } 50% { transform: translate(-50%, -50%) scale(1.09); opacity: 1; } }
+      @keyframes ob { 0%, 100% { transform: scale(1); opacity: 0.82; } 50% { transform: scale(1.06); opacity: 1; } }
+      @keyframes scanr { 0% { transform: scale(0.85); opacity: 0; } 25% { opacity: 0.5; } 100% { transform: scale(1.28); opacity: 0; } }
+      @keyframes ringx { 0% { transform: scale(0.55); opacity: 0.75; } 100% { transform: scale(1.9); opacity: 0; } }
+      @keyframes wv { 0%, 100% { transform: scaleY(0.22); } 50% { transform: scaleY(1); } }
+      @keyframes dotp { 0%, 100% { opacity: 0.25; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-2px); } }
+      @keyframes blinkc { 0%, 45% { opacity: 1; } 55%, 100% { opacity: 0; } }
+      @keyframes driftx { 0%, 100% { transform: translate3d(-3%, 1%, 0); } 50% { transform: translate3d(3%, -2%, 0); } }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation-play-state: paused !important; transition: none !important; }
       }
-      .advanced > summary::-webkit-details-marker { display: none; }
-      .advanced > summary::before {
-        content: '▸'; font-size: 10px; color: var(--accent-text);
-        transition: transform 0.15s ease;
-      }
-      .advanced[open] > summary::before { transform: rotate(90deg); }
-      .advanced > summary:hover { color: var(--text); }
-      .advanced > .field:first-of-type { margin-top: 8px; }
 
-      .stat { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
-      .stat b { color: var(--accent-text); font-variant-numeric: tabular-nums; }
-
-      .legend { margin-top: 10px; max-height: 220px; overflow-y: auto; }
-      .legend-row {
-        display: flex; align-items: center; gap: 9px;
-        font-size: 12px; padding: 4px 6px; border-radius: 6px; cursor: default;
+      /* ---- Ambient layers (behind the transparent 3D canvas) -------------- */
+      .ambient { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+      .ambient-grid {
+        position: absolute; inset: 0;
+        background-image: radial-gradient(var(--grid-dot) 1.3px, transparent 1.3px);
+        background-size: 34px 34px;
+        -webkit-mask-image: radial-gradient(120% 85% at 50% 40%, #000 25%, transparent 76%);
+        mask-image: radial-gradient(120% 85% at 50% 40%, #000 25%, transparent 76%);
+        opacity: 0.9;
       }
-      .legend-row:hover { background: var(--input-hover); }
-      .swatch { width: 13px; height: 13px; border-radius: 3px; flex: none; border: 1px solid rgba(128,128,128,0.3); }
-
-      /* ---- Mode bar (top-centre) ---- */
-      .modebar {
-        position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
-        display: flex; gap: 6px; padding: 6px;
-        background: var(--panel); border: 1px solid var(--border);
-        border-radius: 14px; backdrop-filter: blur(10px);
-        box-shadow: var(--shadow); z-index: 20; max-width: calc(100vw - 32px); overflow-x: auto;
+      .dome {
+        position: absolute; left: -25%; right: -25%; bottom: -170px; height: 360px;
+        pointer-events: none; opacity: var(--dome-opacity);
+        animation: glowb 8s ease-in-out infinite;
       }
-      .modebtn {
-        width: auto; margin: 0; padding: 8px 12px; font-size: 13px;
-        white-space: nowrap; border-radius: 9px; background: transparent;
-        border: 1px solid transparent;
+      .dome-core {
+        position: absolute; inset: 0; display: block;
+        background: radial-gradient(55% 90% at 50% 100%, rgba(85, 145, 255, 0.42), rgba(112, 100, 255, 0.13) 52%, transparent 76%);
       }
-      .modebtn.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+      .dome-band {
+        position: absolute; left: 14%; right: 14%; bottom: 0; height: 120px; display: block;
+        background: radial-gradient(60% 100% at 50% 100%, rgba(190, 220, 255, 0.45), rgba(120, 170, 255, 0.13) 55%, transparent 75%);
+        filter: blur(6px);
+      }
+      /* The alive arc while Otto is speaking (1d). */
+      .otto-arc {
+        position: fixed; left: 10%; right: 10%; bottom: 90px; height: 200px; z-index: 1;
+        border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+        border-top: 2px solid var(--arc-rim);
+        box-shadow: 0 -20px 55px rgba(90, 150, 255, 0.5), inset 0 30px 45px -32px rgba(120, 175, 255, 0.6);
+        pointer-events: none; opacity: 0; transition: opacity 0.5s ease;
+        animation: glowb 9s ease-in-out 1.2s infinite;
+      }
+      body.otto-speaking .otto-arc { opacity: 1; }
+      body.otto-speaking .dome { animation-duration: 5s; }
 
-      /* ---- Bottom dock: stacks the card + fabs + captions so nothing overlaps.
-         The dock itself is click-through (pointer-events:none); only its real
-         children capture input, so you can still orbit the model in the gaps. */
-      .dock {
-        position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
-        display: flex; flex-direction: column; align-items: center; gap: 10px;
-        padding: 0 16px 16px;
-        padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+      #view { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; z-index: 2; }
+
+      /* Grace: rotate hints beside the object when this device has no AR. */
+      .rotate-hints { position: fixed; inset: 0; z-index: 3; pointer-events: none; display: none; }
+      body.no-ar .rotate-hints { display: block; }
+      body.home-open .rotate-hints, body.ar-active .rotate-hints { display: none; }
+      .rotate-hints svg { position: absolute; top: 44%; opacity: 0.3; }
+      .rotate-hints .rh-l { left: 18px; }
+      .rotate-hints .rh-r { right: 18px; }
+
+      /* ---- Shared components ---------------------------------------------- */
+      .circle-btn {
+        width: 34px; height: 34px; border-radius: 50%; flex: none;
+        display: flex; align-items: center; justify-content: center;
+        background: var(--circle-bg); border: 1px solid var(--circle-border);
+        color: var(--circle-ink);
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      }
+      .circle-btn.gear {
+        width: 40px; height: 40px;
+        background: rgba(120, 170, 255, 0.14); border-color: rgba(170, 205, 255, 0.45);
+        box-shadow: 0 0 16px rgba(90, 150, 255, 0.3); color: #CFE2FF;
+      }
+      :root[data-theme='light'] .circle-btn.gear {
+        background: rgba(53, 102, 227, 0.12); border-color: rgba(53, 102, 227, 0.4);
+        box-shadow: 0 0 14px rgba(53, 102, 227, 0.2); color: #3566E3;
+      }
+      .circle-btn.scrim { background: var(--scrim-bg); border-color: var(--scrim-border); color: rgba(220, 235, 255, 0.9); }
+      .circle-btn svg { display: block; }
+
+      .btn-frosted {
+        height: 50px; display: flex; align-items: center; justify-content: center; gap: 9px;
+        border-radius: 999px; padding: 0 20px;
+        background: var(--frost-bg); border: 1px solid var(--frost-border);
+        box-shadow: var(--frost-shadow); color: var(--frost-ink);
+        font-size: 15px; font-weight: 600;
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      }
+      .btn-frosted svg { flex: none; }
+      .btn-secondary {
+        height: 50px; display: flex; align-items: center; justify-content: center;
+        border-radius: 999px; padding: 0 20px;
+        background: var(--sec-bg); border: 1px solid var(--sec-border); color: var(--sec-ink);
+        font-size: 14.5px; font-weight: 500;
+        backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      }
+      .btn-row { display: flex; gap: 10px; width: 100%; }
+      .btn-row .grow { flex: 1; }
+
+      .kicker-mono {
+        font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600;
+        letter-spacing: 0.26em; text-transform: uppercase; color: var(--kicker);
+      }
+      .mono-hint { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; font-weight: 400; color: var(--mono-dim); }
+
+      .status-pill {
+        height: 28px; display: inline-flex; align-items: center; gap: 7px; padding: 0 12px;
+        border-radius: 999px; background: var(--circle-bg); border: 1px solid var(--circle-border);
+        font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 500;
+        letter-spacing: 0.12em; color: var(--circle-ink); white-space: nowrap;
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+        max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+      }
+      .status-pill.amber { background: var(--amber-badge-bg); border-color: var(--amber-badge-border); color: var(--amber-badge-ink); }
+      .status-pill.scrim { background: var(--scrim-bg); border-color: rgba(150, 195, 255, 0.28); color: rgba(215, 230, 252, 0.85); height: 30px; padding: 0 14px; font-size: 10.5px; font-weight: 400; letter-spacing: 0; }
+      .pulse-dot {
+        width: 6px; height: 6px; border-radius: 50%; background: var(--otto-tint); flex: none;
+        box-shadow: 0 0 8px rgba(140, 190, 255, 0.9);
+        animation: dotp 1.6s ease-in-out infinite;
+      }
+
+      .ghost-pill {
+        height: 32px; display: inline-flex; align-items: center; justify-content: center; padding: 0 14px;
+        border-radius: 999px; border: 1px solid var(--sec-border); background: var(--sec-bg);
+        color: var(--sec-ink); font-size: 12.5px; font-weight: 500; white-space: nowrap;
+      }
+
+      /* ---- Header chrome --------------------------------------------------- */
+      .chrome-top {
+        position: fixed; z-index: 20;
+        top: calc(14px + env(safe-area-inset-top, 0px)); left: 16px; right: 16px;
+        display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;
         pointer-events: none;
       }
-      .dock > * { pointer-events: auto; }
+      .chrome-top button, .chrome-top .switcher { pointer-events: auto; }
+      .chrome-cluster { display: flex; align-items: center; gap: 8px; }
+      .chrome-cluster.right { flex-wrap: wrap; justify-content: flex-end; row-gap: 10px; }
 
-      /* ---- Step / part-info / quiz card ---- */
+      .ar-pill {
+        height: 38px; display: flex; align-items: center; gap: 7px; padding: 0 15px;
+        border-radius: 999px; background: var(--circle-bg); border: 1px solid rgba(160, 195, 255, 0.22);
+        color: var(--circle-ink); font-size: 13px; font-weight: 600;
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      }
+      :root[data-theme='light'] .ar-pill { border-color: var(--circle-border); }
+      .ar-pill span { color: inherit; }
+      .ar-pill[hidden] { display: none; }
+
+      /* Mode switcher: selected mode sits in a filled blue circle with its label
+         beside it; the others collapse to icon-only circles. Blue fill is
+         reserved for selection — everything else stays glass. */
+      .switcher {
+        height: 44px; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 5px;
+        border-radius: 999px; background: var(--switch-bg); border: 1px solid var(--switch-border);
+        backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+        box-shadow: var(--switch-shadow);
+      }
+      .modebtn { display: flex; align-items: center; gap: 0; color: var(--switch-idle-ico); }
+      .modedot {
+        width: 34px; height: 34px; border-radius: 50%; flex: none;
+        display: flex; align-items: center; justify-content: center;
+        transition: background 0.25s ease-out, box-shadow 0.25s ease-out, color 0.25s ease-out;
+      }
+      .modelabel {
+        font-size: 12.5px; font-weight: 600; color: var(--otto-bright); white-space: nowrap;
+        max-width: 0; opacity: 0; overflow: hidden;
+        transition: max-width 0.25s ease-out, opacity 0.2s ease-out, padding 0.25s ease-out;
+      }
+      :root[data-theme='light'] .modelabel { color: #1B2334; }
+      .modebtn.active .modedot { background: var(--otto); color: var(--otto-on); box-shadow: 0 0 14px rgba(91, 157, 255, 0.5); }
+      :root[data-theme='light'] .modebtn.active .modedot { box-shadow: 0 5px 14px rgba(53, 102, 227, 0.4); }
+      .modebtn.active .modelabel { max-width: 130px; opacity: 1; padding: 0 4px 0 7px; }
+
+      /* Transient pills under the header (loading status, listening, culprit). */
+      .pill-row {
+        position: fixed; z-index: 19;
+        top: calc(66px + env(safe-area-inset-top, 0px)); left: 16px; right: 16px;
+        display: flex; justify-content: flex-end; gap: 8px; pointer-events: none;
+        flex-wrap: wrap;
+      }
+      .pill-row .status-pill[hidden] { display: none; }
+
+      /* ---- Fix walkthrough header: mono kicker + pause + progress bars ------ */
+      .fixhead {
+        position: fixed; z-index: 18;
+        top: calc(66px + env(safe-area-inset-top, 0px)); left: 20px; right: 20px;
+        pointer-events: none;
+      }
+      .fixhead[hidden] { display: none; }
+      .fixhead-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+      .fixhead-row .ghost-pill { pointer-events: auto; }
+      .fixbars { display: flex; gap: 5px; margin-top: 12px; }
+      .fixbars span { flex: 1; height: 4px; border-radius: 3px; background: var(--bar-todo); }
+      .fixbars span.done { background: var(--otto); box-shadow: 0 0 10px rgba(91, 157, 255, 0.6); }
+      .fixbars span.current { background: var(--amber-dot); box-shadow: 0 0 12px rgba(255, 180, 90, 0.75); animation: ob 2.6s ease-in-out infinite; }
+
+      /* ---- Part callout: ring → leader → glass label, tracking a 3D part ---- */
+      .callout { position: fixed; z-index: 15; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
+      .callout[hidden] { display: none; }
+      .co-bloom {
+        position: absolute; left: 0; top: 0; display: none; border-radius: 50%;
+        background: radial-gradient(circle, var(--amber-halo), rgba(255, 150, 50, 0.13) 48%, transparent 70%);
+        filter: blur(3px); animation: obx 3s ease-in-out infinite;
+      }
+      .callout.amber .co-bloom { display: block; }
+      .co-ring {
+        position: absolute; left: 0; top: 0; border-radius: 50%;
+        border: 1.5px solid var(--co-ring); box-shadow: var(--co-ring-glow);
+        animation: obx 3.4s ease-in-out infinite;
+      }
+      .callout.amber .co-ring { border-color: var(--amber-ring); box-shadow: var(--amber-ring-glow); animation-duration: 3s; }
+      .co-leader { position: absolute; height: 1.5px; background: var(--co-leader); top: -0.75px; }
+      .callout.amber .co-leader { background: rgba(255, 190, 110, 0.55); }
+      :root[data-theme='light'] .callout.amber .co-leader { background: rgba(217, 122, 22, 0.5); }
+      .co-label {
+        position: absolute; top: 0; transform: translateY(-50%);
+        display: flex; flex-direction: column; gap: 2px; align-items: flex-start;
+        padding: 0 12px; height: 30px; justify-content: center; border-radius: 999px;
+        background: var(--co-label-bg); border: 1px solid var(--co-label-border);
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+        white-space: nowrap;
+      }
+      .co-label b { font-size: 12px; font-weight: 600; color: var(--co-label-ink); }
+      .callout.amber .co-label {
+        height: auto; padding: 8px 13px; border-radius: 16px; gap: 2px;
+        background: var(--amber-label-bg); border-color: var(--amber-label-border);
+      }
+      .callout.amber .co-label b { font-size: 12.5px; color: var(--amber-label-ink); }
+      .co-label small { font-family: 'JetBrains Mono', monospace; font-size: 9.5px; color: var(--amber-label-mono); }
+      .co-label small[hidden] { display: none; }
+
+      /* ---- Bottom dock: chips → card → mic row → type bar ------------------- */
+      .dock {
+        position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+        display: flex; flex-direction: column; align-items: center; gap: 12px;
+        padding: 0 14px calc(18px + env(safe-area-inset-bottom, 0px));
+        pointer-events: none;
+      }
+      .dock > * { pointer-events: auto; width: min(480px, 100%); }
+
+      /* Otto's presence while he thinks / speaks — never an avatar. */
+      .otto {
+        display: none; flex-direction: column; align-items: center; gap: 10px;
+        text-align: center; padding: 0 12px; pointer-events: none !important;
+      }
+      .otto.show { display: flex; }
+      .otto-head { display: flex; align-items: center; gap: 8px; }
+      .otto-name {
+        font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600;
+        letter-spacing: 0.34em; color: rgba(180, 208, 250, 0.75);
+      }
+      :root[data-theme='light'] .otto-name { color: rgba(53, 102, 227, 0.75); }
+      .otto-dots { display: flex; gap: 4px; }
+      .otto-dots i {
+        width: 4px; height: 4px; border-radius: 50%; background: #9CC4FF;
+        animation: dotp 1.3s ease-in-out infinite;
+      }
+      :root[data-theme='light'] .otto-dots i { background: #3566E3; }
+      .otto-dots i:nth-child(2) { animation-delay: 0.2s; }
+      .otto-dots i:nth-child(3) { animation-delay: 0.4s; }
+      .otto-text { font-size: 19px; line-height: 1.5; font-weight: 500; color: var(--ink); }
+      .otto-hint { margin-top: 2px; }
+
+      .part-chips { display: none; gap: 7px; justify-content: center; flex-wrap: wrap; }
+      .part-chips.show { display: flex; }
+      .pchip {
+        height: 32px; display: flex; align-items: center; padding: 0 13px; border-radius: 999px;
+        font-size: 12px; font-weight: 500; color: var(--chip-ink);
+        background: var(--chip-bg); border: 1px solid var(--chip-border);
+      }
+      .pchip.active {
+        font-weight: 600; color: var(--chip-sel-ink);
+        background: var(--chip-sel-bg); border-color: var(--chip-sel-border);
+        box-shadow: var(--chip-sel-glow);
+      }
+
+      /* The glass card — the app's one reading surface. */
       .card {
-        width: min(560px, 100%);
-        background: var(--panel); border: 1px solid var(--border);
-        border-radius: 14px; padding: 16px 18px; backdrop-filter: blur(10px);
-        box-shadow: var(--shadow); display: none;
+        border-radius: 26px; padding: 17px 18px;
+        background: var(--glass-bg); border: 1px solid var(--glass-border);
+        backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+        box-shadow: var(--glass-shadow);
+        display: none; max-height: 46vh; overflow-y: auto;
       }
       .card.show { display: block; }
-      .card .kicker { font-size: 11px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--accent-text); margin-bottom: 6px; }
-      .card .body { font-size: 15px; line-height: 1.5; margin-bottom: 4px; }
-      .card .body .partdesc { display: block; margin-top: 6px; font-size: 13px; line-height: 1.45; color: var(--muted); }
-      .card .meta { font-size: 12px; color: var(--muted); }
-      /* The Fix walkthrough's spoken script: one line per narration beat, lit
-         as it is said, so the user can read along or catch up after looking
-         away. Lines already spoken stay legible but recede. */
-      .card .beats { margin-top: 10px; display: flex; flex-direction: column; gap: 2px; }
+      .card-kicker { margin-bottom: 7px; letter-spacing: 0.24em; }
+      .card-kicker:empty { display: none; }
+      .card.amber .card-kicker { color: var(--kicker-amber); }
+      .card .body { font-size: 15.5px; line-height: 1.5; color: var(--body); }
+      .card .body .found { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; font-size: 22px; font-weight: 700; color: var(--ink); letter-spacing: -0.01em; }
+      .card .body .found i { width: 8px; height: 8px; border-radius: 50%; background: var(--amber-dot); box-shadow: 0 0 12px rgba(255, 180, 90, 0.9); flex: none; }
+      .card .body .partdesc { display: block; margin-top: 6px; font-size: 13.5px; line-height: 1.5; color: var(--secondary); }
+      .card .meta { font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: var(--mono-dim); margin-top: 8px; }
+      .card .meta:empty { display: none; }
+      /* Fix's spoken script: one line per beat, lit as it is said. */
+      .card .beats { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
       .card .beat {
-        position: relative; padding: 5px 0 5px 14px; font-size: 14px; line-height: 1.45;
-        color: var(--muted); opacity: 0.55; transition: opacity 0.25s ease, color 0.25s ease;
+        position: relative; padding: 5px 0 5px 14px; font-size: 14.5px; line-height: 1.5;
+        color: var(--secondary); opacity: 0.55; transition: opacity 0.25s ease, color 0.25s ease;
       }
       .card .beat::before {
         content: ''; position: absolute; left: 0; top: 7px; bottom: 7px; width: 3px;
         border-radius: 999px; background: transparent; transition: background 0.25s ease;
       }
       .card .beat.done { opacity: 0.75; }
-      .card .beat.active {
-        color: var(--text); opacity: 1; font-weight: 500;
+      .card .beat.active { color: var(--body); opacity: 1; font-weight: 500; }
+      .card .beat.active::before { background: var(--amber-dot); }
+      .card .body b { color: var(--ink); font-weight: 600; }
+      /* Assemble's build progress. */
+      .card .progress { height: 4px; margin-top: 12px; border-radius: 999px; background: var(--bar-todo); overflow: hidden; }
+      .card .progress > i { display: block; height: 100%; border-radius: 999px; background: var(--otto); box-shadow: 0 0 10px rgba(91, 157, 255, 0.6); transition: width 0.35s ease; }
+      /* Done (07): centered payoff — big title, one line, mono stat chips. */
+      .done-view { display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; padding: 8px 4px 2px; }
+      .done-title { font-size: 31px; font-weight: 700; letter-spacing: -0.015em; color: var(--ink); }
+      .done-sub { font-size: 14.5px; line-height: 1.55; color: var(--secondary); max-width: 300px; }
+      .statchips { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+      .statchips span {
+        height: 30px; display: flex; align-items: center; padding: 0 12px; border-radius: 999px;
+        background: var(--chip-bg); border: 1px solid var(--sec-border);
+        font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 500;
+        color: var(--chip-ink); white-space: nowrap;
       }
-      .card .beat.active::before { background: var(--accent); }
-      @media (prefers-reduced-motion: reduce) {
-        .card .beat, .card .beat::before { transition: none; }
-      }
-      /* Build progress in the Assemble puzzle card. */
-      .card .progress {
-        height: 5px; margin-top: 12px; border-radius: 999px;
-        background: var(--input-hover); overflow: hidden;
-      }
-      .card .progress > i {
-        display: block; height: 100%; border-radius: 999px;
-        background: var(--accent); transition: width 0.35s ease;
-      }
-      /* Inline explode slider inside the Explore card (see enterExplore). */
-      .card-explode { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
-      .card-explode label { font-size: 12px; color: var(--muted); white-space: nowrap; }
-      .card-explode input[type='range'] { flex: 1; }
-      .card-explode .val { min-width: 34px; text-align: right; }
-      .stepnav { display: flex; gap: 8px; margin-top: 14px; }
-      .stepnav button { margin: 0; }
-      .stepnav .primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
-      .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+      .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+      .chips:empty { display: none; }
       .chip {
-        width: auto; margin: 0; padding: 7px 12px; font-size: 12px; border-radius: 999px;
-        background: var(--input-bg); border: 1px solid var(--border);
+        height: 32px; display: flex; align-items: center; padding: 0 13px; border-radius: 999px;
+        font-size: 12px; font-weight: 500; color: var(--chip-ink);
+        background: var(--chip-bg); border: 1px solid var(--chip-border); white-space: nowrap;
       }
-      .chip:hover { border-color: var(--accent); }
+      .chip:hover { color: var(--chip-sel-ink); border-color: var(--chip-sel-border); }
+      .actions { display: flex; gap: 10px; margin-top: 15px; }
+      .actions:empty { display: none; }
+      .actions .btn-frosted { flex: 1; }
 
-      /* ---- Floating action buttons (AR + mic), right-aligned above the card ---- */
-      .fab-cluster {
-        align-self: flex-end;
-        display: flex; flex-direction: column; gap: 10px; align-items: flex-end;
+      /* Mic row: Fix's back + "say next" pill + the one mic circle (with ASK). */
+      .mic-row { display: flex; align-items: flex-start; justify-content: flex-end; gap: 12px; }
+      .mic-row[hidden] { display: none; }
+      .stepnav { display: none; flex: 1; align-items: center; gap: 12px; }
+      .stepnav.show { display: flex; }
+      .stepnav .nav-back { width: 46px; height: 46px; }
+      .saynext {
+        flex: 1; height: 46px; border-radius: 999px; gap: 8px;
+        font-family: 'JetBrains Mono', monospace; font-size: 11.5px; font-weight: 400;
+        color: rgba(195, 215, 245, 0.7);
+        backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
       }
-      .fab {
-        width: auto; margin: 0; display: inline-flex; align-items: center; gap: 8px;
-        padding: 12px 16px; border-radius: 999px; font-size: 14px; font-weight: 600;
-        border: 1px solid var(--border); background: var(--panel); color: var(--text);
-        backdrop-filter: blur(10px); box-shadow: var(--shadow); cursor: pointer;
+      :root[data-theme='light'] .saynext { color: #5A6A8C; }
+      .ask-cluster { display: flex; flex-direction: column; align-items: center; gap: 5px; flex: none; }
+      .mic-circle {
+        position: relative; width: 46px; height: 46px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(120, 170, 255, 0.12); border: 1px solid rgba(165, 200, 255, 0.35);
+        box-shadow: 0 0 18px rgba(90, 145, 255, 0.28); color: #D6E6FF;
+        backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
       }
-      .fab.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-      .fab.mic.listening { background: var(--danger); color: #fff; border-color: var(--danger); animation: pulse 1.2s infinite; }
-      @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(224,82,79,0.5); } 50% { box-shadow: 0 0 0 10px rgba(224,82,79,0); } }
-      .fab:disabled { opacity: 0.4; cursor: not-allowed; }
+      :root[data-theme='light'] .mic-circle {
+        background: rgba(53, 102, 227, 0.1); border-color: rgba(53, 102, 227, 0.35);
+        box-shadow: 0 4px 14px rgba(53, 102, 227, 0.2); color: #3566E3;
+      }
+      .mic-ring {
+        position: absolute; inset: 0; border-radius: 50%;
+        border: 1.5px solid rgba(140, 190, 255, 0.4); display: none;
+        animation: ringx 2.6s linear infinite;
+      }
+      .mic-circle.listening .mic-ring { display: block; }
+      .mic-circle.listening { background: var(--otto); color: var(--otto-on); box-shadow: 0 0 18px rgba(91, 157, 255, 0.55); }
+      .ask-label {
+        font-family: 'JetBrains Mono', monospace; font-size: 8.5px; font-weight: 500;
+        letter-spacing: 0.14em; color: rgba(175, 205, 250, 0.6);
+      }
+      :root[data-theme='light'] .ask-label { color: rgba(53, 102, 227, 0.7); }
 
-      /* ---- Status pill + live voice caption (dock children, centred) ---- */
-      .status {
-        font-size: 12px; color: var(--muted);
-        background: var(--panel); border: 1px solid var(--border);
-        padding: 7px 14px; border-radius: 20px; transition: opacity 0.3s;
-        backdrop-filter: blur(10px); text-align: center;
+      /* Grace: no voice → type to Otto. */
+      .typebar { display: flex; gap: 10px; align-items: center; }
+      .typebar[hidden] { display: none; }
+      .typebar input {
+        flex: 1; height: 50px; padding: 0 19px; border-radius: 999px;
+        background: var(--sec-bg); border: 1px solid var(--sec-border); color: var(--body);
+        font-family: inherit; font-size: 14.5px; outline: none;
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
       }
-      .voice-caption {
-        max-width: min(560px, 100%); font-size: 13px; color: var(--text); text-align: center;
-        background: var(--panel); border: 1px solid var(--border);
-        padding: 8px 14px; border-radius: 12px; display: none; backdrop-filter: blur(10px);
+      .typebar input::placeholder { color: rgba(195, 212, 240, 0.5); }
+      :root[data-theme='light'] .typebar input::placeholder { color: #7A8AA8; }
+      .send-circle {
+        width: 50px; height: 50px; flex: none; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        background: var(--frost-bg); border: 1px solid var(--frost-border);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35); color: var(--frost-ink);
       }
-      .voice-caption.show { display: block; }
-      .voice-caption b { color: var(--accent-text); }
 
-      /* ---- Corner controls (independent of the dock) ---- */
-      #exitAR {
-        position: fixed; z-index: 40; display: none;
-        top: calc(16px + env(safe-area-inset-top, 0px));
-        left: calc(16px + env(safe-area-inset-left, 0px));
+      /* ---- Listening sheet (1c) --------------------------------------------- */
+      .listen-sheet {
+        position: fixed; left: 0; right: 0; bottom: 0; height: 40%; z-index: 45;
+        border-radius: 32px 32px 0 0;
+        background: var(--listen-sheet-bg);
+        border-top: 1px solid rgba(150, 195, 255, 0.26);
+        backdrop-filter: blur(26px); -webkit-backdrop-filter: blur(26px);
+        box-shadow: 0 -30px 90px rgba(55, 105, 255, 0.28);
+        overflow: hidden;
+        transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
       }
-      #panelToggle {
-        position: fixed; top: 16px; left: 16px; z-index: 25; width: auto; margin: 0;
-        padding: 9px 12px; border-radius: 10px; display: none;
-        background: var(--panel); border: 1px solid var(--border); box-shadow: var(--shadow); backdrop-filter: blur(10px);
+      .listen-sheet.show { transform: translateY(0); }
+      .listen-glow { position: absolute; left: -20%; right: -20%; bottom: -120px; height: 330px; animation: glowb 8s ease-in-out infinite; }
+      .listen-glow i:first-child { position: absolute; inset: 0; background: radial-gradient(55% 95% at 50% 100%, rgba(85, 145, 255, 0.55), rgba(112, 100, 255, 0.16) 52%, transparent 76%); }
+      .listen-glow i:last-child { position: absolute; left: 12%; right: 12%; bottom: 70px; height: 130px; background: radial-gradient(60% 100% at 50% 100%, rgba(190, 220, 255, 0.5), rgba(120, 170, 255, 0.14) 55%, transparent 75%); filter: blur(7px); }
+      .listen-inner {
+        position: relative; height: 100%; display: flex; flex-direction: column; align-items: center;
+        justify-content: flex-start; gap: 15px; padding: 44px 24px 40px;
       }
-      .panel.collapsed { display: none; }
+      .listen-inner .kicker-mono { letter-spacing: 0.34em; }
+      .listen-text { font-size: 21px; line-height: 1.45; font-weight: 500; color: var(--ink); text-align: center; max-width: 310px; min-height: 30px; }
+      .caret {
+        display: inline-block; width: 3px; height: 21px; background: #9CC4FF; border-radius: 2px;
+        margin-left: 4px; vertical-align: -3px; animation: blinkc 1.1s steps(1) infinite;
+      }
+      :root[data-theme='light'] .caret { background: #3566E3; }
+      .wave { display: flex; align-items: center; gap: 3.5px; height: 26px; }
+      .wave span { width: 3px; height: 100%; border-radius: 2px; background: var(--wave-grad); transform-origin: center; animation: wv 1.1s ease-in-out infinite; }
+      .wave span:nth-child(1) { animation: wv 1.15s ease-in-out -0.2s infinite; }
+      .wave span:nth-child(2) { animation: wv 0.95s ease-in-out -0.5s infinite; }
+      .wave span:nth-child(3) { animation: wv 1.3s ease-in-out -0.1s infinite; }
+      .wave span:nth-child(4) { animation: wv 0.85s ease-in-out -0.7s infinite; }
+      .wave span:nth-child(5) { animation: wv 1.1s ease-in-out -0.35s infinite; }
+      .wave span:nth-child(6) { animation: wv 1.25s ease-in-out -0.6s infinite; }
+      .wave span:nth-child(7) { animation: wv 0.9s ease-in-out -0.15s infinite; }
+      .wave span:nth-child(8) { animation: wv 1.2s ease-in-out -0.45s infinite; }
+      .wave span:nth-child(9) { animation: wv 1s ease-in-out -0.3s infinite; }
 
-      /* Language + theme share one flex cluster so neither has to know the
-         other's width (the theme label changes with the theme, the language
-         label with the language). */
-      /* Above the home overlay (z 70) on purpose: language and theme are global
-         preferences and the home screen is the first thing a visitor sees, so
-         that is exactly where they need to be reachable. */
-      .corner-controls {
-        position: fixed; top: 16px; right: 16px; z-index: 75;
-        display: flex; gap: 8px; align-items: center;
-      }
-      .corner-controls > button {
-        width: auto; margin: 0; padding: 9px 12px; border-radius: 10px; white-space: nowrap;
-        background: var(--panel); border: 1px solid var(--border); box-shadow: var(--shadow); backdrop-filter: blur(10px);
-      }
-      #langToggle { font-weight: 600; }
-
-      /* ---- Home screen ---------------------------------------------------
-         The app's front door: pick an object by camera or from the list. It is
-         an opaque full-screen overlay rather than a separate page — the scene,
-         the modes and the model registry all stay live underneath, so choosing
-         is just a model load away and returning here costs nothing. */
-      .home {
-        position: fixed; inset: 0; z-index: 70; display: none;
-        align-items: center; justify-content: center; overflow-y: auto;
-        background: var(--bg); color: var(--text);
-        padding: calc(28px + env(safe-area-inset-top, 0px)) 20px
-                 calc(28px + env(safe-area-inset-bottom, 0px));
-      }
-      .home.show { display: flex; }
-      .home-inner { width: min(520px, 100%); }
-      .home-title { font-size: 26px; margin: 0 0 6px; letter-spacing: 0.2px; }
-      .home-sub { color: var(--muted); font-size: 14px; margin: 0 0 22px; }
-      .home-view { display: flex; flex-direction: column; gap: 12px; }
-      .home-view[hidden] { display: none; }
-
-      .home-option {
-        width: 100%; margin: 0; display: flex; align-items: center; gap: 14px;
-        text-align: left; padding: 18px; border-radius: 16px;
-        background: var(--panel-solid); border: 1px solid var(--border);
-        box-shadow: var(--shadow); cursor: pointer;
-      }
-      .home-option:hover { background: var(--input-hover); border-color: var(--accent); }
-      .home-option .ico { font-size: 26px; line-height: 1; flex: none; }
-      .home-option b { display: block; font-size: 15px; margin-bottom: 3px; }
-      .home-option small { display: block; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
-
-      .home-item {
-        width: 100%; margin: 0; padding: 15px 18px; text-align: left; font-size: 15px;
-        border-radius: 14px; background: var(--panel-solid); border: 1px solid var(--border);
-      }
-      .home-item:hover { background: var(--input-hover); border-color: var(--accent); }
-
-      /* The camera preview and the frozen still share one box, so the shot lands
-         exactly where the user was aiming instead of resizing the layout. */
-      .home-cam {
-        width: 100%; aspect-ratio: 3 / 4; max-height: 52vh;
-        border-radius: 16px; overflow: hidden; background: #000;
-        border: 1px solid var(--border);
-      }
-      .home-cam > video, .home-cam > img { width: 100%; height: 100%; object-fit: cover; display: block; }
-      .home-cam > [hidden] { display: none; }
-      .home-scan-status { min-height: 19px; font-size: 13px; color: var(--muted); text-align: center; }
-      .home-actions { display: flex; gap: 8px; }
-      .home-actions button { margin: 0; }
-      .home-primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
-      /* A "Home" button on the home screen is nonsense; the language and theme
-         toggles beside it stay, which is why the cluster sits above the overlay. */
-      body.home-open #homeBtn { display: none; }
-
-      /* ---- AR mode: hide the dev chrome, show exit ---- */
-      body.ar-active .panel,
-      body.ar-active #panelToggle,
-      body.ar-active .corner-controls,
-      body.ar-active .status,
-      body.ar-active .fab.ar { display: none !important; }
-      body.ar-active #exitAR { display: flex; }
-
-      /* Modal backdrop behind the mobile controls sheet. Off on desktop. */
+      /* ---- Controls sheet (4d) ---------------------------------------------- */
       #sheetBackdrop {
-        position: fixed; inset: 0; z-index: 55; display: none;
-        background: rgba(10, 14, 22, 0.45);
+        position: fixed; inset: 0; z-index: 55;
+        background: rgba(4, 8, 18, 0.42);
         opacity: 0; pointer-events: none; transition: opacity 0.28s ease;
-        -webkit-tap-highlight-color: transparent;
       }
       #sheetBackdrop.show { opacity: 1; pointer-events: auto; }
+      .panel {
+        position: fixed; left: 50%; bottom: 0; z-index: 60;
+        width: min(440px, 100vw);
+        border-radius: 32px 32px 0 0;
+        background: var(--sheet-bg);
+        border-top: 1px solid var(--sheet-border);
+        backdrop-filter: blur(26px); -webkit-backdrop-filter: blur(26px);
+        box-shadow: var(--sheet-shadow);
+        transform: translate(-50%, 105%); transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+        max-height: 86vh; overflow-y: auto;
+      }
+      .panel.open { transform: translate(-50%, 0); }
+      .sheet-inner { display: flex; flex-direction: column; gap: 16px; padding: 14px 22px calc(30px + env(safe-area-inset-bottom, 0px)); }
+      .drag-handle { width: 44px; height: 4px; border-radius: 3px; background: rgba(255, 255, 255, 0.25); margin: 0 auto; flex: none; }
+      :root[data-theme='light'] .drag-handle { background: rgba(27, 35, 52, 0.25); }
+      .sheet-head { display: flex; align-items: center; justify-content: space-between; }
+      .sheet-head .kicker-mono { letter-spacing: 0.3em; }
+      .sheet-head .circle-btn { width: 30px; height: 30px; }
+      .sheet-row { display: flex; flex-direction: column; gap: 7px; }
+      .row-label {
+        font-family: 'JetBrains Mono', monospace; font-size: 10.5px; font-weight: 500;
+        letter-spacing: 0.14em; text-transform: uppercase; color: var(--kicker);
+      }
+      .select-row { position: relative; }
+      .select-row select {
+        appearance: none; -webkit-appearance: none; width: 100%; height: 50px; padding: 0 40px 0 18px;
+        border-radius: 18px; background: var(--row-bg); border: 1px solid var(--row-border);
+        color: var(--body); font-family: inherit; font-size: 15px; font-weight: 500; cursor: pointer; outline: none;
+      }
+      .select-row svg { position: absolute; right: 18px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+      .seg { display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: var(--seg-bg); border: 1px solid var(--seg-border); }
+      .seg button {
+        flex: 1; height: 38px; display: flex; align-items: center; justify-content: center; gap: 7px;
+        border-radius: 999px; font-size: 13.5px; font-weight: 500; color: var(--chip-ink);
+        border: 1px solid transparent;
+      }
+      .seg button.active {
+        font-weight: 600; color: var(--chip-sel-ink);
+        background: var(--chip-sel-bg); border-color: var(--chip-sel-border);
+        box-shadow: 0 0 14px rgba(90, 150, 255, 0.2);
+      }
+      .panel .btn-frosted { height: 46px; font-size: 14.5px; }
+      .credit { text-align: center; line-height: 1.6; }
+      .credit a { color: var(--kicker); text-decoration: none; }
 
-      /* ---- Mobile: phone-first re-layout --------------------------------
-         The app's primary device is a phone (AR is Android-Chrome only), so
-         the desktop dev panel becomes a thumb-reachable bottom SHEET and the
-         tutor chrome (modes, voice, AR, steps) is foregrounded. Header icons
-         (gear · theme) sit on their own line; the mode bar gets its own row
-         below so nothing overlaps, and the notch/home-bar are respected. */
-      @media (max-width: 720px) {
-        /* Header line: gear (left) + theme (right), clear of the notch. */
-        #panelToggle {
-          display: block;
-          top: calc(10px + env(safe-area-inset-top, 0px)); left: 12px;
-        }
-        .corner-controls { top: calc(10px + env(safe-area-inset-top, 0px)); right: 12px; gap: 6px; }
-        .corner-controls > button { padding: 9px 10px; font-size: 12px; }
+      /* ---- Home overlay (4a / 4b / 4c) --------------------------------------- */
+      .home {
+        position: fixed; inset: 0; z-index: 70; display: none; overflow: hidden;
+        background: var(--bg-grad); color: var(--body);
+      }
+      .home.show { display: block; }
+      .home-ambient { position: absolute; inset: 0; pointer-events: none; }
+      .home-ambient .ambient-grid { -webkit-mask-image: radial-gradient(120% 80% at 50% 45%, #000 25%, transparent 75%); mask-image: radial-gradient(120% 80% at 50% 45%, #000 25%, transparent 75%); opacity: 0.85; }
+      .drift { position: absolute; border-radius: 50%; pointer-events: none; }
+      .drift.d1 { top: -90px; left: -70px; width: 340px; height: 340px; background: radial-gradient(circle, rgba(80, 130, 255, 0.16), transparent 65%); filter: blur(24px); animation: driftx 14s ease-in-out infinite; }
+      .drift.d2 { top: 16%; right: -90px; width: 300px; height: 300px; background: radial-gradient(circle, rgba(152, 128, 255, 0.13), transparent 65%); filter: blur(26px); animation: driftx 18s ease-in-out -6s infinite reverse; }
+      :root[data-theme='light'] .drift.d1 { background: radial-gradient(circle, rgba(80, 130, 255, 0.1), transparent 65%); }
+      :root[data-theme='light'] .drift.d2 { background: radial-gradient(circle, rgba(152, 128, 255, 0.08), transparent 65%); }
+      .home-view { position: absolute; inset: 0; }
+      .home-view[hidden] { display: none; }
 
-        /* Mode bar: full-width scroll row on its own line under the header. */
-        .modebar {
-          top: calc(56px + env(safe-area-inset-top, 0px));
-          left: 12px; right: 12px; transform: none; max-width: none;
-          gap: 6px; padding: 6px; scroll-snap-type: x proximity;
-          -webkit-overflow-scrolling: touch; scrollbar-width: none;
-        }
-        .modebar::-webkit-scrollbar { display: none; }
-        .modebtn {
-          padding: 9px 13px; font-size: 13px; min-height: 42px; scroll-snap-align: start;
-        }
+      /* 4a — bottom-weighted chooser. */
+      .home-choose { display: flex; flex-direction: column; justify-content: flex-start; padding: 0 20px; }
+      .home-copy { margin-top: 44vh; display: flex; flex-direction: column; gap: 8px; padding: 0 4px; }
+      .home-title { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.015em; color: var(--ink); }
+      .home-sub { margin: 0; font-size: 14px; line-height: 1.5; color: var(--secondary); }
+      .home-options { display: flex; flex-direction: column; gap: 12px; margin-top: 22px; width: 100%; }
+      .home-option {
+        display: flex; align-items: center; gap: 15px; border-radius: 26px; padding: 17px 18px;
+        background: var(--glass-bg); border: 1px solid rgba(150, 195, 255, 0.2);
+        backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+        box-shadow: var(--glass-shadow); text-align: left;
+      }
+      :root[data-theme='light'] .home-option { border-color: var(--glass-border); }
+      .opt-ico {
+        flex: none; width: 46px; height: 46px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(120, 170, 255, 0.1); border: 1px solid rgba(160, 195, 255, 0.3);
+        color: var(--otto-tint);
+      }
+      :root[data-theme='light'] .opt-ico { background: rgba(53, 102, 227, 0.08); border-color: rgba(53, 102, 227, 0.3); }
+      .opt-copy { display: flex; flex-direction: column; gap: 3px; }
+      .opt-copy b { font-size: 16.5px; font-weight: 600; color: var(--ink); }
+      .opt-copy small { font-size: 13px; line-height: 1.45; color: var(--secondary); }
 
-        /* Dev controls become a bottom sheet: always mounted, slid off-screen,
-           revealed by the gear. A grab handle + tappable backdrop dismiss it. */
-        #sheetBackdrop { display: block; }
-        .panel {
-          display: block; top: auto; bottom: 0; left: 0; right: 0;
-          width: 100%; max-width: none; max-height: 78vh; z-index: 60;
-          border-radius: 20px 20px 0 0; padding: 10px 18px 20px;
-          padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
-          transform: translateY(100%);
-          transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
-        }
-        .panel.open { transform: translateY(0); }
-        .panel.collapsed { display: block; }   /* legacy class: don't hard-hide the sheet */
-        .panel::before {                        /* grab handle, pinned while the sheet scrolls */
-          content: ''; display: block; position: sticky; top: 0;
-          width: 40px; height: 4px; margin: 2px auto 12px;
-          border-radius: 999px; background: var(--border);
-        }
+      /* 4b — the pick list. */
+      .home-pick { display: flex; flex-direction: column; }
+      .home-header {
+        display: flex; align-items: center; gap: 10px;
+        padding: calc(14px + env(safe-area-inset-top, 0px)) 20px 0;
+      }
+      .home-header-title { font-size: 16px; font-weight: 600; color: var(--ink); }
+      .pick-body { padding: 56px 20px 0; display: flex; flex-direction: column; gap: 12px; }
+      .pick-body .kicker-mono { padding: 0 4px 4px; }
+      .home-list { display: flex; flex-direction: column; gap: 12px; }
+      .home-item {
+        display: flex; align-items: center; justify-content: space-between; height: 58px; padding: 0 20px;
+        border-radius: 22px; background: var(--glass-bg); border: 1px solid rgba(150, 195, 255, 0.2);
+        backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+        font-size: 15.5px; font-weight: 600; color: var(--body); text-align: left;
+      }
+      :root[data-theme='light'] .home-item { border-color: var(--glass-border); color: var(--ink); }
+      .home-item svg { flex: none; color: var(--switch-idle-ico); }
+      .pick-bottom {
+        margin-top: auto; display: flex; flex-direction: column; gap: 10px; align-items: center;
+        padding: 20px 20px calc(28px + env(safe-area-inset-bottom, 0px));
+      }
+      .pick-bottom .btn-frosted { width: 100%; }
 
-        /* Keep a long step/quiz card from eating the viewport; scroll inside. */
-        .card { max-height: 42vh; overflow-y: auto; }
-        .fab { padding: 12px 16px; font-size: 14px; }
+      /* 4c — full-bleed capture. */
+      .home-scan { background: #0B101C; }
+      .home-scan video, .home-scan img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+      .home-scan video[hidden], .home-scan img[hidden] { display: none; }
+      .scan-scrim-top { position: absolute; left: 0; right: 0; top: 0; height: 160px; background: linear-gradient(180deg, rgba(8, 12, 24, 0.55), transparent); }
+      .scan-scrim-bottom { position: absolute; left: 0; right: 0; bottom: 0; height: 280px; background: linear-gradient(0deg, rgba(8, 12, 24, 0.68), transparent); }
+      .scan-header {
+        position: absolute; left: 20px; right: 20px; top: calc(14px + env(safe-area-inset-top, 0px));
+        display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      }
+      .scan-header .circle-btn { width: 38px; height: 38px; }
+      .scan-header .status-pill { flex: 1; min-width: 0; justify-content: center; }
+      .scan-header .spacer { width: 38px; flex: none; }
+      .viewfinder {
+        position: absolute; left: 50%; top: 44%; width: 250px; height: 250px;
+        transform: translate(-50%, -50%); pointer-events: none;
+      }
+      .viewfinder .c { position: absolute; width: 36px; height: 36px; border: 0 solid rgba(255, 255, 255, 0.85); }
+      .viewfinder .tl { left: 0; top: 0; border-left-width: 2.5px; border-top-width: 2.5px; border-radius: 10px 0 0 0; }
+      .viewfinder .tr { right: 0; top: 0; border-right-width: 2.5px; border-top-width: 2.5px; border-radius: 0 10px 0 0; }
+      .viewfinder .bl { left: 0; bottom: 0; border-left-width: 2.5px; border-bottom-width: 2.5px; border-radius: 0 0 0 10px; }
+      .viewfinder .br { right: 0; bottom: 0; border-right-width: 2.5px; border-bottom-width: 2.5px; border-radius: 0 0 10px 0; }
+      .viewfinder .scan-ring { position: absolute; inset: -20px; border-radius: 50%; border: 1px solid rgba(130, 180, 255, 0.35); animation: scanr 3.4s ease-out infinite; }
+      .scan-bottom {
+        position: absolute; left: 0; right: 0; bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+        display: flex; flex-direction: column; align-items: center; gap: 18px;
+      }
+      .shutter { position: relative; width: 76px; height: 76px; }
+      .shutter::before {
+        content: ''; position: absolute; inset: 0; border-radius: 50%;
+        border: 3px solid rgba(255, 255, 255, 0.9); box-shadow: 0 8px 26px rgba(0, 0, 0, 0.4);
+      }
+      .shutter i { position: absolute; inset: 7px; border-radius: 50%; background: rgba(255, 255, 255, 0.92); transition: transform 0.12s ease; }
+      .shutter:active i { transform: scale(0.9); }
+      .shutter:disabled { opacity: 0.5; }
+      .scrim-pill {
+        height: 40px; display: flex; align-items: center; gap: 8px; padding: 0 18px; border-radius: 999px;
+        background: var(--scrim-bg); border: 1px solid var(--scrim-border);
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+        color: var(--scrim-ink); font-size: 13.5px; font-weight: 500;
       }
 
-      /* Landscape phones (how you actually hold a phone for AR): little
-         vertical room, so trim the sheet and card and tighten the header. */
+      /* ---- Arrival (1a): recognized on sight ---------------------------------- */
+      .arrival { position: fixed; inset: 0; z-index: 40; }
+      .arrival[hidden] { display: none; }
+      .arrival-stage { position: absolute; left: 50%; top: 40%; width: 0; height: 0; pointer-events: none; }
+      .arrival .scan-ring2 {
+        position: absolute; left: -125px; top: -125px; width: 250px; height: 250px; border-radius: 50%;
+        border: 1px solid rgba(130, 180, 255, 0.4); animation: scanr 3.4s ease-out infinite;
+      }
+      .arrival .scan-ring2.r2 { border-color: rgba(130, 180, 255, 0.3); animation-delay: 1.7s; }
+      .arrival-pill {
+        position: absolute; left: 50%; top: -160px; transform: translateX(-50%);
+        display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 13px; border-radius: 999px;
+        background: linear-gradient(155deg, rgba(120, 170, 255, 0.14), rgba(120, 170, 255, 0.05));
+        border: 1px solid rgba(150, 195, 255, 0.22);
+        backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+        white-space: nowrap; font-size: 12.5px; font-weight: 600; color: var(--ink);
+        pointer-events: none;
+      }
+      :root[data-theme='light'] .arrival-pill { background: var(--glass-bg); border-color: var(--glass-border); }
+      .arrival-pill svg { color: var(--otto-tint); }
+      .arrival-stack {
+        position: absolute; left: 14px; right: 14px; bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+        display: flex; flex-direction: column; gap: 13px; align-items: center;
+      }
+      .arrival-stack > * { width: min(480px, 100%); }
+      .arrival-card {
+        border-radius: 26px; padding: 17px 18px;
+        background: var(--glass-bg); border: 1px solid var(--glass-border);
+        backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+        box-shadow: var(--glass-shadow);
+        font-size: 16.5px; line-height: 1.5; color: var(--body);
+      }
+      .arrival-stack .btn-row > * { flex: 1; }
+
+      /* ---- AR chrome (1h / 3a) ------------------------------------------------ */
+      #exitAR { display: none; position: fixed; z-index: 42; top: calc(14px + env(safe-area-inset-top, 0px)); left: 16px; width: 38px; height: 38px; }
+      .ar-top { display: none; position: fixed; z-index: 41; top: calc(14px + env(safe-area-inset-top, 0px)); left: 64px; right: 64px; justify-content: center; pointer-events: none; }
+      .ar-bottom {
+        display: none; position: fixed; z-index: 41; left: 0; right: 0;
+        bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+        flex-direction: column; align-items: center; gap: 16px;
+      }
+      .voice-chips { display: flex; gap: 8px; }
+      .voice-chips[hidden] { display: none; }
+      .vchip {
+        height: 26px; display: flex; align-items: center; padding: 0 11px; border-radius: 999px;
+        background: rgba(10, 16, 32, 0.6); border: 1px solid rgba(150, 195, 255, 0.2);
+        font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: rgba(205, 222, 248, 0.75);
+      }
+      .ar-controls { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0 30px; max-width: 480px; }
+      .ar-side {
+        height: 52px; min-width: 92px; display: flex; align-items: center; justify-content: center;
+        border-radius: 999px; padding: 0 18px;
+        background: var(--scrim-bg); border: 1px solid var(--scrim-border);
+        color: rgba(228, 238, 254, 0.95); font-size: 15px; font-weight: 600;
+        backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      }
+      .ar-cta { height: 58px; padding: 0 28px; font-size: 16px; }
+      .ar-cta.listening { background: var(--otto); color: var(--otto-on); border-color: transparent; }
+
+      body.ar-active { background: transparent; }
+      body.ar-active .ambient, body.ar-active .otto-arc,
+      body.ar-active .chrome-top, body.ar-active .pill-row,
+      body.ar-active .fixhead, body.ar-active .part-chips,
+      body.ar-active .mic-row, body.ar-active .typebar,
+      body.ar-active .listen-sheet,
+      body.ar-active .panel, body.ar-active #sheetBackdrop { display: none !important; }
+      body.ar-active #exitAR { display: flex; }
+      body.ar-active .ar-top { display: flex; }
+      body.ar-active .ar-bottom { display: flex; }
+      body.ar-active .dock { bottom: 96px; }
+
+      /* Home screen: only the gear (global prefs) survives in the chrome. */
+      body.home-open .chrome-cluster.right, body.home-open #backBtn,
+      body.home-open .pill-row, body.home-open .fixhead,
+      body.home-open .dock, body.home-open .callout, body.home-open .otto-arc { display: none !important; }
+      body.home-open #panelToggle { position: relative; z-index: 76; }
+      body.home-open .chrome-top { z-index: 76; }
+
+      /* Desktop: same system, a little more air. */
+      @media (min-width: 720px) {
+        .chrome-top { left: 20px; right: 20px; }
+        .home-copy { max-width: 520px; margin-left: auto; margin-right: auto; }
+        .home-options { max-width: 520px; margin-left: auto; margin-right: auto; }
+        .pick-body, .home-header, .pick-bottom { max-width: 560px; margin-left: auto; margin-right: auto; width: 100%; }
+        .listen-sheet { left: 50%; width: min(560px, 100vw); transform: translate(-50%, 100%); border-radius: 32px 32px 0 0; }
+        .listen-sheet.show { transform: translate(-50%, 0); }
+        .fixhead { left: 50%; transform: translateX(-50%); width: min(520px, calc(100vw - 40px)); right: auto; }
+      }
+      /* Landscape phones: little vertical room — trim the card. */
       @media (max-width: 900px) and (max-height: 500px) and (orientation: landscape) {
-        .modebar { top: calc(48px + env(safe-area-inset-top, 0px)); }
-        .panel { max-height: 88vh; }
         .card { max-height: 34vh; }
         .dock { gap: 6px; }
       }
     </style>
   </head>
   <body>
+    <!-- Ambient: gradient body → dotted grid → Otto's dome glow. The 3D canvas
+         is transparent, so these read through it. -->
+    <div class="ambient">
+      <div class="ambient-grid"></div>
+      <div class="dome" id="dome"><i class="dome-core"></i><i class="dome-band"></i></div>
+    </div>
+    <i class="otto-arc"></i>
+
     <canvas id="view"></canvas>
 
-    <div id="sheetBackdrop"></div>
-
-    <div class="panel">
-      <h1 data-i18n="panel.heading">Exploded View</h1>
-      <div class="sub" id="credit">…</div>
-
-      <!-- Primary, end-user controls: choose an object, spread it, look around. -->
-      <div class="field">
-        <label data-i18n="panel.model">Model</label>
-        <!-- autocomplete=off: the app owns this value; Chrome form-restoration
-             otherwise re-applies a stale selection mid-boot and desyncs the
-             loaded model from the semantic name map. -->
-        <select id="model" autocomplete="off"></select>
-      </div>
-
-      <!-- Language: the app is strictly monolingual per selection — UI, voice,
-           transcription and every AI answer follow this one control. -->
-      <div class="field">
-        <label data-i18n="panel.language">Language</label>
-        <select id="lang" autocomplete="off"></select>
-      </div>
-
-      <div class="field">
-        <label data-i18n="panel.explode">Explode amount</label>
-        <div class="row">
-          <input type="range" id="explode" min="0" max="2" step="0.01" value="0" />
-        </div>
-        <div class="row"><span class="val" id="explodeVal">0.00</span></div>
-      </div>
-
-      <div class="toggles">
-        <label class="toggle"><input type="checkbox" id="autorotate" /> <span data-i18n="panel.autorotate">Auto-rotate</span></label>
-      </div>
-
-      <button id="reset" data-i18n="panel.reset">Reset view</button>
-
-      <!-- Developer tools, collapsed by default on every device. Native
-           <details> so it needs no JS; the ids stay identical so main.js
-           wiring is unchanged wherever these controls live in the DOM. -->
-      <details class="advanced">
-        <summary data-i18n="panel.advanced">Advanced</summary>
-
-        <div class="field">
-          <label data-i18n="panel.splitMode">Split mode</label>
-          <select id="mode" autocomplete="off">
-            <option value="group" data-i18n="panel.splitGroup">By material group</option>
-            <option value="component" data-i18n="panel.splitComp">By connected piece</option>
-          </select>
-        </div>
-
-        <div class="toggles">
-          <label class="toggle"><input type="checkbox" id="tint" /> <span data-i18n="panel.tint">Tint parts by component</span></label>
-          <label class="toggle"><input type="checkbox" id="wireframe" /> <span data-i18n="panel.wireframe">Wireframe</span></label>
-        </div>
-
-        <hr />
-
-        <div class="stat"><span data-i18n="panel.partCount">Component parts</span><b id="partCount">–</b></div>
-        <div class="legend" id="legend"></div>
-      </details>
+    <!-- Grace: spin-it hints for devices with no AR. -->
+    <div class="rotate-hints">
+      <svg class="rh-l" width="9" height="16" viewBox="0 0 9 16"><path d="M8 1L1 8l7 7" fill="none" stroke="#AFCDFB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <svg class="rh-r" width="9" height="16" viewBox="0 0 9 16"><path d="M1 1l7 7-7 7" fill="none" stroke="#AFCDFB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </div>
 
-    <div class="modebar" id="modebar"></div>
+    <!-- Part callout: ring → leader → glass label. Blue = informational,
+         amber = the problem. Position driven per-frame from the 3D part. -->
+    <div class="callout" id="callout" hidden>
+      <i class="co-bloom" id="coBloom"></i>
+      <i class="co-ring" id="coRing"></i>
+      <i class="co-leader" id="coLeader"></i>
+      <div class="co-label" id="coLabel"><b id="coName"></b><small id="coSub" hidden></small></div>
+    </div>
 
-    <!-- Bottom dock: voice caption → fabs → card → status, stacked so they never
-         collide on narrow screens. -->
-    <div class="dock">
-      <div class="voice-caption" id="voiceCaption"></div>
-
-      <div class="fab-cluster">
-        <button class="fab ar primary" id="startAR" data-i18n="btn.ar">📱 View in AR</button>
-        <button class="fab mic" id="micBtn" data-i18n="btn.mic">🎤 Ask</button>
+    <!-- Header: back + controls (left) · AR quick-toggle + mode switcher (right). -->
+    <header class="chrome-top">
+      <div class="chrome-cluster">
+        <button class="circle-btn" id="backBtn" data-i18n-title="btn.backTitle" title="">
+          <svg width="8" height="14" viewBox="0 0 8 14"><path d="M7 1L1 7l6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="circle-btn gear" id="panelToggle" data-i18n-title="btn.controlsTitle" title="">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"/><circle cx="15" cy="7" r="2.3"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="8.5" cy="12" r="2.3"/><line x1="4" y1="17" x2="20" y2="17"/><circle cx="16.5" cy="17" r="2.3"/></svg>
+        </button>
       </div>
+      <div class="chrome-cluster right">
+        <button class="ar-pill" id="startAR" data-i18n-title="btn.arTitle" title="">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8"/><path d="M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8"/><path d="M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16"/><path d="M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M12 8.4l3.1 1.8v3.6L12 15.6l-3.1-1.8v-3.6z"/></svg>
+          <span>AR</span>
+        </button>
+        <div class="switcher" id="modebar"></div>
+      </div>
+    </header>
+
+    <!-- Transient pills: app status · mic armed · culprit found. -->
+    <div class="pill-row">
+      <span class="status-pill" id="status" hidden><span id="statusText"></span></span>
+      <span class="status-pill" id="voicePill" hidden><i class="pulse-dot"></i><span data-i18n="pill.listening">listening</span></span>
+      <span class="status-pill amber" id="diagBadge" hidden data-i18n="diag.badge">culprit found</span>
+    </div>
+
+    <!-- Fix walkthrough header: step counter + pause + progress bars. -->
+    <div class="fixhead" id="fixHead" hidden>
+      <div class="fixhead-row">
+        <span class="kicker-mono" id="fixHeadKicker"></span>
+        <button class="ghost-pill" id="pauseBtn"></button>
+      </div>
+      <div class="fixbars" id="fixBars"></div>
+    </div>
+
+    <!-- Bottom dock: Otto's voice → part chips → the card → mic row → type bar. -->
+    <div class="dock">
+      <div class="otto" id="voiceCaption">
+        <div class="otto-head">
+          <span class="otto-name">OTTO</span>
+          <span class="otto-dots"><i></i><i></i><i></i></span>
+        </div>
+        <div class="otto-text" id="ottoText"></div>
+        <div class="mono-hint otto-hint" data-i18n="otto.hint">say “pause” anytime</div>
+      </div>
+
+      <div class="part-chips" id="partChips"></div>
 
       <div class="card" id="card">
-        <div class="kicker" id="cardKicker">Fix</div>
-        <div class="body" id="cardBody">…</div>
+        <div class="kicker-mono card-kicker" id="cardKicker"></div>
+        <div class="body" id="cardBody"></div>
         <div class="meta" id="cardMeta"></div>
         <div class="chips" id="cardChips"></div>
+        <div class="actions" id="cardActions"></div>
+      </div>
+
+      <div class="mic-row" id="micRow">
         <div class="stepnav" id="cardNav">
-          <button id="stepPrev" data-i18n="btn.back">◀ Back</button>
-          <button id="stepNext" class="primary" data-i18n="btn.next">Next ▶</button>
+          <button class="circle-btn nav-back" id="stepPrev" data-i18n-title="btn.backTitle" title="">
+            <svg width="8" height="14" viewBox="0 0 8 14"><path d="M7 1L1 7l6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="ghost-pill saynext" id="stepNext"></button>
+        </div>
+        <div class="ask-cluster">
+          <button class="mic-circle" id="micBtn" data-i18n-title="btn.micTitle" title="">
+            <i class="mic-ring"></i>
+            <svg width="13" height="16" viewBox="0 0 16 19"><rect x="4.5" y="1" width="7" height="11" rx="3.5" fill="currentColor"/><path d="M2 9a6 6 0 0 0 12 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="8" y1="15.5" x2="8" y2="18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </button>
+          <span class="ask-label" data-i18n="btn.ask">ASK</span>
         </div>
       </div>
 
-      <div class="status" id="status" data-i18n="status.init">Initialising…</div>
+      <form class="typebar" id="typeBar" hidden>
+        <input id="typeInput" type="text" autocomplete="off" />
+        <button class="send-circle" id="typeSend" type="submit" data-i18n-title="btn.sendTitle" title="">
+          <svg width="16" height="16" viewBox="0 0 16 16"><path d="M2.5 8h10M8.5 3.5L13 8l-4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </form>
     </div>
 
-    <!-- Home screen: the front door. Opaque, over everything except the global
-         language/theme toggles. Two ways to choose an object — camera scan, or
-         the list. -->
-    <div class="home" id="home">
-      <div class="home-inner">
-        <h1 class="home-title" data-i18n="app.title">AR Repair Tutor</h1>
-        <p class="home-sub" data-i18n="home.sub">What are we working on?</p>
+    <!-- Listening sheet: mic live — "I'm hearing you". -->
+    <div class="listen-sheet" id="listenSheet">
+      <div class="listen-glow"><i></i><i></i></div>
+      <div class="listen-inner">
+        <div class="kicker-mono" data-i18n="listen.kicker">LISTENING</div>
+        <div class="listen-text"><span id="listenPhrase"></span><i class="caret"></i></div>
+        <div class="wave"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+        <div class="mono-hint" data-i18n="listen.hint">take your time · tap anywhere to stop</div>
+      </div>
+    </div>
 
-        <div class="home-view" id="homeChoose">
+    <!-- AR chrome: exit · anchor pill · voice chips · big reachable controls. -->
+    <button class="circle-btn scrim" id="exitAR" data-i18n-title="btn.exitARTitle" title="">
+      <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1L1 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <div class="ar-top">
+      <span class="status-pill scrim"><i class="pulse-dot"></i><span id="arTopText"></span></span>
+    </div>
+    <div class="ar-bottom">
+      <div class="voice-chips" id="arChips" hidden>
+        <span class="vchip" data-i18n="chip.next">“next”</span>
+        <span class="vchip" data-i18n="chip.again">“again”</span>
+        <span class="vchip" data-i18n="chip.move">“move it”</span>
+      </div>
+      <div class="ar-controls">
+        <button class="ar-side" id="arSteps" data-i18n="ar.steps">Steps</button>
+        <button class="btn-frosted ar-cta" id="arAsk">
+          <svg width="14" height="17" viewBox="0 0 16 19"><rect x="4.5" y="1" width="7" height="11" rx="3.5" fill="currentColor"/><path d="M2 9a6 6 0 0 0 12 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="8" y1="15.5" x2="8" y2="18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          <span data-i18n="btn.askOtto">Ask Otto</span>
+        </button>
+        <button class="ar-side" id="arPause" data-i18n="ar.pause">Pause</button>
+      </div>
+    </div>
+
+    <!-- Arrival: recognized on sight — scan rings + checkmark pill + one question. -->
+    <div class="arrival" id="arrival" hidden>
+      <div class="arrival-stage">
+        <i class="scan-ring2"></i>
+        <i class="scan-ring2 r2"></i>
+        <div class="arrival-pill">
+          <svg width="11" height="9" viewBox="0 0 14 11"><path d="M2 6l3.4 3.4L12 2.6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="color:var(--otto-tint)"/></svg>
+          <span id="arrivalName"></span>
+        </div>
+      </div>
+      <div class="arrival-stack">
+        <div class="arrival-card" id="arrivalBody"></div>
+        <div class="btn-row">
+          <button class="btn-secondary" id="arrivalExplore" data-i18n="arrival.lookInside">Look inside</button>
+          <button class="btn-frosted" id="arrivalAsk">
+            <svg width="13" height="16" viewBox="0 0 16 19"><rect x="4.5" y="1" width="7" height="11" rx="3.5" fill="currentColor"/><path d="M2 9a6 6 0 0 0 12 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><line x1="8" y1="15.5" x2="8" y2="18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            <span data-i18n="btn.askOtto">Ask Otto</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Controls sheet: model · language · theme · reset. Slides up from the gear. -->
+    <div id="sheetBackdrop"></div>
+    <div class="panel">
+      <div class="sheet-inner">
+        <div class="drag-handle"></div>
+        <div class="sheet-head">
+          <span class="kicker-mono" data-i18n="controls.kicker">CONTROLS</span>
+          <button class="circle-btn" id="sheetClose" data-i18n-title="btn.closeTitle" title="">
+            <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 1l8 8M9 1L1 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div class="sheet-row">
+          <span class="row-label" data-i18n="controls.model">MODEL</span>
+          <div class="select-row">
+            <select id="model" autocomplete="off"></select>
+            <svg width="12" height="8" viewBox="0 0 12 8"><path d="M1 1.5L6 6.5l5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--circle-ink)"/></svg>
+          </div>
+        </div>
+        <div class="sheet-row">
+          <span class="row-label" data-i18n="controls.language">LANGUAGE</span>
+          <div class="seg" id="langSeg"></div>
+        </div>
+        <div class="sheet-row">
+          <span class="row-label" data-i18n="controls.theme">THEME</span>
+          <div class="seg" id="themeSeg"></div>
+        </div>
+        <button class="btn-frosted" id="reset" data-i18n="controls.reset">Reset view</button>
+        <div class="credit mono-hint" id="credit"></div>
+        <!-- Engine plumbing with no UI in the Otto system: the app decides the
+             explode amount, the splitter mode comes from the model registry.
+             These inputs stay mounted (hidden) because the 3D core reads them. -->
+        <div hidden aria-hidden="true">
+          <select id="mode" autocomplete="off">
+            <option value="group">group</option>
+            <option value="component">component</option>
+          </select>
+          <input type="checkbox" id="tint" />
+          <input type="checkbox" id="wireframe" />
+          <input type="checkbox" id="autorotate" />
+          <input type="range" id="explode" min="0" max="2" step="0.01" value="0" />
+          <span id="explodeVal"></span>
+          <span id="partCount"></span>
+          <div id="legend"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Home: the front door — scan it, or pick it. -->
+    <div class="home" id="home">
+      <div class="home-ambient">
+        <div class="ambient-grid"></div>
+        <div class="drift d1"></div>
+        <div class="drift d2"></div>
+        <div class="dome"><i class="dome-core"></i><i class="dome-band"></i></div>
+      </div>
+
+      <!-- 4a — chooser -->
+      <div class="home-view home-choose" id="homeChoose">
+        <div class="home-copy">
+          <h1 class="home-title" data-i18n="home.title">What are we working on?</h1>
+          <p class="home-sub" data-i18n="home.sub">Point me at something broken, or pick from what I know.</p>
+        </div>
+        <div class="home-options">
           <button class="home-option" id="homeScanBtn">
-            <span class="ico">📷</span>
-            <span>
+            <span class="opt-ico">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6.5" width="19" height="13.5" rx="3"/><circle cx="12" cy="13" r="3.6"/><path d="M8.2 6.5l1.3-2.5h5l1.3 2.5"/></svg>
+            </span>
+            <span class="opt-copy">
               <b data-i18n="home.scan">Scan an object</b>
               <small data-i18n="home.scanSub">Point your camera at it and I'll recognise it.</small>
             </span>
           </button>
           <button class="home-option" id="homeSelectBtn">
-            <span class="ico">📋</span>
-            <span>
+            <span class="opt-ico">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="6" x2="20.5" y2="6"/><line x1="9" y1="12" x2="20.5" y2="12"/><line x1="9" y1="18" x2="20.5" y2="18"/><circle cx="4.6" cy="6" r="1.1" fill="currentColor" stroke="none"/><circle cx="4.6" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="4.6" cy="18" r="1.1" fill="currentColor" stroke="none"/></svg>
+            </span>
+            <span class="opt-copy">
               <b data-i18n="home.select">Select an object</b>
               <small data-i18n="home.selectSub">Choose from the objects I know.</small>
             </span>
           </button>
         </div>
+      </div>
 
-        <!-- Object list. Filled from the model registry, so it follows the
-             selected language and never drifts from the panel's dropdown. -->
-        <div class="home-view" id="homePick" hidden>
-          <div class="home-list" id="homeList"></div>
-          <button data-home-back data-i18n="btn.back">◀ Back</button>
+      <!-- 4b — pick list -->
+      <div class="home-view home-pick" id="homePick" hidden>
+        <div class="home-header">
+          <button class="circle-btn" data-home-back data-i18n-title="btn.backTitle" title="">
+            <svg width="8" height="14" viewBox="0 0 8 14"><path d="M7 1L1 7l6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <span class="home-header-title" data-i18n="home.title">What are we working on?</span>
         </div>
+        <div class="pick-body">
+          <div class="kicker-mono" data-i18n="home.kicker">OBJECTS I KNOW</div>
+          <div class="home-list" id="homeList"></div>
+        </div>
+        <div class="pick-bottom">
+          <div class="mono-hint" data-i18n="home.dontSee">don't see yours?</div>
+          <button class="btn-frosted" id="homePickScan">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6.5" width="19" height="13.5" rx="3"/><circle cx="12" cy="13" r="3.6"/><path d="M8.2 6.5l1.3-2.5h5l1.3 2.5"/></svg>
+            <span data-i18n="home.scanInstead">Scan it instead</span>
+          </button>
+        </div>
+      </div>
 
-        <div class="home-view" id="homeScan" hidden>
-          <div class="home-cam">
-            <video id="homeVideo" playsinline muted></video>
-            <img id="homeShot" alt="" hidden />
-          </div>
-          <div class="home-scan-status" id="homeScanStatus"></div>
-          <div class="home-actions">
-            <button data-home-back data-i18n="btn.back">◀ Back</button>
-            <button class="home-primary" id="homeCapture" data-i18n="scan.capture">📸 Capture</button>
-          </div>
-          <button id="homeScanAlt" data-i18n="scan.chooseInstead">📋 Pick from the list</button>
+      <!-- 4c — full-bleed capture -->
+      <div class="home-view home-scan" id="homeScan" hidden>
+        <video id="homeVideo" playsinline muted></video>
+        <img id="homeShot" alt="" hidden />
+        <div class="scan-scrim-top"></div>
+        <div class="scan-scrim-bottom"></div>
+        <div class="scan-header">
+          <button class="circle-btn scrim" data-home-back data-i18n-title="btn.backTitle" title="">
+            <svg width="8" height="14" viewBox="0 0 8 14"><path d="M7 1L1 7l6 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <span class="status-pill scrim"><i class="pulse-dot"></i><span id="homeScanStatus"></span></span>
+          <span class="spacer"></span>
+        </div>
+        <div class="viewfinder"><i class="c tl"></i><i class="c tr"></i><i class="c bl"></i><i class="c br"></i><i class="scan-ring"></i></div>
+        <div class="scan-bottom">
+          <button class="shutter" id="homeCapture" data-i18n-title="scan.shutterTitle" title=""><i></i></button>
+          <button class="scrim-pill" id="homeScanAlt">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="6" x2="20.5" y2="6"/><line x1="9" y1="12" x2="20.5" y2="12"/><line x1="9" y1="18" x2="20.5" y2="18"/><circle cx="4.6" cy="6" r="1.1" fill="currentColor" stroke="none"/><circle cx="4.6" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="4.6" cy="18" r="1.1" fill="currentColor" stroke="none"/></svg>
+            <span data-i18n="scan.pickList">Pick from the list</span>
+          </button>
         </div>
       </div>
     </div>
-
-    <button id="panelToggle" data-i18n="btn.controls">⚙︎ Controls</button>
-    <!-- Top-right cluster. Language sits beside the theme switch because it is
-         the same kind of control: a global, one-tap preference. -->
-    <div class="corner-controls">
-      <button id="homeBtn" data-i18n-title="btn.homeTitle" title="Home" data-i18n="btn.home">⌂ Home</button>
-      <button id="langToggle" data-i18n-title="btn.langTitle" title="Switch language">🌐 EN</button>
-      <button id="themeToggle" data-i18n-title="btn.themeTitle" title="Toggle light / dark theme">🌙 Dark</button>
-    </div>
-
-    <button class="fab" id="exitAR" data-i18n="btn.exitAR">✕ Exit AR</button>
 
     <script type="module" src="/src/main.js"></script>
   </body>

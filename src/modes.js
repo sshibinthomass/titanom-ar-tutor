@@ -854,6 +854,52 @@ export function partInfoDigest(modelKey) {
   return Object.entries(info).map(([name, desc]) => `${localizeName(name)}: ${tr(desc)}`).join(' | ');
 }
 
+/**
+ * The authored fact for ONE part, in the current language — what the Explore
+ * card's body shows when a part is tapped (the Otto UI system reads a short
+ * description under the part-name kicker). '' when nothing is authored, so the
+ * caller can fall back to a generic line. The same texts still go to the LLM
+ * whole via partInfoDigest; this is just the on-screen slice of them.
+ */
+export function partInfo(modelKey, partName) {
+  const info = PART_INFO[modelKey];
+  return info?.[partName] ? tr(info[partName]) : '';
+}
+
+/**
+ * Explore's part-chip row: a handful of big, tappable regions (Backrest · Seat
+ * · Tilt · Gas lift · Base — never all 47 parts). Authored for the hero via
+ * EXPLORE_CHIPS; every other model derives its chips from its Assemble groups
+ * (or, failing that, its biggest parts), so the row is never empty or absurd.
+ */
+const EXPLORE_CHIPS = {
+  'markus-chair': [
+    { label: { en: 'Backrest', de: 'Lehne' }, match: ['backrest', 'mesh panel', 'lumbar', 'headrest'] },
+    { label: { en: 'Seat', de: 'Sitz' }, match: ['seat'] },
+    { label: { en: 'Tilt', de: 'Wippmechanik' }, match: ['tilt'] },
+    { label: { en: 'Gas lift', de: 'Gasfeder' }, match: ['gas cylinder'] },
+    { label: { en: 'Base', de: 'Fußkreuz' }, match: ['star base', 'caster'] },
+  ],
+};
+
+export function resolveExploreChips(modelKey, parts) {
+  const authored = EXPLORE_CHIPS[modelKey];
+  if (authored) {
+    return authored
+      .map((c) => ({ label: tr(c.label), indices: findParts(parts, c.match) }))
+      .filter((c) => c.indices.length);
+  }
+  // Derive from the Assemble groups: they are already the object's semantic
+  // regions in build order. Cap at five so the row stays one comfortable line.
+  const groups = ASSEMBLE_STEPS[modelKey];
+  if (groups) {
+    return resolveAssemble(modelKey, parts).steps.slice(0, 5)
+      .map((s) => ({ label: s.label, indices: s.indices }));
+  }
+  // No authored anything: the five biggest parts (parts are sorted by size).
+  return parts.slice(0, 5).map((p, i) => ({ label: partLabel(p), indices: [i] }));
+}
+
 /** Quiz entries → [{ indices, question, answer }] (only those that matched parts). */
 export function resolveQuiz(modelKey, parts) {
   const entries = CONTENT[modelKey]?.quiz ?? [];

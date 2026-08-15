@@ -54,6 +54,7 @@ export function initHome(options) {
     capture: document.getElementById('homeCapture'),
     scanStatus: document.getElementById('homeScanStatus'),
     scanAlt: document.getElementById('homeScanAlt'),
+    pickScan: document.getElementById('homePickScan'),
     backs: document.querySelectorAll('[data-home-back]'),
   };
 
@@ -61,7 +62,8 @@ export function initHome(options) {
   el.scanBtn.addEventListener('click', () => cfg.onView('scan'));
   el.selectBtn.addEventListener('click', () => cfg.onView('pick'));
   for (const b of el.backs) b.addEventListener('click', () => cfg.onView('choose'));
-  el.scanAlt.addEventListener('click', () => cfg.onView('pick'));
+  el.scanAlt.addEventListener('click', () => cfg.onView('pick'));   // capture → "Pick from the list"
+  el.pickScan.addEventListener('click', () => cfg.onView('scan'));  // pick list → "Scan it instead"
   // Retake is not a view change — it re-arms the camera on the page we are on.
   el.capture.addEventListener('click', () => (scanPhase === 'live' ? capture() : showScan()));
 
@@ -116,7 +118,7 @@ export function refreshHome() {
   renderList();
   if (!el.scan.hidden) {
     setScanStatus(statusKey, statusVars);
-    el.capture.textContent = t(scanPhase === 'live' ? 'scan.capture' : 'scan.retake');
+    el.capture.title = t(scanPhase === 'live' ? 'scan.shutterTitle' : 'scan.retakeTitle');
   }
 }
 
@@ -137,15 +139,18 @@ function renderList() {
   for (const { key, label } of cfg.getOptions()) {
     const btn = document.createElement('button');
     btn.className = 'home-item';
-    btn.textContent = label;
+    btn.innerHTML = `<span></span><svg width="8" height="14" viewBox="0 0 8 14"><path d="M1 1l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>`;
+    btn.querySelector('span').textContent = label;
     btn.addEventListener('click', () => pick(key));
     el.list.appendChild(btn);
   }
 }
 
-function pick(key) {
+// `source` tells the caller how the object was chosen: a camera recognition
+// ('scan') earns the Arrival greeting, a plain list pick does not.
+function pick(key, source = 'list') {
   closeHome();
-  cfg.onPick(key);
+  cfg.onPick(key, source);
 }
 
 // ---- Scan ------------------------------------------------------------------
@@ -155,7 +160,7 @@ async function showScan() {
   scanPhase = 'live';
   el.shot.hidden = true;
   el.video.hidden = false;
-  el.capture.textContent = t('scan.capture');
+  el.capture.title = t('scan.shutterTitle');
   el.capture.disabled = true;
   setScanStatus('scan.starting');
   try {
@@ -198,10 +203,10 @@ async function capture() {
   const key = cfg.scanMap[label];
   if (!key) {
     // 'none' also covers "the AI isn't configured or didn't answer" — one
-    // dead end, one way out: retake, or use the list.
+    // dead end, one way out: retake (the shutter re-arms), or use the list.
     scanPhase = 'result';
     setScanStatus('scan.none');
-    el.capture.textContent = t('scan.retake');
+    el.capture.title = t('scan.retakeTitle');
     el.capture.disabled = false;
     return;
   }
@@ -210,7 +215,7 @@ async function capture() {
   setScanStatus('scan.found', { object: option?.label || key });
   // A beat to read the result before the overlay drops — otherwise the answer
   // flashes past and the model just changes on its own.
-  setTimeout(() => { if (seq === scanSeq) pick(key); }, 900);
+  setTimeout(() => { if (seq === scanSeq) pick(key, 'scan'); }, 900);
 }
 
 // The scan's status line is generated, not static markup, so — like main.js's

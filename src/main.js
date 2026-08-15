@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { buildExplodedView, setExplode, setPartExplode, isolateParts, clearPartStates, setHighlight, setGhostStyle, findParts } from './explode.js';
 import { updateTweens, tweenTo, cancelTween, isTweening, easeInOutCubic, flyToParts, moveCamera } from './animate.js';
 import { attachPicker, attachDragger } from './select.js';
-import { MODE_LIST, resolveFix, resolveAssemble, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest, fixSuggestions, resolvePlanParts, partLabel, canonicalName } from './modes.js';
+import { MODE_LIST, resolveFix, resolveAssemble, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest, fixSuggestions, resolvePlanParts, partLabel, canonicalName, partInfo, resolveExploreChips } from './modes.js';
 import { LANGS, getLang, setLang, onLangChange, t, locale, applyStaticTranslations } from './i18n.js';
 import { isARSupported, startAR, updateAR, endAR, requestMove, setInteractor, setManipulationEnabled, setPivotScale, getFitScale } from './ar.js';
 import { startPuzzle, stopPuzzle, updatePuzzle, puzzleInteractor, isPuzzleActive, puzzleAutoPlace, puzzleHintIndices, puzzleStatus, puzzleAnswerByName, puzzleAnswerCandidates } from './puzzle.js';
@@ -99,10 +99,10 @@ renderer.toneMappingExposure = 1.35;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-// Scene backdrop tracks the UI theme (set for real by applyTheme() below);
-// this light default just avoids a first-frame flash before that runs.
-const SCENE_BG = { light: 0xe9ecf1, dark: 0x14161c };
-scene.background = new THREE.Color(SCENE_BG.light);
+// No scene backdrop: the canvas is transparent so the Otto ambient layers —
+// the midnight gradient, the dotted grid, the breathing dome glow — read
+// through it. The theme lives entirely in CSS tokens.
+scene.background = null;
 
 // The "disabled part" wireframe has to stay legible on three very different
 // backdrops, so it is re-coloured per backdrop rather than picking one tint and
@@ -165,6 +165,9 @@ const ui = {
   autorotate: document.getElementById('autorotate'),
   reset: document.getElementById('reset'),
   status: document.getElementById('status'),
+  statusText: document.getElementById('statusText'),
+  voicePill: document.getElementById('voicePill'),
+  diagBadge: document.getElementById('diagBadge'),
   partCount: document.getElementById('partCount'),
   legend: document.getElementById('legend'),
   credit: document.getElementById('credit'),
@@ -174,20 +177,49 @@ const ui = {
   cardBody: document.getElementById('cardBody'),
   cardMeta: document.getElementById('cardMeta'),
   cardChips: document.getElementById('cardChips'),
+  cardActions: document.getElementById('cardActions'),
   cardNav: document.getElementById('cardNav'),
+  micRow: document.getElementById('micRow'),
   stepPrev: document.getElementById('stepPrev'),
   stepNext: document.getElementById('stepNext'),
   startAR: document.getElementById('startAR'),
   exitAR: document.getElementById('exitAR'),
   micBtn: document.getElementById('micBtn'),
   voiceCaption: document.getElementById('voiceCaption'),
+  ottoText: document.getElementById('ottoText'),
   panelToggle: document.getElementById('panelToggle'),
-  themeToggle: document.getElementById('themeToggle'),
+  sheetClose: document.getElementById('sheetClose'),
   panel: document.querySelector('.panel'),
   sheetBackdrop: document.getElementById('sheetBackdrop'),
-  lang: document.getElementById('lang'),
-  langToggle: document.getElementById('langToggle'),
-  homeBtn: document.getElementById('homeBtn'),
+  backBtn: document.getElementById('backBtn'),
+  langSeg: document.getElementById('langSeg'),
+  themeSeg: document.getElementById('themeSeg'),
+  partChips: document.getElementById('partChips'),
+  fixHead: document.getElementById('fixHead'),
+  fixHeadKicker: document.getElementById('fixHeadKicker'),
+  fixBars: document.getElementById('fixBars'),
+  pauseBtn: document.getElementById('pauseBtn'),
+  listenSheet: document.getElementById('listenSheet'),
+  listenPhrase: document.getElementById('listenPhrase'),
+  typeBar: document.getElementById('typeBar'),
+  typeInput: document.getElementById('typeInput'),
+  arTopText: document.getElementById('arTopText'),
+  arChips: document.getElementById('arChips'),
+  arSteps: document.getElementById('arSteps'),
+  arAsk: document.getElementById('arAsk'),
+  arPause: document.getElementById('arPause'),
+  callout: document.getElementById('callout'),
+  coBloom: document.getElementById('coBloom'),
+  coRing: document.getElementById('coRing'),
+  coLeader: document.getElementById('coLeader'),
+  coLabel: document.getElementById('coLabel'),
+  coName: document.getElementById('coName'),
+  coSub: document.getElementById('coSub'),
+  arrival: document.getElementById('arrival'),
+  arrivalName: document.getElementById('arrivalName'),
+  arrivalBody: document.getElementById('arrivalBody'),
+  arrivalExplore: document.getElementById('arrivalExplore'),
+  arrivalAsk: document.getElementById('arrivalAsk'),
 };
 
 // Paint the static chrome in the selected language before anything else runs,
@@ -250,6 +282,9 @@ primeSfx();
 // the *request* — set the instant a route arrives — so the router compares
 // against this to decide whether a route still needs a load.
 let loadedKey = null;
+// …and the model whose parts are actually on screen: set by rebuild(), so the
+// Arrival greeting can tell "already built" from "still downloading".
+let builtKey = null;
 
 function loadModel(key) {
   const m = MODELS[key];
@@ -286,12 +321,21 @@ function loadModel(key) {
 
 // The status line is written from a dozen places and has to survive a language
 // switch, so it remembers its key (and vars) rather than its rendered text.
+// In the Otto system it is a transient mono pill under the header: it shows
+// while something is actually happening (loading, splitting) and retires
+// itself shortly after settling — a permanent status bar reads as debug chrome.
 let statusKey = 'status.init';
 let statusVars = null;
+let statusHideTimer = null;
 function setStatus(key, vars = null) {
   statusKey = key;
   statusVars = vars;
-  ui.status.textContent = t(key, vars);
+  ui.statusText.textContent = t(key, vars);
+  ui.status.hidden = false;
+  clearTimeout(statusHideTimer);
+  if (key === 'status.ready' || key === 'status.failed') {
+    statusHideTimer = setTimeout(() => { ui.status.hidden = true; }, 2500);
+  }
 }
 
 function rebuild() {
@@ -312,6 +356,7 @@ function rebuild() {
   });
   explodedGroup = built.group;
   parts = built.parts;
+  builtKey = ui.model.value;
   applyNames(ui.model.value, parts); // semantic names for single-material models
   scene.add(explodedGroup);
 
@@ -321,6 +366,8 @@ function rebuild() {
   ui.partCount.textContent = String(parts.length);
   onExplodeChange();
   enterMode(currentMode); // re-init the active mode against the new part list
+  // A scan landed on this model: greet it (1a Arrival) now that it is built.
+  if (pendingArrival === ui.model.value) { pendingArrival = null; showArrival(); }
 
   // DEBUG: expose part geometry (world-space bbox) for authoring semantic names.
   window.__parts = parts.map((p, i) => {
@@ -449,16 +496,10 @@ function onExplodeChange() {
   updateExplodeReadout(amount);
 }
 
-// Slider value + numeric readouts. Split out of onExplodeChange because the
-// explode tween positions parts itself (per-part, staggered) and must not go
-// back through setExplode — that would flatten the cascade to a uniform amount.
+// Numeric readout (hidden — the Otto system has no explode slider; the app
+// decides the spread). Kept because the tween and the hidden input feed it.
 function updateExplodeReadout(amount) {
   ui.explodeVal.textContent = amount.toFixed(2);
-  // Keep the Explore card's inline slider in step with the panel slider.
-  if (cardExplode) {
-    cardExplode.slider.value = ui.explode.value;
-    cardExplode.val.textContent = amount.toFixed(2);
-  }
 }
 
 // Fraction of the tween spent handing off between parts. Each part eases over
@@ -593,7 +634,8 @@ let quizItems = [];    // quiz: [{ index, question, answer }]
 let quizIndex = 0;
 let quizRevealed = false;
 let focusedPart = null; // name of the currently highlighted part (for the tutor)
-let cardExplode = null; // Explore card's inline explode slider { slider, val }, or null
+let pendingArrival = null; // model key a camera scan chose — greet it once built
+let exploreChips = [];  // Explore's part-chip row: [{ label, indices }]
 
 function currentKey() { return ui.model.value; }
 
@@ -603,30 +645,48 @@ function say(text) {
   speak(text);
 }
 
-// Build the mode-switch bar once. The captions come from the dictionary and are
-// re-read on a language switch (relabelModes), so the bar itself is built once
-// and never rebuilt — the buttons keep their listeners and their active state.
-for (const m of MODE_LIST) {
+// The pill switcher holds exactly three modes — Explore (magnifier), Fix
+// (wrench), Assemble (cube), per the Otto UI system. Quiz stays a valid deep
+// link (`#/<model>/quiz`) but earns no tab. The selected mode sits in a filled
+// blue circle with its label beside it; the others collapse to icon circles.
+const SWITCHER_MODES = ['explore', 'fix', 'assemble'];
+const MODE_ICONS = {
+  explore: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="16.5" y1="16.5" x2="21" y2="21"></line></svg>',
+  fix: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4.6 4.6 0 0 0-6 5.7L3 17.7a1.9 1.9 0 0 0 2.7 2.7L11.4 15a4.6 4.6 0 0 0 5.7-6l-3 3-2.5-.7-.7-2.5z"></path></svg>',
+  assemble: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.3 7 12 12 20.7 7"></polyline><line x1="12" y1="22" x2="12" y2="12"></line></svg>',
+};
+// Built once; captions re-read on a language switch (relabelModes), so the
+// buttons keep their listeners and their active state.
+for (const id of SWITCHER_MODES) {
   const btn = document.createElement('button');
   btn.className = 'modebtn';
-  btn.dataset.mode = m.id;
-  btn.textContent = t(`mode.${m.id}`);
-  btn.addEventListener('click', () => enterMode(m.id));
+  btn.dataset.mode = id;
+  btn.innerHTML = `<span class="modedot">${MODE_ICONS[id]}</span><span class="modelabel">${t(`mode.${id}`)}</span>`;
+  btn.addEventListener('click', () => goTo({ kind: 'object', model: ui.model.value, mode: id }));
   ui.modebar.appendChild(btn);
 }
 function relabelModes() {
-  for (const b of ui.modebar.children) b.textContent = t(`mode.${b.dataset.mode}`);
+  for (const b of ui.modebar.children) b.querySelector('.modelabel').textContent = t(`mode.${b.dataset.mode}`);
 }
 
 function setModeButtons(active) {
   for (const b of ui.modebar.children) b.classList.toggle('active', b.dataset.mode === active);
 }
 
-function showCard(kicker, bodyHtml, meta = '', { chips = null, nav = false } = {}) {
+/**
+ * The one reading surface: a glass card. `tone: 'amber'` marks a problem card
+ * (Fix steps, the diagnosis) — the kicker and beat markers warm up, nothing
+ * else; amber never spreads beyond the problem. `actions` renders big buttons
+ * (frosted primary / ghost secondary) under the body — the diagnose and done
+ * moments. `nav: true` shows the step row (back circle + the "say next" pill)
+ * in the mic row below the card.
+ */
+function showCard(kicker, bodyHtml, meta = '', { chips = null, nav = false, tone = null, actions = null } = {}) {
   ui.cardKicker.textContent = kicker;
   ui.cardBody.innerHTML = bodyHtml;
   ui.cardMeta.textContent = meta;
-  ui.cardNav.style.display = nav ? 'flex' : 'none';
+  ui.card.classList.toggle('amber', tone === 'amber');
+  ui.cardNav.classList.toggle('show', !!nav);
   ui.cardChips.innerHTML = '';
   if (chips) {
     for (const c of chips) {
@@ -637,13 +697,16 @@ function showCard(kicker, bodyHtml, meta = '', { chips = null, nav = false } = {
       ui.cardChips.appendChild(el);
     }
   }
-  // Every card carries its own explode slider. The Controls panel's copy is
-  // unreachable exactly where it is most wanted — it is a gear-tap bottom sheet
-  // on a phone, and hidden outright during AR — so the card is the only place
-  // the spread can be adjusted on the surfaces the app is actually used on.
-  // Skipped while the puzzle owns part positions, where the slider is a no-op
-  // (see onExplodeChange) and would just be a dead control.
-  if (!isPuzzleActive()) addCardExplodeSlider();
+  ui.cardActions.innerHTML = '';
+  if (actions) {
+    for (const a of actions) {
+      const el = document.createElement('button');
+      el.className = a.kind === 'ghost' ? 'btn-secondary' : 'btn-frosted';
+      el.textContent = a.label;
+      el.addEventListener('click', a.onClick);
+      ui.cardActions.appendChild(el);
+    }
+  }
   ui.card.classList.add('show');
 }
 function hideCard() { ui.card.classList.remove('show'); }
@@ -705,9 +768,12 @@ function enterMode(id) {
   currentMode = id;
   setModeButtons(id);
   syncRoute();        // every mode is a page; entering one is arriving at it
-  cardExplode = null; // drop any stale inline slider before the card is rebuilt
   stopPuzzle();       // before resetParts, which assumes it owns part positions
   cancelBeats();      // ditto — a gesture writes part positions every frame
+  hideArrival();      // the greeting is a moment, not a mode — any switch ends it
+  clearCallout();
+  setFixChrome(null); // step header + culprit badge belong to Fix's own states
+  setPartChips(null); // rebuilt by enterExplore; hidden everywhere else
   applyARInteraction();
   resetParts();
   selectedPart = -1;
@@ -724,36 +790,69 @@ function enterMode(id) {
 // so translating the header can't change control flow.
 const kicker = (id) => t(`kicker.${id}`);
 
-// --- Explore: tap a part, isolate + name it ---
+// --- Explore: tap a part (or a region chip), isolate + describe it -----------
+// There is no explode slider anywhere: the app decides. Explore opens the
+// object part-way so the regions read as separate things to tap.
 function enterExplore() {
-  showCard(kicker('explore'), t('explore.intro'), t('explore.partCount', { count: parts.length }));
+  mildExplode();
+  exploreChips = resolveExploreChips(currentKey(), parts);
+  setPartChips(exploreChips);
+  showExploreIntro();
 }
 
-// The explode slider that rides inside every card (appended by showCard), so
-// parts can be spread apart without the Controls sheet — which is a gear tap
-// away on mobile and hidden entirely in AR. It mirrors the panel slider; both
-// drive onExplodeChange, which keeps the two in sync.
-function addCardExplodeSlider() {
-  const wrap = document.createElement('div');
-  wrap.className = 'card-explode';
-  const label = document.createElement('label');
-  label.textContent = t('card.explode');
-  const slider = document.createElement('input');
-  slider.type = 'range';
-  slider.min = ui.explode.min;
-  slider.max = ui.explode.max;
-  slider.step = ui.explode.step;
-  slider.value = ui.explode.value;
-  const val = document.createElement('span');
-  val.className = 'val';
-  val.textContent = parseFloat(ui.explode.value).toFixed(2);
-  slider.addEventListener('input', () => {
-    ui.explode.value = slider.value;
-    onExplodeChange();
-  });
-  wrap.append(label, slider, val);
-  ui.cardBody.appendChild(wrap);
-  cardExplode = { slider, val };
+function showExploreIntro() {
+  showCard(kicker('explore'), esc(t(arSupported ? 'explore.intro' : 'explore.introNoAr')),
+    t('explore.partCount', { count: parts.length }));
+}
+
+/** Render (or hide, with null) Explore's part-chip row. */
+function setPartChips(chips, activeLabel = null) {
+  ui.partChips.innerHTML = '';
+  ui.partChips.classList.toggle('show', !!(chips && chips.length));
+  if (!chips) return;
+  for (const c of chips) {
+    const el = document.createElement('button');
+    el.className = 'pchip' + (c.label === activeLabel ? ' active' : '');
+    el.textContent = c.label;
+    el.addEventListener('click', () => selectExploreGroup(c));
+    ui.partChips.appendChild(el);
+  }
+}
+
+/** A region chip was tapped: spotlight that family and describe it. */
+function selectExploreGroup(chip) {
+  if (currentMode !== 'explore') return;
+  const active = ui.partChips.querySelector('.pchip.active');
+  if (active && active.textContent === chip.label) {   // tap again → deselect
+    setPartChips(exploreChips);
+    clearCallout();
+    clearPartStates(parts);
+    selectedPart = -1;
+    focusedPart = null;
+    showExploreIntro();
+    return;
+  }
+  setPartChips(exploreChips, chip.label);
+  selectedPart = chip.indices[0] ?? -1;
+  isolateParts(parts, chip.indices, { highlight: false });
+  flyTo(chip.indices);
+  focusedPart = chip.indices.length ? partLabel(parts[chip.indices[0]]) : null;
+  showPartCard(chip.indices, chip.label);
+  setCallout(chip.indices, { label: chip.label });
+}
+
+/**
+ * The Explore card for a part or a region: the name as the mono kicker, the
+ * authored fact as the body (partInfo — grounded in the IKEA manual for the
+ * hero), a generic invitation when nothing is authored.
+ */
+function showPartCard(indices, label) {
+  const name = indices.length ? parts[indices[0]].name : null;
+  const desc = name ? partInfo(currentKey(), name) : '';
+  const metaText = indices.length > 1
+    ? t('explore.groupMeta', { count: indices.length })
+    : t('explore.partMeta', { tris: parts[indices[0]].triangleCount.toLocaleString(locale()) });
+  showCard(label.toUpperCase(), esc(desc || t('explore.askAbout')), metaText);
 }
 
 // --- Fix: voice-first, DGPT-planned repair ------------------------------------
@@ -762,8 +861,53 @@ function addCardExplodeSlider() {
 // names, and the app walks it with the same isolate + camera-flight + TTS
 // pipeline the authored procedure used. Without DGPT the authored procedure
 // runs exactly as before — the fallback, not the feature.
-let fixState = 'ask';   // 'ask' (waiting for a problem) | 'planning' | 'guided'
+let fixState = 'ask';   // 'ask' | 'planning' | 'diagnose' | 'guided' | 'done'
 let fixSeq = 0;         // newest fix request wins if two plans race
+let fixPaused = false;  // the step header's pause button froze the narration
+
+/**
+ * Fix's chrome outside the card: the amber "culprit found" badge (diagnose)
+ * and the step header — mono counter, pause pill, equal-width progress bars
+ * (done = blue glow, current = amber breathing, upcoming = faint). Passing
+ * null clears all of it; every other mode runs through that on entry.
+ */
+function setFixChrome(state) {
+  ui.diagBadge.hidden = state !== 'diagnose';
+  const heady = state === 'guided' || state === 'done';
+  ui.fixHead.hidden = !heady;
+  if (!heady) return;
+  if (state === 'done') {
+    ui.fixHeadKicker.textContent = t('fixhead.complete');
+    ui.pauseBtn.hidden = true;
+  } else {
+    ui.fixHeadKicker.textContent = t('fixhead.step', { index: stepIndex + 1, total: steps.length });
+    ui.pauseBtn.hidden = false;
+    ui.pauseBtn.textContent = t(fixPaused ? 'fix.resume' : 'fix.pause');
+  }
+  ui.fixBars.innerHTML = '';
+  for (let i = 0; i < steps.length; i++) {
+    const bar = document.createElement('span');
+    if (state === 'done' || i < stepIndex) bar.className = 'done';
+    else if (i === stepIndex) bar.className = 'current';
+    ui.fixBars.appendChild(bar);
+  }
+  updateArChips(); // the AR voice hints only apply while a step is on screen
+}
+
+// Pause freezes the narration where it stands; resume replays the current step
+// from its first beat (a half-heard sentence is worth less than a repeated one).
+ui.pauseBtn.addEventListener('click', () => {
+  if (fixState !== 'guided') return;
+  if (!fixPaused) {
+    fixPaused = true;
+    cancelBeats();
+    stopSpeaking();
+    setFixChrome('guided');
+  } else {
+    fixPaused = false;
+    renderStep();
+  }
+});
 
 function enterFix() {
   fixSeq++; // drop any plan still in flight from a previous visit / old part list
@@ -782,6 +926,7 @@ function runAuthoredFix() {
   }));
   stepIndex = 0; stepTitle = proc.title; stepKicker = 'fix';
   fixState = 'guided';
+  fixPaused = false;
   fixExplode();
   renderStep();
 }
@@ -795,10 +940,12 @@ function showFixAsk(lead = '') {
   steps = [];
   focusedPart = null;
   cancelBeats();
+  clearCallout();
+  setFixChrome(null);
   clearPartStates(parts);
   fixExplode(); // Fix sits at its own spread throughout, including while asking
   const chips = fixSuggestions(currentKey()).map((label) => ({
-    label: `🔧 ${label}`,
+    label,
     onClick: () => startFixRequest(label),
   }));
   showCard(
@@ -810,7 +957,7 @@ function showFixAsk(lead = '') {
   say(lead || t('fix.askSpoken'));
 }
 
-/** A problem arrived (spoken or tapped): plan it with DGPT and start the walkthrough. */
+/** A problem arrived (spoken or tapped): have DGPT plan it, then diagnose. */
 async function startFixRequest(request) {
   const my = ++fixSeq;
   fixState = 'planning';
@@ -833,11 +980,95 @@ async function startFixRequest(request) {
   stepIndex = 0;
   stepTitle = plan.title || t('fix.titleFor', { request });
   stepKicker = 'fix';
-  fixState = 'guided';
   track('fix-plan', { metadata: { model: ui.model.value, lang: getLang(), steps: steps.length, request } });
   fixExplode();
-  if (plan.intro) showCaption(esc(plan.intro));
-  renderStep(plan.intro);
+  showDiagnose(plan);
+}
+
+/**
+ * Diagnose (05): the culprit blooms warm. The plan's first step names the part
+ * the repair starts at — amber ring + label on it, the diagnosis line on the
+ * card, and one question: fix it with me, or not now. Amber owns this frame;
+ * everything else stays cool.
+ */
+function showDiagnose(plan) {
+  fixState = 'diagnose';
+  fixPaused = false;
+  setFixChrome('diagnose');
+  const culprit = steps[0]?.indices || [];
+  isolateParts(parts, culprit, { highlight: false });
+  flyTo(culprit);
+  if (culprit.length) {
+    focusedPart = partLabel(parts[culprit[0]]);
+    setCallout(culprit, { label: focusedPart, tone: 'amber' });
+  }
+  const intro = plan.intro || stepTitle;
+  showCard(
+    '',
+    `<div class="found"><i></i>${esc(t('diag.title'))}</div>${esc(intro)}`,
+    '',
+    {
+      tone: 'amber',
+      actions: [
+        { label: t('diag.fix'), onClick: beginWalkthrough },
+        { label: t('diag.notNow'), kind: 'ghost', onClick: () => { stopSpeaking(); showFixAsk(); } },
+      ],
+    }
+  );
+  say(intro);
+}
+
+function beginWalkthrough() {
+  if (currentMode !== 'fix' || !steps.length) return;
+  stopSpeaking();
+  fixState = 'guided';
+  fixPaused = false;
+  track('fix-walkthrough', { metadata: { model: ui.model.value, steps: steps.length } });
+  renderStep();
+}
+
+/**
+ * Done (07): amber is gone — every bar blue, the object whole again, and the
+ * payoff line. "what we did" flips the card into a recap of the spoken script.
+ */
+function showFixDone() {
+  cancelBeats();
+  fixState = 'done';
+  setFixChrome('done');
+  clearCallout();
+  clearPartStates(parts);
+  setExplodeAmount(0, { animate: true });
+  homeView({ animate: true });
+  renderDoneCard();
+  track('fix-done', { metadata: { model: ui.model.value, steps: steps.length } });
+  say(`${t('done.title')} ${t('done.body', { object: modelLabel() })}`);
+}
+
+function renderDoneCard() {
+  const line = t('done.body', { object: modelLabel() });
+  showCard(
+    '',
+    `<div class="done-view"><div class="done-title">${esc(t('done.title'))}</div>` +
+      `<div class="done-sub">${esc(line)}</div>` +
+      `<div class="statchips"><span>${esc(t('done.stepsChip', { count: steps.length }))}</span>` +
+      `<span>${esc(modelLabel())}</span><span>${esc(t('done.handsFree'))}</span></div></div>`,
+    '',
+    {
+      actions: [
+        { label: t('done.btn'), onClick: () => { stopSpeaking(); showFixAsk(aiAvailable() ? t('fix.done') : ''); } },
+        { label: t('done.recap'), kind: 'ghost', onClick: showFixRecap },
+      ],
+    }
+  );
+}
+
+function showFixRecap() {
+  const script = steps
+    .map((s) => `<div class="beat done">${esc(s.beats.map((b) => b.text).join(' '))}</div>`)
+    .join('');
+  showCard(t('done.recapKicker'), `<div class="beats">${script}</div>`, '', {
+    actions: [{ label: t('done.btn'), kind: 'ghost', onClick: renderDoneCard }],
+  });
 }
 
 /**
@@ -958,10 +1189,12 @@ async function playBeats(preface) {
     // `highlight: false` for the same reason Explore does it: the part you are
     // about to put a spanner on must look like the real part, not a teal wash —
     // the ghosted wireframe around it is what makes it stand out.
-    if (isObjectAction(b.action)) clearPartStates(parts);
+    if (isObjectAction(b.action)) { clearPartStates(parts); clearCallout(); }
     else isolateParts(parts, b.indices.length ? b.indices : s.indices, { highlight: false });
     if (b.indices.length) {
       focusedPart = partLabel(parts[b.indices[0]]); // "what is this?" follows the narration
+      // Amber follows the sentence: the ring sits on the part your hands touch next.
+      if (stepKicker === 'fix') setCallout(b.indices, { label: focusedPart, tone: 'amber' });
       flyTo(b.indices);
     }
     await narrate(b.text, () => {
@@ -985,7 +1218,9 @@ async function playBeats(preface) {
 function renderStep(preface = '') {
   const title = stepTitle, modeId = stepKicker;
   cancelBeats(); // stop the previous step's narration + restore its parts first
+  fixPaused = false;
   if (!steps.length) { showCard(kicker(modeId), t('step.none')); return; }
+  setFixChrome('guided'); // counter + pause + progress bars live above the scene
   const s = steps[stepIndex];
   const stepIndices = s.indices || [];
 
@@ -995,6 +1230,8 @@ function renderStep(preface = '') {
 
   const partName = stepIndices.length ? partLabel(parts[stepIndices[0]]) : null;
   focusedPart = partName;
+  if (stepIndices.length) setCallout(stepIndices, { label: partName, tone: 'amber' });
+  else clearCallout();
   const chips = modeId === 'fix' && aiAvailable()
     ? [
         { label: t('fix.sayAgain'), onClick: () => renderStep() },
@@ -1002,23 +1239,25 @@ function renderStep(preface = '') {
       ]
     : null;
   // The spoken script is on the card, one line per beat, and lights up as it is
-  // said — so the user can read along, or catch up after looking away.
+  // said — so the user can read along, or catch up after looking away. The
+  // kicker names the step ("STEP 2 · FREE THE OLD LIFT"); the counter itself
+  // lives in the fix header, so the card doesn't say it twice.
   const script = s.beats.map((b) => `<div class="beat">${esc(b.text)}</div>`).join('');
   showCard(
-    kicker(modeId),
-    `<b>${esc(title)}</b><div class="beats">${script}</div>`,
-    t('step.counter', { index: stepIndex + 1, total: steps.length }) + (partName ? ` · ${partName}` : ''),
-    { nav: true, chips }
+    t('fix.stepKicker', { index: stepIndex + 1, title }),
+    `<div class="beats">${script}</div>`,
+    '',
+    { nav: true, chips, tone: 'amber' }
   );
   ui.stepPrev.disabled = stepIndex === 0;
-  ui.stepNext.textContent = stepIndex === steps.length - 1 ? t('btn.done') : t('btn.next');
+  ui.stepNext.textContent = stepIndex === steps.length - 1 ? t('btn.done') : t('fix.sayNext');
   playBeats(preface);
 }
 function goStep(delta) {
   if (!steps.length) return;
-  // 'Done ✔' on the last Fix step closes the plan and asks for the next problem.
+  // Past the last step: the fix is in — the Done moment (amber gone, all blue).
   if (delta > 0 && stepIndex === steps.length - 1) {
-    if (stepKicker === 'fix' && aiAvailable()) showFixAsk(t('fix.done'));
+    if (stepKicker === 'fix') showFixDone();
     return;
   }
   stepIndex = Math.max(0, Math.min(steps.length - 1, stepIndex + delta));
@@ -1131,7 +1370,7 @@ function onPuzzleCorrect({ step, assisted }) {
   focusedPart = shown || null;
   playSfx('snap'); // the whole audible reward for a correct drop
   renderPuzzleCard(
-    `<b>${assisted ? '' : '✅ '}${esc(shown)}</b><span class="partdesc">${esc(step.text)}</span>`,
+    `<b>${esc(shown)}</b><span class="partdesc">${esc(step.text)}</span>`,
     puzzleMeta(),
     puzzleStatus().stepIndex + 1
   );
@@ -1419,23 +1658,21 @@ attachPicker(renderer, camera, () => parts, (index) => {
   if (currentMode === 'explore') {
     selectedPart = index;
     // No emissive glow here: keep the tapped part fully textured and just dim
-    // the rest, so the real material reads instead of a teal wash.
+    // the rest, so the real material reads instead of a teal wash. The blue
+    // callout (ring → leader → label) names it in place.
     isolateParts(parts, index >= 0 ? [index] : [], { highlight: false });
     if (index >= 0) {
       const name = partLabel(parts[index]);
       focusedPart = name;
-      // Just the name — the authored part facts (partInfoDigest) are deliberately
-      // NOT shown or spoken here. They go to the LLM as grounding (getContext),
-      // so the detail surfaces only when the user actually asks about the part.
-      showCard(
-        kicker('explore'),
-        `<b>${esc(name)}</b>`,
-        t('explore.partMeta', { tris: parts[index].triangleCount.toLocaleString(locale()) })
-      );
+      setPartChips(exploreChips); // a direct tap outranks whatever chip was lit
+      setCallout([index], { label: name });
+      showPartCard([index], name);
       say(name);
     } else {
       focusedPart = null;
-      showCard(kicker('explore'), t('explore.intro'), t('explore.partCount', { count: parts.length }));
+      clearCallout();
+      setPartChips(exploreChips);
+      showExploreIntro();
     }
   }
   else if (currentMode === 'quiz' && index >= 0) {
@@ -1469,8 +1706,10 @@ function getContext() {
   };
 }
 
+// Otto's voice on screen: the caption text under the OTTO wordmark. The block
+// breathes with the dome glow while TTS is audible (see the render loop).
 function showCaption(html) {
-  ui.voiceCaption.innerHTML = html;
+  ui.ottoText.innerHTML = html;
   ui.voiceCaption.classList.add('show');
   clearTimeout(showCaption._t);
   showCaption._t = setTimeout(() => ui.voiceCaption.classList.remove('show'), 7000);
@@ -1498,8 +1737,20 @@ function hideCaption() {
 // Recognising an extra half-dozen fixed words costs nothing and can't misfire:
 // MUTE_RE anchors the whole utterance, and MOVE_RE only applies inside AR to
 // phrases of four words or fewer.
-const MUTE_RE = /^\s*(stop|stopp|be quiet|quiet|shut up|silence|stop talking|stop speaking|halt|halt stopp|sei (?:mal )?(?:still|leise)|ruhe|schweig|hör auf|hor auf|aufhören|aufhoren)[.!\s]*$/i;
+const MUTE_RE = /^\s*(stop|stopp|pause|be quiet|quiet|shut up|silence|stop talking|stop speaking|halt|halt stopp|sei (?:mal )?(?:still|leise)|ruhe|schweig|hör auf|hor auf|aufhören|aufhoren)[.!\s]*$/i;
 const MOVE_RE = /\b(move|reposition|verschieb\w*|versetz\w*|beweg\w*|umstellen|woanders)\b/i;
+
+// Fix's guided walkthrough is the one place spoken *navigation* exists — the
+// step pill literally instructs "say next". Anchored single words only, valid
+// only while a step is on screen, both languages at once (same reasoning as
+// MUTE_RE: these must work under stress, and anchoring means no misfires —
+// anything longer is a question and flows to the tutor as before).
+const NEXT_RE = /^\s*(next|okay next|weiter|fertig|done|erledigt)[.!\s]*$/i;
+const BACK_RE = /^\s*(back|go back|previous|zurück|zuruck)[.!\s]*$/i;
+const AGAIN_RE = /^\s*(again|repeat|say it again|nochmal|noch mal|wiederholen)[.!\s]*$/i;
+// Diagnose asks one question ("fix it with me?") — accept its natural answers.
+const YES_RE = /^\s*(yes|yeah|yep|sure|okay|ok|fix it|let's go|los|ja|klar|gerne|mach|los geht's)[.!\s]*$/i;
+const NO_RE = /^\s*(no|nope|not now|later|nein|nicht jetzt|später|spater)[.!\s]*$/i;
 
 let askSeq = 0; // newest question wins: older in-flight answers are dropped
 
@@ -1509,12 +1760,35 @@ async function handleSpeech(text) {
   const phrase = text.trim();
   if (!phrase) return;
 
-  if (MUTE_RE.test(phrase)) { stopSpeaking(); showCaption(t('voice.muted')); track('voice-mute', { input: phrase }); return; }
+  if (MUTE_RE.test(phrase)) {
+    stopSpeaking();
+    cancelBeats();
+    // Mid-walkthrough, "pause" (or "stop") freezes the step too — the header
+    // pill flips to resume, exactly as if it had been tapped.
+    if (currentMode === 'fix' && fixState === 'guided') { fixPaused = true; setFixChrome('guided'); }
+    showCaption(t('voice.muted'));
+    track('voice-mute', { input: phrase });
+    return;
+  }
   // AR-only: "move it" re-enters placement — voice is the only way (see moveARFlow).
   if (renderer.xr.isPresenting && phrase.split(/\s+/).length <= 4 && MOVE_RE.test(phrase)) {
     moveARFlow();
     track('voice-move', { input: phrase });
     return;
+  }
+
+  // Fix's guided walkthrough advances by voice — "say 'next' when it's done".
+  // Strictly-anchored single words, valid only while a step is on screen.
+  if (currentMode === 'fix' && fixState === 'guided') {
+    if (NEXT_RE.test(phrase)) { track('voice-next', { input: phrase }); goStep(1); return; }
+    if (BACK_RE.test(phrase)) { track('voice-back', { input: phrase }); goStep(-1); return; }
+    if (AGAIN_RE.test(phrase)) { track('voice-again', { input: phrase }); renderStep(); return; }
+  }
+  // Diagnose asked one question — "fix it with me?" — so its natural answers
+  // are content, not commands: yes starts the walkthrough, no returns to ask.
+  if (currentMode === 'fix' && fixState === 'diagnose') {
+    if (YES_RE.test(phrase)) { track('voice-fix-yes', { input: phrase }); beginWalkthrough(); return; }
+    if (NO_RE.test(phrase)) { track('voice-fix-no', { input: phrase }); stopSpeaking(); showFixAsk(); return; }
   }
 
   // Fix mode, waiting for a problem: the utterance IS the fix request — the
@@ -1601,13 +1875,8 @@ function highlightPartByName(name) {
   if (currentMode === 'explore') {
     selectedPart = indices[0];
     isolateParts(parts, indices, { highlight: false }); // match the tap look: textured part, rest ghosted
-    showCard(
-      kicker('explore'),
-      `<b>${esc(focusedPart)}</b>`,
-      indices.length > 1
-        ? t('explore.groupMeta', { count: indices.length })
-        : t('explore.partMeta', { tris: parts[indices[0]].triangleCount.toLocaleString(locale()) })
-    );
+    setCallout(indices, { label: focusedPart });
+    showPartCard(indices, focusedPart);
   }
   return indices;
 }
@@ -1648,58 +1917,118 @@ window.__gesture = (action, indices = []) => {
 // without asking the recognizer (which may not exist) what state it is in.
 let micListening = false;
 
+// ---- The listening sheet (1c) -----------------------------------------------
+// Slides up the moment the VAD hears the user, holds through transcription,
+// flashes the final transcript, and drops. It is a *moment*, not a mode — the
+// mic stays an always-on channel; the sheet only appears while it is hearing.
+// Skipped inside AR, where it would cover the camera feed.
+let listenHideTimer = null;
+function showListenSheet() {
+  if (renderer.xr.isPresenting) return;
+  clearTimeout(listenHideTimer);
+  ui.listenPhrase.textContent = '';
+  ui.listenSheet.classList.add('show');
+}
+function hideListenSheet(delay = 0) {
+  clearTimeout(listenHideTimer);
+  if (delay) listenHideTimer = setTimeout(() => ui.listenSheet.classList.remove('show'), delay);
+  else ui.listenSheet.classList.remove('show');
+}
+// "tap anywhere to stop": the sheet itself is the stop button.
+ui.listenSheet.addEventListener('click', () => { toggleMic(false); });
+
 const recognizer = createRecognizer({
-  onResult: handleSpeech,
+  onResult: (text) => {
+    // Flash what was heard where the user was watching, then hand it on.
+    if (ui.listenSheet.classList.contains('show') && text.trim()) {
+      ui.listenPhrase.textContent = text.trim();
+      hideListenSheet(900);
+    }
+    handleSpeech(text);
+  },
   // Barge-in: the instant the user starts talking, the tutor yields — their next
   // question must never compete with a half-finished answer, and a Fix
   // walkthrough must not carry on to the next sentence over their voice.
-  onSpeechStart: () => { stopSpeaking(); cancelBeats(); },
+  onSpeechStart: () => { stopSpeaking(); cancelBeats(); showListenSheet(); },
   // Lets the VAD demand more sustained energy while the tutor is audible, so
   // speaker bleed the echo canceller misses can't trigger a false barge-in.
   isTtsSpeaking: isSpeaking,
-  onStatus: (phase) => { if (phase === 'transcribing') showCaption(t('voice.transcribing')); },
-  onError: (msg) => showCaption(esc(msg)),
+  onStatus: (phase) => {
+    if (phase === 'transcribing' && !ui.listenSheet.classList.contains('show')) {
+      showCaption(t('voice.transcribing'));
+    }
+  },
+  onError: (msg) => { hideListenSheet(); showCaption(esc(msg)); },
   onStateChange: (listening) => {
     micListening = listening;
-    ui.micBtn.classList.toggle('listening', listening);
-    ui.micBtn.textContent = t(listening ? 'btn.micListening' : 'btn.mic');
+    micUI(listening);
+    if (!listening) hideListenSheet();
   },
 });
-if (!recognizer) {
-  ui.micBtn.disabled = true;
-  ui.micBtn.title = t('btn.micTitle');
+
+/** One mic state, several mic surfaces: the ASK circle, AR's Ask Otto, the pill. */
+function micUI(listening) {
+  ui.micBtn.classList.toggle('listening', listening);
+  ui.arAsk.classList.toggle('listening', listening);
+  ui.voicePill.hidden = !listening;
 }
-ui.micBtn.addEventListener('click', () => {
+
+function toggleMic(force) {
   if (!recognizer) return;
+  const want = force !== undefined ? force : !recognizer.isListening();
   stopSpeaking();
-  if (recognizer.isListening()) {
-    recognizer.stop();
-  } else {
+  if (want && !recognizer.isListening()) {
     recognizer.start();
     showCaption(t('voice.askHint'));
+  } else if (!want && recognizer.isListening()) {
+    recognizer.stop();
+    hideListenSheet();
   }
-});
+}
 
-// AR availability + start/exit. `arSupported` is kept so a language switch
-// knows which of the two AR-button captions applies.
+if (!recognizer) {
+  ui.micBtn.disabled = true;
+  ui.arAsk.disabled = true;
+  // Grace: no voice → "Type to Otto" — the same question channel, typed.
+  ui.typeBar.hidden = false;
+}
+ui.micBtn.addEventListener('click', () => toggleMic());
+ui.arAsk.addEventListener('click', () => toggleMic());
+
+// The typed channel goes through the exact same routing as a spoken phrase.
+ui.typeBar.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const text = ui.typeInput.value.trim();
+  if (!text) return;
+  ui.typeInput.value = '';
+  handleSpeech(text);
+});
+ui.typeInput.placeholder = t('grace.type');
+
+// AR availability. No AR is the Grace case (1i), never a dead end: the AR pill
+// disappears, the spin-it chevrons appear, and the 3D viewer does the same job.
 let arSupported = true;
 (async () => {
   const supported = await isARSupported();
   track('ar-support', { metadata: { supported } });
   if (!supported) {
     arSupported = false;
-    ui.startAR.textContent = t('btn.arUnsupported');
-    ui.startAR.disabled = true;
-    ui.startAR.title = t('btn.arTitle');
+    ui.startAR.hidden = true;
+    document.body.classList.add('no-ar');
   }
 })();
+
+/** The voice-hint chips in AR advertise only words that actually work here. */
+function updateArChips() {
+  ui.arChips.hidden = !(renderer.xr.isPresenting && currentMode === 'fix' && fixState === 'guided');
+}
 
 // Shared AR entry points (buttons *and* voice call these). Note: WebXR
 // requestSession normally needs a user gesture, so a purely voice-triggered
 // start may be rejected — we catch that and tell the user to tap the button.
 async function startARFlow() {
   if (renderer.xr.isPresenting) return;
-  if (ui.startAR.disabled) { showCaption(t('ar.needsAndroid')); return; }
+  if (ui.startAR.hidden) { showCaption(t('ar.needsAndroid')); return; }
   cancelTween('camera'); // ar.js saves + owns the camera pose from here on
   try {
     document.body.classList.add('ar-active');
@@ -1711,6 +2040,8 @@ async function startARFlow() {
       onPlaced: () => {
         track('ar-placed', { metadata: { model: ui.model.value } });
         applyARInteraction(); // pivot exists only once placed — size + lock it now
+        ui.arTopText.textContent = t('ar.pillAnchored');
+        updateArChips();
         if (isPuzzleActive()) {
           showCaption(t('ar.placedPuzzle'));
           say(t('ar.placedPuzzleSpoken'));
@@ -1732,7 +2063,8 @@ async function startARFlow() {
     });
     applyGhostTheme(); // the session is live now → the AR ghost colour
     setInteractor(puzzleInteractor); // the finger's target ray drives part dragging
-    showCaption(t('ar.pointAtFloor'));
+    ui.arTopText.textContent = t('ar.pillPlace');
+    updateArChips();
   } catch (e) {
     console.error('AR failed', e);
     document.body.classList.remove('ar-active');
@@ -1751,10 +2083,15 @@ function moveARFlow() {
 
 ui.startAR.addEventListener('click', startARFlow);
 ui.exitAR.addEventListener('click', () => endAR());
+// AR's big reachable controls: Steps toggles the card; Pause quiets Otto.
+ui.arSteps.addEventListener('click', () => ui.card.classList.toggle('show'));
+ui.arPause.addEventListener('click', () => {
+  stopSpeaking();
+  cancelBeats();
+  if (currentMode === 'fix' && fixState === 'guided') { fixPaused = true; setFixChrome('guided'); }
+});
 
-// Mobile: gear opens the dev-controls bottom sheet; the backdrop (or gear
-// again) dismisses it. On desktop the sheet class is inert — the panel is
-// always visible top-left — so this just no-ops visually there.
+// The gear slides the controls sheet up; backdrop, X or gear again dismiss it.
 function toggleSheet(open) {
   const isOpen = open === undefined ? !ui.panel.classList.contains('open') : open;
   ui.panel.classList.toggle('open', isOpen);
@@ -1762,50 +2099,59 @@ function toggleSheet(open) {
 }
 ui.panelToggle.addEventListener('click', () => toggleSheet());
 ui.sheetBackdrop.addEventListener('click', () => toggleSheet(false));
+ui.sheetClose.addEventListener('click', () => toggleSheet(false));
 
-// ---- Theme (light default; persisted) --------------------------------------
-// Light is the product default — we only flip to dark on an explicit choice,
-// so a first-time visitor always lands on light regardless of their OS setting.
+// ---- Theme (dark default; persisted) ----------------------------------------
+// Dark is the Otto system's default; light is the explicit alternative. Both
+// live entirely in CSS tokens — the scene keeps its transparent backdrop and
+// only the ghost-wireframe tint needs re-picking per theme.
 function applyTheme(theme) {
-  const dark = theme === 'dark';
+  const dark = theme !== 'light';
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-  scene.background = new THREE.Color(dark ? SCENE_BG.dark : SCENE_BG.light);
-  ui.themeToggle.textContent = t(dark ? 'btn.light' : 'btn.dark');
   applyGhostTheme();
-  try { localStorage.setItem('theme', theme); } catch {}
+  segActivate(ui.themeSeg, dark ? 'dark' : 'light');
+  try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch {}
 }
 const isDark = () => document.documentElement.dataset.theme === 'dark';
+
+/** Mark one segment of a segmented control active. */
+function segActivate(seg, value) {
+  for (const b of seg.children) b.classList.toggle('active', b.dataset.value === value);
+}
+
+// Theme segments: Dark (moon) | Light (sun) — stroke icons, never emoji.
+const THEME_ICONS = {
+  dark: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" stroke-linejoin="round"></path></svg>',
+  light: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"></circle><line x1="12" y1="2.5" x2="12" y2="5"></line><line x1="12" y1="19" x2="12" y2="21.5"></line><line x1="2.5" y1="12" x2="5" y2="12"></line><line x1="19" y1="12" x2="21.5" y2="12"></line><line x1="5.3" y1="5.3" x2="7" y2="7"></line><line x1="17" y1="17" x2="18.7" y2="18.7"></line><line x1="17" y1="7" x2="18.7" y2="5.3"></line><line x1="5.3" y1="18.7" x2="7" y2="17"></line></svg>',
+};
+for (const id of ['dark', 'light']) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.dataset.value = id;
+  btn.innerHTML = `${THEME_ICONS[id]}<span>${t(`theme.${id}`)}</span>`;
+  btn.addEventListener('click', () => applyTheme(id));
+  ui.themeSeg.appendChild(btn);
+}
+function relabelThemeSeg() {
+  for (const b of ui.themeSeg.children) b.querySelector('span').textContent = t(`theme.${b.dataset.value}`);
+}
 applyTheme(
-  (() => { try { return localStorage.getItem('theme'); } catch { return null; } })() || 'light'
+  (() => { try { return localStorage.getItem('theme'); } catch { return null; } })() || 'dark'
 );
-ui.themeToggle.addEventListener('click', () => {
-  applyTheme(isDark() ? 'light' : 'dark');
-});
 
-// ---- Language --------------------------------------------------------------
+// ---- Language ----------------------------------------------------------------
 // One control, everything follows: chrome, cards, authored content, part names,
-// the tutor's prompts, the TTS voice and the STT language hint.
-
-// Populate the panel's language <select> and label the corner toggle.
+// the tutor's prompts, the TTS voice and the STT language hint. A segmented
+// pill in the controls sheet — English | Deutsch.
 for (const l of LANGS) {
-  const opt = document.createElement('option');
-  opt.value = l.id;
-  opt.textContent = l.label;
-  ui.lang.appendChild(opt);
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.dataset.value = l.id;
+  btn.textContent = l.label;
+  btn.addEventListener('click', () => setLang(l.id));
+  ui.langSeg.appendChild(btn);
 }
-ui.lang.value = getLang();
-
-// The corner button shows the language you'd switch TO, which is what a
-// one-tap toggle has to say to be predictable.
-function labelLangToggle() {
-  const other = LANGS.find((l) => l.id !== getLang()) || LANGS[0];
-  ui.langToggle.textContent = `🌐 ${other.short}`;
-  ui.langToggle.dataset.next = other.id;
-}
-labelLangToggle();
-
-ui.lang.addEventListener('change', () => setLang(ui.lang.value));
-ui.langToggle.addEventListener('click', () => setLang(ui.langToggle.dataset.next));
+segActivate(ui.langSeg, getLang());
 
 /**
  * Re-render everything after a language switch.
@@ -1823,15 +2169,12 @@ onLangChange((next) => {
   recognizer?.setLang();             // Web Speech needs a bounce; the VAD path re-reads per utterance
   applyStaticTranslations();
   relabelModes();
-  labelLangToggle();
+  relabelThemeSeg();
   relabelModels();
   refreshHome();                     // the home picker lists model names too
-  ui.lang.value = next;
-  applyTheme(isDark() ? 'dark' : 'light');   // re-label the theme button
-  ui.micBtn.textContent = t(micListening ? 'btn.micListening' : 'btn.mic');
-  ui.micBtn.title = recognizer ? '' : t('btn.micTitle');
-  if (!arSupported) { ui.startAR.textContent = t('btn.arUnsupported'); ui.startAR.title = t('btn.arTitle'); }
-  ui.status.textContent = t(statusKey, statusVars);
+  segActivate(ui.langSeg, next);
+  ui.typeInput.placeholder = t('grace.type');
+  ui.statusText.textContent = t(statusKey, statusVars);
   buildLegend();                     // part names are display names
   enterMode(currentMode);            // re-resolve the mode's content in the new language
 });
@@ -1871,8 +2214,97 @@ renderer.setAnimationLoop((time, frame) => {
   // amount, so slider drags and explode tweens keep working underneath it).
   updateFixAnim(dt, parseFloat(ui.explode.value) || 0);
   controls.update();
+  updateCallout();     // after every position writer, so the ring hugs the part
+  updateOttoPresence();
   renderer.render(scene, camera);
 });
+
+// The dome glow breathes harder and the lavender arc appears while Otto is
+// actually audible — presence, not an avatar. Class writes are gated so this
+// costs nothing per frame.
+let ottoWasSpeaking = false;
+function updateOttoPresence() {
+  const speaking = isSpeaking();
+  if (speaking === ottoWasSpeaking) return;
+  ottoWasSpeaking = speaking;
+  document.body.classList.toggle('otto-speaking', speaking);
+}
+
+// ---- Part callout ------------------------------------------------------------
+// The design's ring → leader → glass label, tracking a live 3D part. The ring
+// is re-projected every frame because everything moves underneath it: explode
+// tweens, gestures, orbit, even AR anchor refinement.
+let calloutState = null; // { indices, label, sub, tone } | null
+
+function setCallout(indices, { label, sub = '', tone = 'blue' } = {}) {
+  if (!indices || !indices.length || !label) { clearCallout(); return; }
+  calloutState = { indices, label, sub, tone };
+  ui.callout.classList.toggle('amber', tone === 'amber');
+  ui.coName.textContent = label;
+  ui.coSub.textContent = sub;
+  ui.coSub.hidden = !sub;
+  ui.callout.hidden = false;
+}
+function clearCallout() {
+  calloutState = null;
+  ui.callout.hidden = true;
+}
+
+const _coCenter = new THREE.Vector3();
+const _coProj = new THREE.Vector3();
+function updateCallout() {
+  if (!calloutState) return;
+  const p = parts[calloutState.indices[0]];
+  if (!p || !p.mesh.visible || isHomeOpen()) { ui.callout.style.display = 'none'; return; }
+
+  // The anchor point: the part's bounding-sphere centre, in world space.
+  const geo = p.mesh.geometry;
+  if (!geo.boundingSphere) geo.computeBoundingSphere();
+  _coCenter.copy(geo.boundingSphere.center).applyMatrix4(p.mesh.matrixWorld);
+
+  // In AR the render camera is WebXR's; projecting through it keeps the label
+  // on the part as the phone moves.
+  const cam = renderer.xr.isPresenting ? renderer.xr.getCamera() : camera;
+  _coProj.copy(_coCenter).project(cam);
+  if (_coProj.z > 1) { ui.callout.style.display = 'none'; return; } // behind the camera
+
+  const w = window.innerWidth, h = window.innerHeight;
+  const x = (_coProj.x * 0.5 + 0.5) * w;
+  const y = (-_coProj.y * 0.5 + 0.5) * h;
+
+  // Ring radius from the part's projected size, clamped to stay readable.
+  const dist = _coCenter.distanceTo(cam.getWorldPosition(_coTmp));
+  const fov = (cam.fov || 60) * Math.PI / 180;
+  const rWorld = geo.boundingSphere.radius * p.mesh.getWorldScale(_coTmp2).x;
+  let r = (rWorld / (dist * Math.tan(fov / 2))) * (h / 2);
+  r = Math.min(Math.max(r, 26), Math.min(w, h) * 0.22);
+
+  const leader = 26;
+  ui.callout.style.display = '';
+  ui.callout.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
+  ui.coRing.style.width = ui.coRing.style.height = `${(r * 2).toFixed(0)}px`;
+  ui.coRing.style.left = ui.coRing.style.top = `${(-r).toFixed(0)}px`;
+  const bloom = r * 2.4;
+  ui.coBloom.style.width = ui.coBloom.style.height = `${bloom.toFixed(0)}px`;
+  ui.coBloom.style.left = ui.coBloom.style.top = `${(-bloom / 2).toFixed(0)}px`;
+  ui.coLeader.style.width = `${leader}px`;
+  // Label side: right of the ring by default (the design's reading direction),
+  // flipped only when the left genuinely has more room — and never off-screen.
+  const lw = ui.coLabel.offsetWidth || 150;
+  const spaceRight = w - (x + r + leader) - 10;
+  const spaceLeft = x - r - leader - 10;
+  if (spaceRight >= lw || spaceRight >= spaceLeft) {
+    ui.coLeader.style.left = `${r.toFixed(0)}px`;
+    ui.coLabel.style.left = `${Math.min(r + leader, Math.max(-x + 10, w - x - lw - 10)).toFixed(0)}px`;
+    ui.coLabel.style.right = 'auto';
+  } else {
+    ui.coLeader.style.left = `${(-r - leader).toFixed(0)}px`;
+    ui.coLabel.style.left = `${Math.max(-r - leader - lw, -x + 10).toFixed(0)}px`;
+    ui.coLabel.style.right = 'auto';
+  }
+}
+const _coTmp = new THREE.Vector3();
+const _coTmp2 = new THREE.Vector3();
 
 // ---- Home screen -----------------------------------------------------------
 // The front door: scan the real object with the camera, or pick from the list.
@@ -1897,12 +2329,51 @@ initHome({
   getOptions: selectableModels,
   scanMap: SCAN_MODELS,
   // Both of these navigate and let the router do the work — see "Routing".
-  // A pick keeps the mode you were in, exactly as the model dropdown does.
-  onPick: (key) => { if (MODELS[key]) goTo({ kind: 'object', model: key, mode: currentMode }, 'home'); },
+  // A pick keeps the mode you were in, exactly as the model dropdown does; a
+  // *scan* is a recognition, so it lands on Explore and earns the Arrival
+  // greeting (1a) — immediately if the model is already built, otherwise from
+  // rebuild() when the glTF lands.
+  onPick: (key, source) => {
+    if (!MODELS[key]) return;
+    if (source === 'scan') {
+      pendingArrival = key;
+      goTo({ kind: 'object', model: key, mode: 'explore' }, 'scan');
+      if (pendingArrival === key && builtKey === key) { pendingArrival = null; showArrival(); }
+    } else {
+      goTo({ kind: 'object', model: key, mode: currentMode }, 'home');
+    }
+  },
   onView: (view) => goTo({ kind: 'home', view }),
 });
 
-ui.homeBtn.addEventListener('click', () => goTo({ kind: 'home', view: 'choose' }));
+// The header's back circle: the front door is always one tap up.
+ui.backBtn.addEventListener('click', () => goTo({ kind: 'home', view: 'choose' }));
+
+// ---- Arrival (1a): recognized on sight ---------------------------------------
+// A moment, not a mode: scan rings + a checkmark pill over the freshly loaded
+// object, one glass card, one question. Any interaction ends it — Look inside
+// stays in Explore; Ask Otto jumps straight to Fix's "what's it doing?" with
+// the mic armed, which is the design's voice-first path into the repair.
+function showArrival() {
+  if (!parts.length || renderer.xr.isPresenting) return;
+  const name = modelLabel();
+  const line = t('arrival.found', { object: name });
+  ui.arrivalName.textContent = name;
+  ui.arrivalBody.textContent = line;
+  ui.arrival.hidden = false;
+  say(line);
+}
+function hideArrival() {
+  ui.arrival.hidden = true;
+}
+ui.arrivalExplore.addEventListener('click', () => { stopSpeaking(); hideArrival(); });
+ui.arrivalAsk.addEventListener('click', () => {
+  stopSpeaking();
+  hideArrival();
+  goTo({ kind: 'object', model: ui.model.value, mode: 'fix' });
+  toggleMic(true);
+});
+ui.arrival.addEventListener('click', (e) => { if (e.target === ui.arrival) hideArrival(); });
 
 // ---- Routing ---------------------------------------------------------------
 // One link per screen: `#/`, `#/scan`, `#/objects`, `#/<model>/<mode>`. Two
