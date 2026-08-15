@@ -149,9 +149,12 @@ export async function answerQuestion(context, question, { focusOnly = false } = 
       'You are an augmented-reality repair and assembly tutor speaking out loud to a user.',
       `The user is looking at a ${context.modelLabel} and has selected exactly one part: the "${focusPart}".`,
       `Answer ONLY about the "${focusPart}". Do not describe, compare, or mention any other part of the ${context.modelLabel}.`,
+      // The authored per-part facts (materials, part numbers, behaviours) are
+      // the ground truth for this part — prefer them over general knowledge.
+      context.focusedPartInfo && `Authored facts about the "${focusPart}" — ground your answer in them and do not contradict them: ${context.focusedPartInfo}`,
       `If the question is not about the "${focusPart}", reply in one sentence that you can only talk about the selected ${focusPart} right now, and suggest they select the part they mean.`,
       'Answer in at most two short sentences, plain spoken language, practical and friendly. No markdown, no lists.',
-    ].join(' ');
+    ].filter(Boolean).join(' ');
   } else {
     const parts = [...new Set(context.parts || [])].join(', ');
     system = [
@@ -159,6 +162,7 @@ export async function answerQuestion(context, question, { focusOnly = false } = 
       `The user is looking at a ${context.modelLabel} through their phone camera.`,
       parts && `Its parts are: ${parts}.`,
       focusPart && `They currently have the "${focusPart}" highlighted.`,
+      focusPart && context.focusedPartInfo && `Authored facts about the "${focusPart}" — prefer them when the question touches this part: ${context.focusedPartInfo}`,
       context.mode === 'diagnose' && 'They are in Diagnose mode, troubleshooting a fault: name the most likely faulty part and the key fix.',
       // Ground answers in the authored fix/fault knowledge when it applies; fall
       // back to general repair sense otherwise. This is what lets Diagnose answer

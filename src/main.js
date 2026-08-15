@@ -910,13 +910,15 @@ attachPicker(renderer, camera, () => parts, (index) => {
     if (index >= 0) {
       const name = parts[index].name;
       focusedPart = name;
-      const desc = describePart(currentKey(), name);
+      // Just the name — the authored description (describePart) is deliberately
+      // NOT shown or spoken here. It goes to the LLM as grounding (getContext),
+      // so the detail surfaces only when the user actually asks about the part.
       showCard(
         'Explore',
-        `<b>${name}</b>${desc ? `<span class="partdesc">${desc}</span>` : ''}`,
+        `<b>${name}</b>`,
         `${parts[index].triangleCount.toLocaleString()} triangles · ask 🎤 about this part`
       );
-      say(desc ? `${name}. ${desc}` : name);
+      say(name);
     } else {
       focusedPart = null;
       showCard('Explore', 'Tap any part to isolate it, then tap 🎤 and ask about it. Drag the slider to spread the parts apart.', `${parts.length} parts`);
@@ -942,6 +944,9 @@ function getContext() {
     parts: parts.map((p) => p.name).filter(Boolean),
     mode: currentMode,
     focusedPart,
+    // The authored description of the focused part (MARKUS_INFO). Never shown
+    // or spoken directly — it grounds the LLM's answer when the user asks.
+    focusedPartInfo: focusedPart ? describePart(currentKey(), focusedPart) : '',
     // Authored fix + diagnosis knowledge for this model, so the AI tutor grounds
     // free-form answers in the real faults instead of guessing.
     diagnostics: knowledgeDigest(currentKey()),

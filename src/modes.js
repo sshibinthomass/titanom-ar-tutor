@@ -465,10 +465,12 @@ export function knowledgeDigest(modelKey) {
 }
 
 /**
- * Per-part descriptions for Explore mode, keyed by model id then semantic part
- * name (the names from SEMANTIC_NAMES / findParts). Optional — a model with no
- * entry, or a part with no entry, just shows the bare part name as before. Kept
- * short: one or two sentences, spoken aloud on tap, so they must read naturally.
+ * Per-part reference facts, keyed by model id then semantic part name (the
+ * names from SEMANTIC_NAMES / findParts). Optional — a model or part with no
+ * entry just has no extra grounding. These are NOT shown or spoken on tap
+ * (a tap announces only the part name); they are fed to the LLM as ground
+ * truth when the user asks a question about the focused part, so keep them
+ * factual and dense rather than conversational.
  */
 // Specs grounded in the official IKEA manual (AA-251870-21), the MARKUS product
 // page, and owner guides — hardware IDs and behaviours are the documented ones.
