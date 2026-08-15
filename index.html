@@ -456,6 +456,17 @@
       .card-explode .val { min-width: 32px; text-align: right; }
       .stepnav { display: flex; gap: 9px; margin-top: 15px; }
       .stepnav button { margin: 0; }
+      /* Where you are, and what you can do about it, on one line: the step
+         counter reads left, its actions sit right. They used to stack, which
+         pushed Back/Next further down a card already capped at 42vh. Wraps only
+         when the chips genuinely cannot fit beside it (long German labels on a
+         narrow phone). */
+      .card-foot {
+        display: flex; align-items: center; justify-content: space-between;
+        flex-wrap: wrap; gap: 8px; margin-top: 12px;
+      }
+      .card-foot .meta { margin: 0; }
+      .card-foot .chips { margin-top: 0; margin-left: auto; justify-content: flex-end; }
       .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
       .chip {
         width: auto; margin: 0; min-height: 34px; padding: 0 14px;
@@ -490,6 +501,15 @@
          hold as a scroll, a text selection or a long-press callout — any of
          those steal the pointer mid-sentence and cancel the capture. */
       .fab.mic { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+      /* Icon only. The label stays in the DOM — it is the button's accessible
+         name and it still changes with the state (hold / listening) — but a mic
+         glyph is unambiguous and the words cost a third of the dock. */
+      .fab.mic { width: 54px; min-height: 54px; padding: 0; border-radius: 50%; justify-content: center; }
+      .fab.mic .lbl {
+        position: absolute; width: 1px; height: 1px; margin: -1px;
+        overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+      }
+      .fab.mic .ico { width: 22px; height: 22px; }
       /* Armed but idle: the mic is open and a hold will record instantly. */
       .fab.mic.armed { border-color: var(--accent); box-shadow: var(--frost-shadow), 0 0 0 1px var(--accent); }
       /* Listening and holding are the tutor's own state, so they glow blue —
@@ -518,11 +538,72 @@
       .voice-caption.show { display: block; }
       .voice-caption b { color: var(--accent-text); font-weight: 600; }
 
+      /* ---- Model loading dial ------------------------------------------
+         A ring that fills once, with the number inside it. The old readout was
+         a line of text in the dock quoting a percentage that could exceed 100
+         (see loadModel) — a progress display that lies is worse than none. */
+      .loader {
+        position: fixed; inset: 0; z-index: 30;
+        display: grid; place-items: center;
+        pointer-events: none;   /* never blocks a drag on the scene underneath */
+      }
+      .loader[hidden] { display: none; }
+      .loader-dial {
+        position: relative; width: 92px; height: 92px;
+        display: grid; place-items: center;
+        border-radius: 50%;
+        background: var(--panel); border: 1px solid var(--border);
+        backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur));
+        box-shadow: var(--shadow);
+      }
+      .loader-dial svg {
+        position: absolute; inset: 0; width: 100%; height: 100%;
+        transform: rotate(-90deg);   /* 0% starts at 12 o'clock, not 3 */
+      }
+      .loader-track, .loader-arc {
+        fill: none; stroke-width: 3.5; stroke-linecap: round;
+      }
+      .loader-track { stroke: var(--border); }
+      .loader-arc {
+        stroke: var(--accent);
+        /* r=24 → circumference 150.8. dasharray is the whole circle; the offset
+           walks it back to `--p` (0–1) of the way round. */
+        stroke-dasharray: 150.8;
+        stroke-dashoffset: calc(150.8 * (1 - var(--p, 0)));
+        transition: stroke-dashoffset 0.3s ease-out;
+        filter: drop-shadow(0 0 5px rgba(91, 157, 255, 0.5));
+      }
+      .loader-pct {
+        font: 600 19px var(--font-mono); font-variant-numeric: tabular-nums;
+        color: var(--accent-text); letter-spacing: -0.02em;
+      }
+      .loader-pct::after { content: '%'; font-size: 11px; opacity: 0.6; margin-left: 1px; }
+      /* Indeterminate: the byte total can't be trusted, so show motion instead
+         of a number that would be a guess. */
+      .loader.spin .loader-arc {
+        stroke-dasharray: 38 113; stroke-dashoffset: 0; transition: none;
+        transform-origin: 50% 50%; animation: loaderspin 1s linear infinite;
+      }
+      .loader.spin .loader-pct { display: none; }
+      @keyframes loaderspin { to { transform: rotate(360deg); } }
+      /* The dial breathes while it waits, so a stalled download still looks
+         alive rather than frozen. */
+      .loader-dial { animation: loaderbreathe 2.4s ease-in-out infinite; }
+      @keyframes loaderbreathe {
+        0%, 100% { transform: scale(1);    box-shadow: var(--shadow); }
+        50%      { transform: scale(1.035); box-shadow: var(--shadow), 0 0 26px rgba(91, 157, 255, 0.28); }
+      }
+
       /* ---- Corner controls (independent of the dock) ---- */
+      /* Right end of the header row, in the seat .corner-controls vacates for a
+         session — so AR reads as the same bar with one button swapped, instead
+         of a pill dropped on top of the mode switcher. */
       #exitAR {
         position: fixed; z-index: 40; display: none;
         top: calc(16px + env(safe-area-inset-top, 0px));
-        left: calc(16px + env(safe-area-inset-left, 0px));
+        right: calc(16px + env(safe-area-inset-right, 0px));
+        width: auto; margin: 0; min-height: 40px; padding: 0 13px;
+        border-radius: var(--r-pill);
       }
       #panelToggle {
         position: fixed; top: 16px; left: 16px; z-index: 25; width: auto; margin: 0;
@@ -683,7 +764,8 @@
          still glow rather than none — the depth is the point, the breathing is
          the flourish. */
       @media (prefers-reduced-motion: reduce) {
-        .ambient .dome, .home::after, .fab.mic.listening { animation: none; }
+        .ambient .dome, .home::after, .fab.mic.listening,
+        .loader-dial, .loader.spin .loader-arc { animation: none; }
       }
 
       /* ---- Medium widths: give the centred mode bar its room back ---------
@@ -725,6 +807,14 @@
            the one place a German speaker most needs to find it. */
         #langToggle { display: none; }
         body.home-open #langToggle { display: flex; }
+
+        /* In a session Exit AR takes the Home button's exact seat, so the header
+           stays the one row it is everywhere else. */
+        #exitAR {
+          top: calc(10px + env(safe-area-inset-top, 0px)); right: 12px;
+          min-height: 42px; padding: 0 12px;
+        }
+        #exitAR .lbl { display: none; }
 
         /* Mode bar: the middle of that row, scrolling within it if a long
            selected label (German "Zusammenbauen") outgrows the space. */
@@ -880,8 +970,13 @@
       <div class="card" id="card">
         <div class="kicker" id="cardKicker">Fix</div>
         <div class="body" id="cardBody">…</div>
-        <div class="meta" id="cardMeta"></div>
-        <div class="chips" id="cardChips"></div>
+        <!-- Where you are, and what you can do about it, on one line: the step
+             counter reads left, its actions sit right. They used to stack, which
+             pushed Back/Next off a phone card that is capped at 42vh. -->
+        <div class="card-foot">
+          <div class="meta" id="cardMeta"></div>
+          <div class="chips" id="cardChips"></div>
+        </div>
         <div class="stepnav" id="cardNav">
           <button id="stepPrev"><span data-icon="back"></span><span class="lbl" data-i18n="btn.back">Back</span></button>
           <button id="stepNext" class="primary"><span class="lbl" data-i18n="btn.next">Next</span><span data-icon="next"></span></button>
@@ -889,6 +984,20 @@
       </div>
 
       <div class="status" id="status" data-i18n="status.init">Initialising…</div>
+    </div>
+
+    <!-- Model loading. Centred over the scene rather than a line of text in the
+         dock, because it is the one moment the app has nothing else to show.
+         `--p` (0–1) drives the arc; adding .spin drops the number and sweeps
+         instead, for when the byte total can't be trusted (see loadModel). -->
+    <div class="loader" id="loader" role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden>
+      <div class="loader-dial">
+        <svg viewBox="0 0 56 56" aria-hidden="true">
+          <circle class="loader-track" cx="28" cy="28" r="24" />
+          <circle class="loader-arc" cx="28" cy="28" r="24" />
+        </svg>
+        <span class="loader-pct" id="loaderPct">0</span>
+      </div>
     </div>
 
     <!-- Home screen: the front door. Opaque, over everything except the global

@@ -162,7 +162,6 @@ const STRINGS = {
   // -- Status line -----------------------------------------------------------
   'status.init':        { en: 'Initialising…',              de: 'Wird initialisiert…' },
   'status.loading':     { en: 'Loading model…',             de: 'Modell wird geladen…' },
-  'status.loadingPct':  { en: 'Loading model… {pct}%',      de: 'Modell wird geladen… {pct} %' },
   'status.splitting':   { en: 'Splitting into component parts…', de: 'Wird in Einzelteile zerlegt…' },
   'status.ready':       { en: 'Ready — drag to orbit, use the slider to explode.',
                           de: 'Bereit — ziehen zum Drehen, mit dem Regler zerlegen.' },

@@ -194,6 +194,8 @@ const ui = {
   lang: document.getElementById('lang'),
   langToggle: document.getElementById('langToggle'),
   homeBtn: document.getElementById('homeBtn'),
+  loader: document.getElementById('loader'),
+  loaderPct: document.getElementById('loaderPct'),
 };
 
 // Paint the static chrome in the selected language before anything else runs,
@@ -274,20 +276,33 @@ function loadModel(key) {
   }
 
   setStatus('status.loading');
+  // `evt.total` is Content-Length — the *compressed* size — while `evt.loaded`
+  // counts bytes after the browser has inflated them. A .glb served with gzip or
+  // brotli therefore reports well past 100% (718%, on the deployed Markus). Once
+  // the two disagree the total is not measuring the same thing as the count, so
+  // the dial stops pretending to know and sweeps instead.
+  let sizeKnown = true;
+  showLoader(0);
   loader.load(
     m.url,
     (gltf) => {
       gltfCache.set(key, gltf.scene);
       originalScene = gltf.scene;
       setStatus('status.splitting');
+      showLoader(null);   // splitting is CPU work with no byte count to report
       rebuild();
+      hideLoader();
       setStatus('status.ready');
     },
     (evt) => {
-      if (evt.total) setStatus('status.loadingPct', { pct: Math.round((evt.loaded / evt.total) * 100) });
+      if (!sizeKnown || !evt.total) { showLoader(null); return; }
+      const pct = (evt.loaded / evt.total) * 100;
+      if (pct > 101) { sizeKnown = false; showLoader(null); return; }
+      showLoader(pct);
     },
     (err) => {
       console.error(err);
+      hideLoader();
       setStatus('status.failed');
     }
   );
@@ -297,6 +312,29 @@ function loadModel(key) {
 // switch, so it remembers its key (and vars) rather than its rendered text.
 let statusKey = 'status.init';
 let statusVars = null;
+/**
+ * The loading dial. `pct` is 0–100, or null for "still going, but the size is
+ * not knowable" — which is a real case, not a fallback: see loadModel.
+ */
+function showLoader(pct = null) {
+  ui.loader.hidden = false;
+  const known = pct != null && Number.isFinite(pct);
+  ui.loader.classList.toggle('spin', !known);
+  if (known) {
+    const p = Math.max(0, Math.min(100, Math.round(pct)));
+    ui.loader.style.setProperty('--p', p / 100);
+    ui.loaderPct.textContent = p;
+    ui.loader.setAttribute('aria-valuenow', p);
+  } else {
+    ui.loader.removeAttribute('aria-valuenow');
+  }
+}
+function hideLoader() {
+  ui.loader.hidden = true;
+  ui.loader.classList.remove('spin');
+  ui.loader.style.setProperty('--p', 0);
+}
+
 function setStatus(key, vars = null) {
   statusKey = key;
   statusVars = vars;
