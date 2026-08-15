@@ -5,53 +5,188 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>AR Repair Tutor</title>
     <style>
+      /* ---- Fonts -------------------------------------------------------------
+         Self-hosted, not the Google CDN. The app is demoed on venue wifi and a
+         blocked or slow CDN would render the whole UI in the fallback face —
+         which is exactly the moment it matters most. Only latin + latin-ext are
+         shipped; latin-ext is what German needs and the browser fetches it only
+         when a glyph in that range actually appears. */
+      @font-face{font-family:'Inter';font-style:normal;font-weight:400;font-display:swap;src:url('./fonts/inter-400-latin.woff2') format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
+      @font-face{font-family:'Inter';font-style:normal;font-weight:400;font-display:swap;src:url('./fonts/inter-400-latin-ext.woff2') format('woff2');unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;}
+      @font-face{font-family:'Inter';font-style:normal;font-weight:500;font-display:swap;src:url('./fonts/inter-500-latin.woff2') format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
+      @font-face{font-family:'Inter';font-style:normal;font-weight:500;font-display:swap;src:url('./fonts/inter-500-latin-ext.woff2') format('woff2');unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;}
+      @font-face{font-family:'Inter';font-style:normal;font-weight:600;font-display:swap;src:url('./fonts/inter-600-latin.woff2') format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
+      @font-face{font-family:'Inter';font-style:normal;font-weight:600;font-display:swap;src:url('./fonts/inter-600-latin-ext.woff2') format('woff2');unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;}
+      @font-face{font-family:'Inter';font-style:normal;font-weight:700;font-display:swap;src:url('./fonts/inter-700-latin.woff2') format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
+      @font-face{font-family:'Inter';font-style:normal;font-weight:700;font-display:swap;src:url('./fonts/inter-700-latin-ext.woff2') format('woff2');unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;}
+      @font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:400;font-display:swap;src:url('./fonts/jetbrains-mono-400-latin.woff2') format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
+      @font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:400;font-display:swap;src:url('./fonts/jetbrains-mono-400-latin-ext.woff2') format('woff2');unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;}
+      @font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:600;font-display:swap;src:url('./fonts/jetbrains-mono-600-latin.woff2') format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;}
+      @font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:600;font-display:swap;src:url('./fonts/jetbrains-mono-600-latin-ext.woff2') format('woff2');unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;}
+
       /* ---- Theme tokens ------------------------------------------------------
          Light is the default (bare :root). Dark overrides only what changes,
          under [data-theme="dark"] set by main.js. We deliberately do NOT key off
-         prefers-color-scheme — the product default is light regardless of OS. */
+         prefers-color-scheme — the product default is light regardless of OS.
+
+         Two rules the palette runs on, and they are the whole visual grammar:
+           · blue  = the app talking to you — selection, focus, "here".
+           · amber = the thing that is wrong, or the thing your hands touch next.
+         Amber appears nowhere else. That is what makes it mean something when a
+         Fix step lights a part up; see `body[data-mode='fix']` below. */
       :root {
-        --bg: #e9ecf1;                       /* body + 3D scene backdrop */
-        --panel: rgba(255, 255, 255, 0.82);  /* frosted panels / cards / fabs */
-        --panel-solid: #ffffff;
-        --border: #d3d8e0;
-        --text: #1b1f27;
-        --muted: #5c6472;
-        --accent: #2fbfb3;        /* fills & focus rings (paired with --accent-ink) */
-        --accent-ink: #06322d;    /* text/icon sitting on an --accent fill */
-        --accent-text: #0c8379;   /* accent used as text on a panel (needs contrast) */
-        --input-bg: #ffffff;
-        --input-hover: #eef1f5;
+        /* Tells the browser to draw its *own* widgets to match — checkboxes,
+           scrollbars and the native <select> popup. Without it an unchecked
+           checkbox stays a white box on the dark sheet, which is the one place
+           a hand-styled UI still leaks the platform default. */
+        color-scheme: light;
+        --bg: #eff3fb;                       /* body + 3D scene backdrop */
+        --bg-grad: linear-gradient(180deg, #f7f9fd 0%, #eff3fb 55%, #e7edf9 100%);
+        /* Glass, never plain white: a flat white card over a rendered scene
+           reads as a hole punched in the page. */
+        --panel: linear-gradient(155deg, rgba(228, 238, 253, 0.85), rgba(210, 226, 250, 0.6));
+        --panel-solid: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(230, 239, 253, 0.86));
+        --border: rgba(90, 130, 220, 0.24);
+        --text: #1b2334;
+        --muted: #5a6a8c;
+        --faint: rgba(60, 85, 135, 0.55);    /* mono captions, the quietest text */
+        --accent: #3566e3;        /* fills & focus rings (paired with --accent-ink) */
+        --accent-ink: #ffffff;    /* text/icon sitting on an --accent fill */
+        --accent-text: #2c56c6;   /* accent used as text on a panel (needs contrast) */
+        --input-bg: rgba(222, 233, 251, 0.6);
+        --input-hover: rgba(214, 228, 252, 0.92);
         --danger: #e0524f;
-        --shadow: 0 10px 40px rgba(20, 30, 50, 0.18);
+        --shadow: 0 14px 40px rgba(50, 80, 160, 0.16);
+
+        /* Frosted primary: translucent, not a filled blue slab. Blue fill is
+           reserved for *selection*, so the loudest button on screen can't be
+           mistaken for something that is switched on. */
+        --frost: linear-gradient(180deg, rgba(214, 228, 252, 0.92), rgba(190, 212, 248, 0.55));
+        --frost-border: rgba(90, 130, 220, 0.4);
+        --frost-ink: #1f3358;
+        --frost-shadow: 0 8px 24px rgba(50, 80, 160, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+
+        --chip-idle: rgba(222, 233, 251, 0.6);
+        --chip-idle-border: rgba(90, 130, 220, 0.22);
+        --chip-idle-ink: var(--muted);
+        --chip-sel: rgba(53, 102, 227, 0.16);
+        --chip-sel-border: rgba(53, 102, 227, 0.45);
+        --chip-sel-ink: #1f3358;
+        --chip-sel-glow: 0 0 16px rgba(53, 102, 227, 0.18);
+
+        --amber: #e08a1e;
+        --amber-ink: #7a4a0c;
+        --amber-border: rgba(217, 122, 22, 0.55);
+        --amber-glow: 0 0 18px rgba(255, 165, 50, 0.35);
+
+        --dome: radial-gradient(55% 90% at 50% 100%,
+                  rgba(85, 145, 255, 0.28), rgba(112, 100, 255, 0.09) 52%, transparent 76%);
+        --dot: rgba(90, 130, 220, 0.22);
+
+        /* One knob for every blurred surface, so AR can turn the cost down in a
+           single declaration (see body.ar-active). */
+        --glass-blur: 18px;
+
+        --r-card: 22px;
+        --r-row: 18px;
+        --r-pill: 999px;
+        --r-sheet: 32px;
+
+        --font-ui: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
       }
       :root[data-theme='dark'] {
-        --bg: #14161c;
-        --panel: rgba(26, 29, 38, 0.92);
-        --panel-solid: #21252f;
-        --border: #2a2e3a;
-        --text: #e6e8ee;
-        --muted: #9aa0ad;
-        --accent: #4ecdc4;
-        --accent-ink: #0b0d12;
-        --accent-text: #4ecdc4;
-        --input-bg: #21252f;
-        --input-hover: #2a2f3b;
+        color-scheme: dark;
+        --bg: #0a0d1f;
+        --bg-grad: linear-gradient(180deg, #05070e 0%, #0a0d1f 55%, #111634 100%);
+        --panel: linear-gradient(155deg, rgba(120, 170, 255, 0.11), rgba(120, 170, 255, 0.03));
+        --panel-solid: linear-gradient(180deg, rgba(24, 32, 62, 0.92), rgba(9, 14, 30, 0.98));
+        --border: rgba(150, 195, 255, 0.17);
+        --text: #e9effa;
+        --muted: rgba(216, 228, 250, 0.82);
+        --faint: rgba(165, 190, 230, 0.5);
+        --accent: #5b9dff;
+        --accent-ink: #071022;
+        --accent-text: #8fc0ff;
+        --input-bg: rgba(120, 170, 255, 0.06);
+        --input-hover: rgba(120, 170, 255, 0.14);
         --danger: #ff6b6b;
-        --shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+        --shadow: 0 14px 44px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+
+        --frost: linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.07));
+        --frost-border: rgba(255, 255, 255, 0.42);
+        --frost-ink: #eaf2ff;
+        --frost-shadow: 0 8px 26px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+
+        --chip-idle: rgba(120, 170, 255, 0.05);
+        --chip-idle-border: rgba(160, 195, 255, 0.13);
+        --chip-idle-ink: rgba(200, 216, 244, 0.55);
+        --chip-sel: rgba(120, 170, 255, 0.22);
+        --chip-sel-border: rgba(170, 205, 255, 0.5);
+        --chip-sel-ink: #eaf2ff;
+        --chip-sel-glow: 0 0 16px rgba(90, 150, 255, 0.25);
+
+        --amber: #ffbf66;
+        --amber-ink: #ffe3bc;
+        --amber-border: rgba(255, 185, 90, 0.55);
+        --amber-glow: 0 0 20px rgba(255, 175, 70, 0.45);
+
+        --dome: radial-gradient(55% 90% at 50% 100%,
+                  rgba(85, 145, 255, 0.42), rgba(112, 100, 255, 0.13) 52%, transparent 76%);
+        --dot: rgba(150, 185, 255, 0.26);
       }
 
       * { box-sizing: border-box; }
       html, body { margin: 0; height: 100%; overflow: hidden; }
       body {
-        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        font-family: var(--font-ui);
         background-color: var(--bg);
         color: var(--text);
+        -webkit-font-smoothing: antialiased;
         /* No CSS transition here: Chrome won't re-evaluate a var()-based
            background/color through a transition when the custom property flips,
            so the body would stick on the old theme. The swap is instant, matching
            the panels (which also flip instantly). */
       }
-      #view { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+      /* The canvas is transparent (renderer alpha, scene.background = null in
+         main.js) so the ambient layers below show *through* the scene — the glow
+         sits behind the object rather than around the chrome. */
+      #view { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; z-index: 2; }
+
+      /* ---- Ambient ------------------------------------------------------------
+         Three layers behind everything, all inert. The gradient establishes the
+         space, the dotted grid gives it a floor, and the dome is the tutor's
+         presence — a glow that breathes at the bottom of the screen rather than
+         a face or an avatar. Purely decorative: `pointer-events: none` so it can
+         never intercept a tap meant for the model. */
+      .ambient {
+        position: fixed; inset: 0; z-index: 1; pointer-events: none;
+        background: var(--bg-grad);
+      }
+      .ambient > i { position: absolute; inset: 0; display: block; }
+      /* Masked, never a full continuous grid — a grid that runs edge to edge
+         reads as graph paper instead of depth. */
+      .ambient .grid {
+        background-image: radial-gradient(var(--dot) 1.3px, transparent 1.3px);
+        background-size: 34px 34px;
+        -webkit-mask-image: radial-gradient(58% 46% at 50% 34%, #000 0%, transparent 78%);
+        mask-image: radial-gradient(58% 46% at 50% 34%, #000 0%, transparent 78%);
+      }
+      .ambient .dome { background: var(--dome); animation: breathe 9s ease-in-out infinite; }
+      @keyframes breathe {
+        0%, 100% { opacity: 0.62; transform: translateY(10px) scale(1); }
+        50%      { opacity: 1;    transform: translateY(0) scale(1.03); }
+      }
+
+      /* ---- Glass surfaces ----------------------------------------------------
+         One recipe, used by the panel, the card, the fabs and the captions. */
+      .panel, .card, .status, .voice-caption, .modebar,
+      .fab, #panelToggle, .corner-controls > button {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        backdrop-filter: blur(var(--glass-blur));
+        -webkit-backdrop-filter: blur(var(--glass-blur));
+      }
 
       .panel {
         position: fixed;
@@ -60,60 +195,139 @@
         width: 300px;
         max-height: calc(100vh - 32px);
         overflow-y: auto;
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 14px;
+        border-radius: var(--r-card);
         padding: 18px;
-        backdrop-filter: blur(10px);
         box-shadow: var(--shadow);
         z-index: 15;
       }
-      .panel h1 { font-size: 16px; margin: 0 0 2px; letter-spacing: 0.2px; }
-      .panel .sub { color: var(--muted); font-size: 12px; margin-bottom: 16px; }
+      .panel h1 { font-size: 17px; font-weight: 700; margin: 0 0 2px; letter-spacing: -0.015em; }
+      .panel .sub { color: var(--faint); font: 400 10.5px/1.5 var(--font-mono); margin-bottom: 18px; }
       .panel .sub a { color: var(--accent-text); text-decoration: none; }
 
+      /* Section labels are the app's "technical voice": mono, tracked out, upper
+         case — the same register as the status line and the card kickers. */
       .field { margin-bottom: 16px; }
-      .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 7px; }
+      .field label {
+        display: block; margin-bottom: 8px;
+        font: 600 10px/1 var(--font-mono); letter-spacing: 0.16em; text-transform: uppercase;
+        color: var(--faint);
+      }
       .row { display: flex; align-items: center; justify-content: space-between; }
-      input[type='range'] { width: 100%; accent-color: var(--accent); }
+      .val { font: 500 11px var(--font-mono); font-variant-numeric: tabular-nums; color: var(--accent-text); }
+
+      /* ---- Range: the explode slider (panel + card) ---------------------------
+         Styled by hand rather than left to `accent-color`, which gives no way to
+         put a glow on the thumb — and the thumb is the one thing a thumb has to
+         find on a phone. */
+      input[type='range'] {
+        -webkit-appearance: none; appearance: none;
+        width: 100%; height: 22px; background: transparent; cursor: pointer;
+      }
+      input[type='range']::-webkit-slider-runnable-track {
+        height: 5px; border-radius: 999px;
+        background: var(--input-bg); border: 1px solid var(--chip-idle-border);
+      }
+      input[type='range']::-moz-range-track {
+        height: 5px; border-radius: 999px;
+        background: var(--input-bg); border: 1px solid var(--chip-idle-border);
+      }
+      input[type='range']::-webkit-slider-thumb {
+        -webkit-appearance: none; appearance: none;
+        width: 17px; height: 17px; margin-top: -7px; border-radius: 50%;
+        background: var(--accent); border: 2px solid var(--panel-solid);
+        box-shadow: 0 0 12px rgba(91, 157, 255, 0.6);
+      }
+      input[type='range']::-moz-range-thumb {
+        width: 17px; height: 17px; border: 2px solid var(--panel-solid); border-radius: 50%;
+        background: var(--accent); box-shadow: 0 0 12px rgba(91, 157, 255, 0.6);
+      }
+
+      /* Select rows: pill-shaped, glass, with a drawn chevron (the native arrow
+         can't be recoloured, so it goes and this replaces it). */
       select {
         width: 100%;
-        padding: 8px 10px;
-        border: 1px solid var(--border);
-        border-radius: 9px;
-        background: var(--input-bg);
+        min-height: 46px;
+        padding: 10px 38px 10px 16px;
+        border: 1px solid var(--chip-idle-border);
+        border-radius: var(--r-row);
+        background-color: var(--input-bg);
+        background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                          linear-gradient(135deg, currentColor 50%, transparent 50%);
+        background-position: calc(100% - 19px) calc(50% + 1px), calc(100% - 13px) calc(50% + 1px);
+        background-size: 6px 6px, 6px 6px;
+        background-repeat: no-repeat;
+        -webkit-appearance: none; appearance: none;
         color: var(--text);
-        font-size: 13px;
+        font-family: var(--font-ui); font-size: 14.5px;
         cursor: pointer;
       }
-      select:hover { border-color: var(--accent); }
-      .val { font-variant-numeric: tabular-nums; color: var(--accent-text); font-size: 12px; }
+      select:hover { background-color: var(--input-hover); border-color: var(--accent); }
+      select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      /* The popup is OS-drawn and follows `color-scheme` above; this only
+         pins it to the app's exact background rather than the platform's. */
+      select option { background: var(--bg); color: var(--text); }
 
-      .toggles { display: flex; flex-direction: column; gap: 9px; }
-      .toggle { display: flex; align-items: center; gap: 9px; font-size: 13px; cursor: pointer; }
-      .toggle input { accent-color: var(--accent); width: 15px; height: 15px; }
+      .toggles { display: flex; flex-direction: column; gap: 4px; }
+      .toggle {
+        display: flex; align-items: center; gap: 11px;
+        min-height: 44px; padding: 0 4px;
+        font-size: 14px; cursor: pointer;
+      }
+      .toggle input { accent-color: var(--accent); width: 17px; height: 17px; flex: none; }
 
+      /* ---- Buttons -----------------------------------------------------------
+         Base = the secondary treatment: a quiet glass pill. `.primary` promotes
+         it to frosted. Every button in the app is one of these two, or a chip.
+         The 44px floor is a phone requirement, not a nicety. */
       button {
         width: 100%;
         margin-top: 4px;
-        padding: 9px;
-        border: 1px solid var(--border);
-        border-radius: 9px;
+        min-height: 46px;
+        padding: 11px 18px;
+        display: flex; align-items: center; justify-content: center; gap: 9px;
+        border: 1px solid var(--chip-idle-border);
+        border-radius: var(--r-pill);
         background: var(--input-bg);
-        color: var(--text);
-        font-size: 13px;
+        color: var(--muted);
+        font-family: var(--font-ui); font-size: 14.5px; font-weight: 500;
         cursor: pointer;
+        /* A tap that lands on the label must not select the label. On a phone a
+           slightly-long press otherwise highlights the text and pops the OS
+           selection callout instead of firing the button. */
+        user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+        transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
       }
-      button:hover { background: var(--input-hover); border-color: var(--accent); }
+      button:hover { background: var(--input-hover); border-color: var(--accent); color: var(--text); }
+      button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      button:disabled { opacity: 0.4; cursor: not-allowed; }
+      button:disabled:hover { background: var(--input-bg); border-color: var(--chip-idle-border); }
+
+      .primary {
+        background: var(--frost);
+        border-color: var(--frost-border);
+        box-shadow: var(--frost-shadow);
+        color: var(--frost-ink);
+        font-weight: 600;
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      }
+      .primary:hover { background: var(--frost); border-color: var(--frost-border); color: var(--frost-ink); filter: brightness(1.08); }
+
+      /* Icons are drawn by src/icons.js and sit *beside* the label, never inside
+         it — i18n repaints labels with textContent and would wipe a nested icon.
+         `currentColor` means the button's own colour drives the icon, so themes
+         and hover states need no icon-specific rules. */
+      .ico { width: 18px; height: 18px; flex: none; }
+      .lbl { display: inline-block; }
 
       hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 
       /* ---- Advanced (developer) disclosure — collapsed by default ---- */
-      .advanced { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 12px; }
+      .advanced { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 14px; }
       .advanced > summary {
         list-style: none; cursor: pointer; user-select: none;
-        display: flex; align-items: center; gap: 6px;
-        font-size: 12px; color: var(--muted); padding: 4px 0; margin-bottom: 4px;
+        display: flex; align-items: center; gap: 7px;
+        font: 600 10px/1 var(--font-mono); letter-spacing: 0.16em; text-transform: uppercase;
+        color: var(--faint); padding: 6px 0; margin-bottom: 4px;
       }
       .advanced > summary::-webkit-details-marker { display: none; }
       .advanced > summary::before {
@@ -122,33 +336,42 @@
       }
       .advanced[open] > summary::before { transform: rotate(90deg); }
       .advanced > summary:hover { color: var(--text); }
-      .advanced > .field:first-of-type { margin-top: 8px; }
+      .advanced > .field:first-of-type { margin-top: 10px; }
 
-      .stat { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
-      .stat b { color: var(--accent-text); font-variant-numeric: tabular-nums; }
+      .stat { display: flex; justify-content: space-between; font: 400 11px var(--font-mono); color: var(--faint); margin-bottom: 6px; }
+      .stat b { color: var(--accent-text); font-weight: 600; font-variant-numeric: tabular-nums; }
 
       .legend { margin-top: 10px; max-height: 220px; overflow-y: auto; }
       .legend-row {
         display: flex; align-items: center; gap: 9px;
-        font-size: 12px; padding: 4px 6px; border-radius: 6px; cursor: default;
+        font-size: 12.5px; padding: 5px 7px; border-radius: 9px; cursor: default;
       }
       .legend-row:hover { background: var(--input-hover); }
-      .swatch { width: 13px; height: 13px; border-radius: 3px; flex: none; border: 1px solid rgba(128,128,128,0.3); }
+      .swatch { width: 12px; height: 12px; border-radius: 4px; flex: none; border: 1px solid rgba(128,128,128,0.3); }
 
-      /* ---- Mode bar (top-centre) ---- */
+      /* ---- Mode bar (top-centre) ----------------------------------------------
+         A pill of tabs. The selected mode is the only filled thing on screen —
+         that is what blue-as-selection buys: you can find where you are without
+         reading. */
       .modebar {
         position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
-        display: flex; gap: 6px; padding: 6px;
-        background: var(--panel); border: 1px solid var(--border);
-        border-radius: 14px; backdrop-filter: blur(10px);
+        display: flex; gap: 4px; padding: 5px;
+        border-radius: var(--r-pill);
         box-shadow: var(--shadow); z-index: 20; max-width: calc(100vw - 32px); overflow-x: auto;
       }
       .modebtn {
-        width: auto; margin: 0; padding: 8px 12px; font-size: 13px;
-        white-space: nowrap; border-radius: 9px; background: transparent;
-        border: 1px solid transparent;
+        width: auto; margin: 0; min-height: 38px; padding: 0 15px;
+        font-size: 13px; font-weight: 500; white-space: nowrap;
+        border-radius: var(--r-pill);
+        background: transparent; border: 1px solid transparent;
+        color: var(--chip-idle-ink);
       }
-      .modebtn.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+      .modebtn:hover { background: var(--chip-idle); border-color: var(--chip-idle-border); color: var(--text); }
+      .modebtn.active {
+        background: var(--chip-sel); border-color: var(--chip-sel-border);
+        color: var(--chip-sel-ink); font-weight: 600; box-shadow: var(--chip-sel-glow);
+      }
+      .modebtn.active:hover { background: var(--chip-sel); border-color: var(--chip-sel-border); color: var(--chip-sel-ink); }
 
       /* ---- Bottom dock: stacks the card + fabs + captions so nothing overlaps.
          The dock itself is click-through (pointer-events:none); only its real
@@ -165,21 +388,27 @@
       /* ---- Step / part-info / quiz card ---- */
       .card {
         width: min(560px, 100%);
-        background: var(--panel); border: 1px solid var(--border);
-        border-radius: 14px; padding: 16px 18px; backdrop-filter: blur(10px);
+        border-radius: var(--r-card); padding: 17px 19px;
         box-shadow: var(--shadow); display: none;
       }
       .card.show { display: block; }
-      .card .kicker { font-size: 11px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--accent-text); margin-bottom: 6px; }
-      .card .body { font-size: 15px; line-height: 1.5; margin-bottom: 4px; }
-      .card .body .partdesc { display: block; margin-top: 6px; font-size: 13px; line-height: 1.45; color: var(--muted); }
-      .card .meta { font-size: 12px; color: var(--muted); }
+      .card .kicker {
+        font: 600 10px/1 var(--font-mono); letter-spacing: 0.24em; text-transform: uppercase;
+        color: var(--accent-text); margin-bottom: 9px;
+      }
+      .card .body { font-size: 15.5px; line-height: 1.52; margin-bottom: 4px; }
+      .card .body .partdesc { display: block; margin-top: 7px; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+      /* The Assemble reveal: a tick, then the part's name. Blue, not amber —
+         a correct placement is the app confirming, not a fault. */
+      .card .body .named { display: flex; align-items: center; gap: 8px; }
+      .card .body .named .ico { width: 17px; height: 17px; color: var(--accent-text); }
+      .card .meta { font: 400 10.5px var(--font-mono); letter-spacing: 0.04em; color: var(--faint); }
       /* The Fix walkthrough's spoken script: one line per narration beat, lit
          as it is said, so the user can read along or catch up after looking
          away. Lines already spoken stay legible but recede. */
-      .card .beats { margin-top: 10px; display: flex; flex-direction: column; gap: 2px; }
+      .card .beats { margin-top: 12px; display: flex; flex-direction: column; gap: 2px; }
       .card .beat {
-        position: relative; padding: 5px 0 5px 14px; font-size: 14px; line-height: 1.45;
+        position: relative; padding: 6px 0 6px 15px; font-size: 14px; line-height: 1.45;
         color: var(--muted); opacity: 0.55; transition: opacity 0.25s ease, color 0.25s ease;
       }
       .card .beat::before {
@@ -194,29 +423,51 @@
       @media (prefers-reduced-motion: reduce) {
         .card .beat, .card .beat::before { transition: none; }
       }
+
+      /* Amber is the problem, and Fix is the only mode that has one. The kicker,
+         the step counter and the beat currently being spoken are the parts of the
+         card that point at the object, so they are the parts that go warm. */
+      body[data-mode='fix'] .card .kicker { color: var(--amber-ink); }
+      body[data-mode='fix'] .card .meta { color: var(--amber-ink); opacity: 0.75; }
+      body[data-mode='fix'] .card .beat.active::before { background: var(--amber); box-shadow: var(--amber-glow); }
+
       /* Build progress in the Assemble puzzle card. */
       .card .progress {
         height: 5px; margin-top: 12px; border-radius: 999px;
-        background: var(--input-hover); overflow: hidden;
+        background: var(--input-bg); overflow: hidden;
       }
       .card .progress > i {
         display: block; height: 100%; border-radius: 999px;
-        background: var(--accent); transition: width 0.35s ease;
+        background: var(--accent); box-shadow: 0 0 10px rgba(91, 157, 255, 0.5);
+        transition: width 0.35s ease;
       }
-      /* Inline explode slider inside the Explore card (see enterExplore). */
-      .card-explode { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
-      .card-explode label { font-size: 12px; color: var(--muted); white-space: nowrap; }
+      /* Inline explode slider inside every card (see showCard). Deliberately
+         quiet — it is a control you reach for occasionally, not the point of the
+         screen, and the modes already spread the model themselves on entry. */
+      .card-explode {
+        display: flex; align-items: center; gap: 11px; margin-top: 14px;
+        padding-top: 12px; border-top: 1px solid var(--border);
+      }
+      .card-explode label {
+        font: 600 9.5px/1 var(--font-mono); letter-spacing: 0.16em; text-transform: uppercase;
+        color: var(--faint); white-space: nowrap;
+      }
       .card-explode input[type='range'] { flex: 1; }
-      .card-explode .val { min-width: 34px; text-align: right; }
-      .stepnav { display: flex; gap: 8px; margin-top: 14px; }
+      .card-explode .val { min-width: 32px; text-align: right; }
+      .stepnav { display: flex; gap: 9px; margin-top: 15px; }
       .stepnav button { margin: 0; }
-      .stepnav .primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
-      .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+      .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
       .chip {
-        width: auto; margin: 0; padding: 7px 12px; font-size: 12px; border-radius: 999px;
-        background: var(--input-bg); border: 1px solid var(--border);
+        width: auto; margin: 0; min-height: 34px; padding: 0 14px;
+        font-size: 12.5px; font-weight: 500; border-radius: var(--r-pill);
+        background: var(--chip-idle); border: 1px solid var(--chip-idle-border);
+        color: var(--chip-idle-ink);
       }
-      .chip:hover { border-color: var(--accent); }
+      .chip .ico { width: 15px; height: 15px; }
+      .chip:hover {
+        background: var(--chip-sel); border-color: var(--chip-sel-border);
+        color: var(--chip-sel-ink); box-shadow: var(--chip-sel-glow);
+      }
 
       /* ---- Floating action buttons (AR + mic), right-aligned above the card ---- */
       .fab-cluster {
@@ -224,37 +475,48 @@
         display: flex; flex-direction: column; gap: 10px; align-items: flex-end;
       }
       .fab {
-        width: auto; margin: 0; display: inline-flex; align-items: center; gap: 8px;
-        padding: 12px 16px; border-radius: 999px; font-size: 14px; font-weight: 600;
-        border: 1px solid var(--border); background: var(--panel); color: var(--text);
-        backdrop-filter: blur(10px); box-shadow: var(--shadow); cursor: pointer;
+        width: auto; margin: 0; min-height: 50px;
+        padding: 0 22px; border-radius: var(--r-pill);
+        font-size: 15px; font-weight: 600;
+        color: var(--text); box-shadow: var(--shadow);
       }
-      .fab.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+      .fab .ico { width: 19px; height: 19px; }
+      .fab.primary {
+        background: var(--frost); border-color: var(--frost-border);
+        color: var(--frost-ink); box-shadow: var(--frost-shadow);
+      }
+      .fab.ar { min-height: 54px; }
       /* Push-to-talk: the button is held, so the browser must not treat the
          hold as a scroll, a text selection or a long-press callout — any of
          those steal the pointer mid-sentence and cancel the capture. */
       .fab.mic { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
       /* Armed but idle: the mic is open and a hold will record instantly. */
-      .fab.mic.armed { border-color: var(--accent); }
-      .fab.mic.listening { background: var(--danger); color: #fff; border-color: var(--danger); animation: pulse 1.2s infinite; }
-      .fab.mic.holding { transform: scale(0.97); }
-      @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(224,82,79,0.5); } 50% { box-shadow: 0 0 0 10px rgba(224,82,79,0); } }
-      .fab:disabled { opacity: 0.4; cursor: not-allowed; }
+      .fab.mic.armed { border-color: var(--accent); box-shadow: var(--frost-shadow), 0 0 0 1px var(--accent); }
+      /* Listening and holding are the tutor's own state, so they glow blue —
+         amber would claim something is wrong with the object. */
+      .fab.mic.listening {
+        border-color: var(--accent); color: var(--accent-text);
+        animation: micpulse 1.6s ease-in-out infinite;
+      }
+      .fab.mic.holding { transform: scale(0.97); box-shadow: var(--frost-shadow), 0 0 26px rgba(91, 157, 255, 0.55); }
+      @keyframes micpulse {
+        0%, 100% { box-shadow: var(--frost-shadow), 0 0 0 0 rgba(91, 157, 255, 0.45); }
+        50%      { box-shadow: var(--frost-shadow), 0 0 0 11px rgba(91, 157, 255, 0); }
+      }
 
       /* ---- Status pill + live voice caption (dock children, centred) ---- */
       .status {
-        font-size: 12px; color: var(--muted);
-        background: var(--panel); border: 1px solid var(--border);
-        padding: 7px 14px; border-radius: 20px; transition: opacity 0.3s;
-        backdrop-filter: blur(10px); text-align: center;
+        font: 400 10.5px var(--font-mono); letter-spacing: 0.06em; color: var(--faint);
+        padding: 8px 15px; border-radius: var(--r-pill); transition: opacity 0.3s;
+        text-align: center;
       }
       .voice-caption {
-        max-width: min(560px, 100%); font-size: 13px; color: var(--text); text-align: center;
-        background: var(--panel); border: 1px solid var(--border);
-        padding: 8px 14px; border-radius: 12px; display: none; backdrop-filter: blur(10px);
+        max-width: min(560px, 100%); font-size: 14.5px; line-height: 1.45; color: var(--text); text-align: center;
+        padding: 11px 17px; border-radius: var(--r-card); display: none;
+        box-shadow: var(--shadow);
       }
       .voice-caption.show { display: block; }
-      .voice-caption b { color: var(--accent-text); }
+      .voice-caption b { color: var(--accent-text); font-weight: 600; }
 
       /* ---- Corner controls (independent of the dock) ---- */
       #exitAR {
@@ -264,8 +526,8 @@
       }
       #panelToggle {
         position: fixed; top: 16px; left: 16px; z-index: 25; width: auto; margin: 0;
-        padding: 9px 12px; border-radius: 10px; display: none;
-        background: var(--panel); border: 1px solid var(--border); box-shadow: var(--shadow); backdrop-filter: blur(10px);
+        min-height: 40px; padding: 0 15px; border-radius: var(--r-pill); display: none;
+        box-shadow: var(--shadow);
       }
       .panel.collapsed { display: none; }
 
@@ -280,10 +542,12 @@
         display: flex; gap: 8px; align-items: center;
       }
       .corner-controls > button {
-        width: auto; margin: 0; padding: 9px 12px; border-radius: 10px; white-space: nowrap;
-        background: var(--panel); border: 1px solid var(--border); box-shadow: var(--shadow); backdrop-filter: blur(10px);
+        width: auto; margin: 0; min-height: 40px; padding: 0 14px;
+        border-radius: var(--r-pill); white-space: nowrap;
+        box-shadow: var(--shadow); font-size: 13px;
       }
-      #langToggle { font-weight: 600; }
+      .corner-controls .ico { width: 17px; height: 17px; }
+      #langToggle { font-weight: 600; font-family: var(--font-mono); }
 
       /* ---- Home screen ---------------------------------------------------
          The app's front door: pick an object by camera or from the list. It is
@@ -293,47 +557,91 @@
       .home {
         position: fixed; inset: 0; z-index: 70; display: none;
         align-items: center; justify-content: center; overflow-y: auto;
-        background: var(--bg); color: var(--text);
+        background: var(--bg-grad); color: var(--text);
         padding: calc(28px + env(safe-area-inset-top, 0px)) 20px
                  calc(28px + env(safe-area-inset-bottom, 0px));
       }
+      /* The dome follows the user to the front door — it is the first thing that
+         says something is listening on the other side of this screen. */
+      .home::after {
+        content: ''; position: absolute; inset: 0; pointer-events: none;
+        background: var(--dome); animation: breathe 9s ease-in-out infinite;
+      }
       .home.show { display: flex; }
-      .home-inner { width: min(520px, 100%); }
-      .home-title { font-size: 26px; margin: 0 0 6px; letter-spacing: 0.2px; }
-      .home-sub { color: var(--muted); font-size: 14px; margin: 0 0 22px; }
+      .home-inner { width: min(520px, 100%); position: relative; z-index: 1; }
+      .home-title { font-size: 28px; font-weight: 700; letter-spacing: -0.015em; margin: 0 0 7px; }
+      .home-sub { color: var(--muted); font-size: 15.5px; line-height: 1.5; margin: 0 0 24px; }
       .home-view { display: flex; flex-direction: column; gap: 12px; }
       .home-view[hidden] { display: none; }
 
       .home-option {
-        width: 100%; margin: 0; display: flex; align-items: center; gap: 14px;
-        text-align: left; padding: 18px; border-radius: 16px;
+        width: 100%; margin: 0; display: flex; align-items: center; gap: 15px;
+        justify-content: flex-start;
+        text-align: left; padding: 18px; border-radius: var(--r-card);
         background: var(--panel-solid); border: 1px solid var(--border);
-        box-shadow: var(--shadow); cursor: pointer;
+        backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur));
+        box-shadow: var(--shadow); cursor: pointer; color: var(--text);
       }
-      .home-option:hover { background: var(--input-hover); border-color: var(--accent); }
-      .home-option .ico { font-size: 26px; line-height: 1; flex: none; }
-      .home-option b { display: block; font-size: 15px; margin-bottom: 3px; }
-      .home-option small { display: block; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+      .home-option:hover { background: var(--panel-solid); border-color: var(--accent); filter: brightness(1.03); }
+      /* The icon sits in its own disc: at 46px it is the thing the eye lands on
+         first, which is the job of the two front-door choices. */
+      .home-option .ico-circle {
+        width: 46px; height: 46px; flex: none; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        background: var(--chip-sel); border: 1px solid var(--chip-sel-border);
+        color: var(--accent-text);
+      }
+      .home-option .ico-circle .ico { width: 22px; height: 22px; }
+      .home-option b { display: block; font-size: 15.5px; font-weight: 600; margin-bottom: 3px; }
+      .home-option small { display: block; font-size: 13px; line-height: 1.45; color: var(--muted); font-weight: 400; }
 
       .home-item {
-        width: 100%; margin: 0; padding: 15px 18px; text-align: left; font-size: 15px;
-        border-radius: 14px; background: var(--panel-solid); border: 1px solid var(--border);
+        width: 100%; margin: 0; min-height: 58px; padding: 15px 20px;
+        text-align: left; justify-content: space-between; font-size: 15px; color: var(--text);
+        border-radius: var(--r-row); background: var(--panel-solid); border: 1px solid var(--border);
+        backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur));
       }
-      .home-item:hover { background: var(--input-hover); border-color: var(--accent); }
+      .home-item::after {
+        content: ''; width: 8px; height: 8px; flex: none;
+        border: 2px solid currentColor; border-left: 0; border-bottom: 0;
+        transform: rotate(45deg); opacity: 0.45;
+      }
+      .home-item:hover { background: var(--panel-solid); border-color: var(--accent); filter: brightness(1.03); }
 
       /* The camera preview and the frozen still share one box, so the shot lands
          exactly where the user was aiming instead of resizing the layout. */
       .home-cam {
+        position: relative;
         width: 100%; aspect-ratio: 3 / 4; max-height: 52vh;
-        border-radius: 16px; overflow: hidden; background: #000;
+        border-radius: var(--r-card); overflow: hidden; background: #000;
         border: 1px solid var(--border);
       }
       .home-cam > video, .home-cam > img { width: 100%; height: 100%; object-fit: cover; display: block; }
       .home-cam > [hidden] { display: none; }
-      .home-scan-status { min-height: 19px; font-size: 13px; color: var(--muted); text-align: center; }
-      .home-actions { display: flex; gap: 8px; }
+      /* Viewfinder: four corner brackets, so it is obvious the whole object has
+         to be in frame — the single most common reason a scan comes back "none". */
+      .home-cam::after {
+        content: ''; position: absolute; left: 12%; right: 12%; top: 16%; bottom: 16%;
+        pointer-events: none; border-radius: 10px;
+        background:
+          linear-gradient(currentColor, currentColor) left top / 34px 2.5px no-repeat,
+          linear-gradient(currentColor, currentColor) left top / 2.5px 34px no-repeat,
+          linear-gradient(currentColor, currentColor) right top / 34px 2.5px no-repeat,
+          linear-gradient(currentColor, currentColor) right top / 2.5px 34px no-repeat,
+          linear-gradient(currentColor, currentColor) left bottom / 34px 2.5px no-repeat,
+          linear-gradient(currentColor, currentColor) left bottom / 2.5px 34px no-repeat,
+          linear-gradient(currentColor, currentColor) right bottom / 34px 2.5px no-repeat,
+          linear-gradient(currentColor, currentColor) right bottom / 2.5px 34px no-repeat;
+        color: rgba(255, 255, 255, 0.85);
+      }
+      .home-scan-status { min-height: 19px; font: 400 11px var(--font-mono); letter-spacing: 0.06em; color: var(--faint); text-align: center; }
+      .home-actions { display: flex; gap: 9px; }
       .home-actions button { margin: 0; }
-      .home-primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+      .home-primary {
+        background: var(--frost); border-color: var(--frost-border);
+        box-shadow: var(--frost-shadow); color: var(--frost-ink); font-weight: 600;
+      }
+      .home-primary:hover { background: var(--frost); border-color: var(--frost-border); color: var(--frost-ink); filter: brightness(1.08); }
       /* A "Home" button on the home screen is nonsense; the language and theme
          toggles beside it stay, which is why the cluster sits above the overlay. */
       body.home-open #homeBtn { display: none; }
@@ -343,17 +651,53 @@
       body.ar-active #panelToggle,
       body.ar-active .corner-controls,
       body.ar-active .status,
+      body.ar-active .ambient,
       body.ar-active .fab.ar { display: none !important; }
       body.ar-active #exitAR { display: flex; }
+      /* Over a live camera feed the glass has to stop being expensive: an 18px
+         backdrop blur on every surface costs real frames on a mid-range phone,
+         and lost frames read as the anchor drifting. One knob, because every
+         blurred surface routes through it. */
+      body.ar-active {
+        /* The dom-overlay root *is* <body>, so anything opaque on it sits
+           between the user and their room. Nothing here may paint a background. */
+        background-color: transparent;
+        --glass-blur: 6px;
+        --panel: rgba(10, 16, 32, 0.62);
+        --border: rgba(150, 195, 255, 0.3);
+        --text: #eaf2ff;
+        --muted: rgba(216, 228, 250, 0.86);
+        --faint: rgba(180, 205, 240, 0.7);
+      }
 
       /* Modal backdrop behind the mobile controls sheet. Off on desktop. */
       #sheetBackdrop {
         position: fixed; inset: 0; z-index: 55; display: none;
-        background: rgba(10, 14, 22, 0.45);
+        background: rgba(4, 8, 18, 0.5);
         opacity: 0; pointer-events: none; transition: opacity 0.28s ease;
         -webkit-tap-highlight-color: transparent;
       }
       #sheetBackdrop.show { opacity: 1; pointer-events: auto; }
+
+      /* Ambient motion is decoration; a user who asked for less of it gets a
+         still glow rather than none — the depth is the point, the breathing is
+         the flourish. */
+      @media (prefers-reduced-motion: reduce) {
+        .ambient .dome, .home::after, .fab.mic.listening { animation: none; }
+      }
+
+      /* ---- Medium widths: give the centred mode bar its room back ---------
+         The bar is centred on the *viewport*, but the panel sits on the left and
+         the preference cluster on the right, so the free centre is narrower than
+         it looks — and adding icons pushed the fourth mode under the corner
+         buttons (which paint above it). Rather than let a mode hide, the bar
+         collapses to what the design does anyway: the selected mode keeps its
+         name, the rest are icons. Their `title` still names them on hover. */
+      @media (max-width: 1180px) {
+        .modebtn:not(.active) .lbl { display: none; }
+        .modebtn { padding: 0 12px; }
+        #homeBtn .lbl { display: none; }
+      }
 
       /* ---- Mobile: phone-first re-layout --------------------------------
          The app's primary device is a phone (AR is Android-Chrome only), so
@@ -362,25 +706,43 @@
          (gear · theme) sit on their own line; the mode bar gets its own row
          below so nothing overlaps, and the notch/home-bar are respected. */
       @media (max-width: 720px) {
-        /* Header line: gear (left) + theme (right), clear of the notch. */
+        /* ONE header row: Controls · the modes · Home. Everything a phone user
+           navigates with, on the line the notch already costs them — and nothing
+           else. Preferences (language, theme) moved inside Controls; a second
+           row of them was eating a third of the viewport above the object. */
         #panelToggle {
-          display: block;
+          display: flex;
           top: calc(10px + env(safe-area-inset-top, 0px)); left: 12px;
+          padding: 0 12px; min-height: 42px;
         }
-        .corner-controls { top: calc(10px + env(safe-area-inset-top, 0px)); right: 12px; gap: 6px; }
-        .corner-controls > button { padding: 9px 10px; font-size: 12px; }
+        #panelToggle .lbl { display: none; }   /* gear only — the row is tight */
 
-        /* Mode bar: full-width scroll row on its own line under the header. */
+        .corner-controls { top: calc(10px + env(safe-area-inset-top, 0px)); right: 12px; gap: 6px; }
+        .corner-controls > button { padding: 0 11px; font-size: 12px; min-height: 42px; }
+        /* Inside an object the panel's Language select is the language control,
+           so the corner keeps Home alone. On the home screen there is no panel to
+           open — and no object yet — so the language toggle comes back, which is
+           the one place a German speaker most needs to find it. */
+        #langToggle { display: none; }
+        body.home-open #langToggle { display: flex; }
+
+        /* Mode bar: the middle of that row, scrolling within it if a long
+           selected label (German "Zusammenbauen") outgrows the space. */
         .modebar {
-          top: calc(56px + env(safe-area-inset-top, 0px));
-          left: 12px; right: 12px; transform: none; max-width: none;
-          gap: 6px; padding: 6px; scroll-snap-type: x proximity;
+          top: calc(10px + env(safe-area-inset-top, 0px));
+          left: 58px; right: 58px; transform: none; max-width: none;
+          gap: 4px; padding: 4px; scroll-snap-type: x proximity;
           -webkit-overflow-scrolling: touch; scrollbar-width: none;
         }
         .modebar::-webkit-scrollbar { display: none; }
         .modebtn {
-          padding: 9px 13px; font-size: 13px; min-height: 42px; scroll-snap-align: start;
+          padding: 0 12px; font-size: 13px; min-height: 42px; scroll-snap-align: start;
         }
+        /* Sized so the longest selected label still fits without scrolling —
+           German "Zusammenbauen" is the one that decides this. It overflowed by
+           17px at the roomier values, which clips the last icon and reads as a
+           broken bar rather than a scrollable one. */
+        .modebtn:not(.active) { padding: 0 10px; }
 
         /* Dev controls become a bottom sheet: always mounted, slid off-screen,
            revealed by the gear. A grab handle + tappable backdrop dismiss it. */
@@ -388,8 +750,10 @@
         .panel {
           display: block; top: auto; bottom: 0; left: 0; right: 0;
           width: 100%; max-width: none; max-height: 78vh; z-index: 60;
-          border-radius: 20px 20px 0 0; padding: 10px 18px 20px;
+          border-radius: var(--r-sheet) var(--r-sheet) 0 0; padding: 10px 18px 20px;
           padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+          background: var(--panel-solid);
+          border-bottom: 0;
           transform: translateY(100%);
           transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
         }
@@ -397,19 +761,21 @@
         .panel.collapsed { display: block; }   /* legacy class: don't hard-hide the sheet */
         .panel::before {                        /* grab handle, pinned while the sheet scrolls */
           content: ''; display: block; position: sticky; top: 0;
-          width: 40px; height: 4px; margin: 2px auto 12px;
+          width: 44px; height: 4px; margin: 2px auto 14px;
           border-radius: 999px; background: var(--border);
         }
 
         /* Keep a long step/quiz card from eating the viewport; scroll inside. */
         .card { max-height: 42vh; overflow-y: auto; }
-        .fab { padding: 12px 16px; font-size: 14px; }
+        .fab { min-height: 48px; padding: 0 18px; font-size: 14px; }
+        .home-title { font-size: 25px; }
       }
 
       /* Landscape phones (how you actually hold a phone for AR): little
          vertical room, so trim the sheet and card and tighten the header. */
       @media (max-width: 900px) and (max-height: 500px) and (orientation: landscape) {
-        .modebar { top: calc(48px + env(safe-area-inset-top, 0px)); }
+        /* (The mode bar used to be pulled up to a second header row here. It now
+           shares the first one, so there is nothing to pull up.) */
         .panel { max-height: 88vh; }
         .card { max-height: 34vh; }
         .dock { gap: 6px; }
@@ -417,6 +783,11 @@
     </style>
   </head>
   <body>
+    <!-- Ambient backdrop: gradient, dotted grid, breathing dome. Inert and
+         behind the canvas, which is transparent so the glow reads through the
+         scene rather than only around the chrome. -->
+    <div class="ambient" aria-hidden="true"><i class="grid"></i><i class="dome"></i></div>
+
     <canvas id="view"></canvas>
 
     <div id="sheetBackdrop"></div>
@@ -441,6 +812,15 @@
         <select id="lang" autocomplete="off"></select>
       </div>
 
+      <!-- Theme lives here rather than in the corner: it is a preference, the
+           same kind of thing as Language, and on a phone the header has room for
+           the three things you actually navigate with (Controls · modes · Home)
+           and nothing else. Shows the theme a tap would switch you TO. -->
+      <div class="field">
+        <label data-i18n="panel.theme">Theme</label>
+        <button id="themeToggle" data-i18n-title="btn.themeTitle" title="Toggle light / dark theme"><span data-icon="moon"></span><span class="lbl">Dark</span></button>
+      </div>
+
       <div class="field">
         <label data-i18n="panel.explode">Explode amount</label>
         <div class="row">
@@ -451,8 +831,8 @@
 
       <div class="toggles">
         <label class="toggle"><input type="checkbox" id="autorotate" /> <span data-i18n="panel.autorotate">Auto-rotate</span></label>
-        <!-- Off by default: holding 🎤 is the reliable way to be heard, and the
-             VAD's guess at where a sentence starts and ends is what a noisy
+        <!-- Off by default: holding the mic is the reliable way to be heard, and
+             the VAD's guess at where a sentence starts and ends is what a noisy
              demo hall breaks first. This is the opt-in for both hands busy. -->
         <label class="toggle" data-i18n-title="panel.handsfreeHint"><input type="checkbox" id="handsfree" /> <span data-i18n="panel.handsfree">Hands-free mic</span></label>
       </div>
@@ -493,8 +873,8 @@
       <div class="voice-caption" id="voiceCaption"></div>
 
       <div class="fab-cluster">
-        <button class="fab ar primary" id="startAR" data-i18n="btn.ar">📱 View in AR</button>
-        <button class="fab mic" id="micBtn" data-i18n="btn.mic">🎤 Ask</button>
+        <button class="fab ar primary" id="startAR"><span data-icon="ar"></span><span class="lbl" data-i18n="btn.ar">View in AR</span></button>
+        <button class="fab mic primary" id="micBtn"><span data-icon="mic"></span><span class="lbl" data-i18n="btn.mic">Hold to ask</span></button>
       </div>
 
       <div class="card" id="card">
@@ -503,8 +883,8 @@
         <div class="meta" id="cardMeta"></div>
         <div class="chips" id="cardChips"></div>
         <div class="stepnav" id="cardNav">
-          <button id="stepPrev" data-i18n="btn.back">◀ Back</button>
-          <button id="stepNext" class="primary" data-i18n="btn.next">Next ▶</button>
+          <button id="stepPrev"><span data-icon="back"></span><span class="lbl" data-i18n="btn.back">Back</span></button>
+          <button id="stepNext" class="primary"><span class="lbl" data-i18n="btn.next">Next</span><span data-icon="next"></span></button>
         </div>
       </div>
 
@@ -521,14 +901,14 @@
 
         <div class="home-view" id="homeChoose">
           <button class="home-option" id="homeScanBtn">
-            <span class="ico">📷</span>
+            <span class="ico-circle" data-icon="camera"></span>
             <span>
               <b data-i18n="home.scan">Scan an object</b>
               <small data-i18n="home.scanSub">Point your camera at it and I'll recognise it.</small>
             </span>
           </button>
           <button class="home-option" id="homeSelectBtn">
-            <span class="ico">📋</span>
+            <span class="ico-circle" data-icon="list"></span>
             <span>
               <b data-i18n="home.select">Select an object</b>
               <small data-i18n="home.selectSub">Choose from the objects I know.</small>
@@ -540,7 +920,7 @@
              selected language and never drifts from the panel's dropdown. -->
         <div class="home-view" id="homePick" hidden>
           <div class="home-list" id="homeList"></div>
-          <button data-home-back data-i18n="btn.back">◀ Back</button>
+          <button data-home-back><span data-icon="back"></span><span class="lbl" data-i18n="btn.back">Back</span></button>
         </div>
 
         <div class="home-view" id="homeScan" hidden>
@@ -550,24 +930,27 @@
           </div>
           <div class="home-scan-status" id="homeScanStatus"></div>
           <div class="home-actions">
-            <button data-home-back data-i18n="btn.back">◀ Back</button>
-            <button class="home-primary" id="homeCapture" data-i18n="scan.capture">📸 Capture</button>
+            <button data-home-back><span data-icon="back"></span><span class="lbl" data-i18n="btn.back">Back</span></button>
+            <button class="home-primary" id="homeCapture"><span data-icon="camera"></span><span class="lbl" data-i18n="scan.capture">Capture</span></button>
           </div>
-          <button id="homeScanAlt" data-i18n="scan.chooseInstead">📋 Pick from the list</button>
+          <button id="homeScanAlt"><span data-icon="list"></span><span class="lbl" data-i18n="scan.chooseInstead">Pick from the list</span></button>
         </div>
       </div>
     </div>
 
-    <button id="panelToggle" data-i18n="btn.controls">⚙︎ Controls</button>
-    <!-- Top-right cluster. Language sits beside the theme switch because it is
-         the same kind of control: a global, one-tap preference. -->
+    <button id="panelToggle"><span data-icon="controls"></span><span class="lbl" data-i18n="btn.controls">Controls</span></button>
+    <!-- Top-right cluster: Home, and the one-tap language switch. Language keeps
+         a corner seat because the home screen is the first thing a visitor sees
+         and a German speaker needs it there before anything else is reachable —
+         which is also why this cluster sits above the home overlay. On a phone
+         it collapses to Home alone once you are inside an object; the panel's
+         Language select covers the rest. -->
     <div class="corner-controls">
-      <button id="homeBtn" data-i18n-title="btn.homeTitle" title="Home" data-i18n="btn.home">⌂ Home</button>
-      <button id="langToggle" data-i18n-title="btn.langTitle" title="Switch language">🌐 EN</button>
-      <button id="themeToggle" data-i18n-title="btn.themeTitle" title="Toggle light / dark theme">🌙 Dark</button>
+      <button id="homeBtn" data-i18n-title="btn.homeTitle" title="Home"><span data-icon="home"></span><span class="lbl" data-i18n="btn.home">Home</span></button>
+      <button id="langToggle" data-i18n-title="btn.langTitle" title="Switch language"><span data-icon="globe"></span><span class="lbl">EN</span></button>
     </div>
 
-    <button class="fab" id="exitAR" data-i18n="btn.exitAR">✕ Exit AR</button>
+    <button class="fab" id="exitAR"><span data-icon="close"></span><span class="lbl" data-i18n="btn.exitAR">Exit AR</span></button>
 
     <script type="module" src="/src/main.js"></script>
   </body>

@@ -27,6 +27,7 @@
  * `releaseCamera()`.
  */
 import { t } from './i18n.js';
+import { setLabel } from './icons.js';
 import { startCamera, stopCamera, captureFrame, identifyObject } from './vision.js';
 
 let el = null;          // cached DOM refs
@@ -116,7 +117,7 @@ export function refreshHome() {
   renderList();
   if (!el.scan.hidden) {
     setScanStatus(statusKey, statusVars);
-    el.capture.textContent = t(scanPhase === 'live' ? 'scan.capture' : 'scan.retake');
+    setLabel(el.capture, t(scanPhase === 'live' ? 'scan.capture' : 'scan.retake'));
   }
 }
 
@@ -137,7 +138,7 @@ function renderList() {
   for (const { key, label } of cfg.getOptions()) {
     const btn = document.createElement('button');
     btn.className = 'home-item';
-    btn.textContent = label;
+    setLabel(btn, label);
     btn.addEventListener('click', () => pick(key));
     el.list.appendChild(btn);
   }
@@ -155,7 +156,7 @@ async function showScan() {
   scanPhase = 'live';
   el.shot.hidden = true;
   el.video.hidden = false;
-  el.capture.textContent = t('scan.capture');
+  setLabel(el.capture, t('scan.capture'), 'camera');
   el.capture.disabled = true;
   setScanStatus('scan.starting');
   try {
@@ -201,7 +202,7 @@ async function capture() {
     // dead end, one way out: retake, or use the list.
     scanPhase = 'result';
     setScanStatus('scan.none');
-    el.capture.textContent = t('scan.retake');
+    setLabel(el.capture, t('scan.retake'), 'again');
     el.capture.disabled = false;
     return;
   }

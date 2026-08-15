@@ -59,7 +59,7 @@ modules are focused, mostly-pure helpers it calls.
 | [src/explode.js](src/explode.js) | The **core**. Splits a glTF into parts and drives the exploded view + per-part highlight/dim/isolate. |
 | [src/animate.js](src/animate.js) | Tween engine (keyed channels, driven from the render loop) + the camera flight that frames a part. |
 | [src/fixanim.js](src/fixanim.js) | Fix's gesture library: 22 part gestures (remove/lift_off/unscrew/tap_loose/press_fit/align/tug/spin/grease/wipe/…) + 6 whole-object ones (tip_over/flip_over/stand_up/sit_test/rock_test/roll_away). The LLM picks the verb per spoken beat; this module owns the motion. |
-| [src/modes.js](src/modes.js) | The 4 modes + **authored per-model content** (fix steps, assemble prompts, known faults, quizzes) and semantic part names. |
+| [src/modes.js](src/modes.js) | The modes (`MODE_LIST` / `selectableModes`) + **authored per-model content** (fix steps, assemble prompts, known faults, quizzes) and semantic part names. |
 | [src/puzzle.js](src/puzzle.js) | Assemble's drag-to-build engine: scatter, ghost slots, snap magnetism, reject. Surface-agnostic — driven by a world-space ray. |
 | [src/select.js](src/select.js) | Raycast tap/click part-picking (drag threshold so orbiting ≠ tapping) + the desktop part-dragger. |
 | [src/ar.js](src/ar.js) | WebXR `immersive-ar` session: hit-test reticle, tap-to-place, long-press to grab then one-finger drag-to-move / pinch scale + twist rotate; voice "move it" re-places on a fresh anchor. Also hands the finger's target ray to an **interactor** (the puzzle). |
@@ -70,6 +70,7 @@ modules are focused, mostly-pure helpers it calls.
 | [src/ai.js](src/ai.js) | DeutschlandGPT chat client (OpenAI-compatible `/chat/completions`). |
 | [src/tutor.js](src/tutor.js) | "Brain" glue: classify a spoken phrase into an app command vs. a free-form question, then answer via AI with context. |
 | [src/i18n.js](src/i18n.js) | **Language.** The selected language (`en`/`de`), the UI dictionary, the authored-content resolver `tr()`, and the locale codes the speech stack needs. One switch flips chrome, content, voice, transcription and every LLM prompt. |
+| [src/icons.js](src/icons.js) | **Iconography.** One inline stroke set + the two ways it reaches the DOM: `hydrateIcons()` for static markup, `setLabel()` for buttons the app builds or relabels. No emoji anywhere. |
 | [src/telemetry.js](src/telemetry.js) | Langfuse tracing. Batches ingestion events to a credential-free proxy (Vite in dev, Worker in prod). No-op when unconfigured. |
 
 ### Links (`router.js`)
@@ -83,7 +84,7 @@ user's steps. The grammar is small enough to read out loud:
 #/scan                  …its camera view
 #/objects               …its object list
 #/<model>               an object, at the default mode (normalised to explore)
-#/<model>/<mode>        e.g. #/markus-chair/fix, #/bicycle/quiz
+#/<model>/<mode>        e.g. #/markus-chair/fix, #/bicycle/assemble
 ```
 
 It routes on the **hash**, not the path. There is no server here — a static
@@ -119,7 +120,7 @@ Three rules hold it together — don't regress them:
    or a stale bookmark is silently corrected rather than left lying.
 3. **A route's mode is set *before* its model loads.** `rebuild()` enters
    `currentMode` when the glTF lands, so assigning it up front is what makes
-   `#/bicycle/quiz` open on the quiz instead of flashing through Explore.
+   `#/bicycle/assemble` open on the puzzle instead of flashing through Explore.
 
 The tab is named after the screen (`setDocumentTitle`), in the selected
 language, using the emoji-free `kicker.*` strings rather than the mode bar's
@@ -230,7 +231,7 @@ Three things keep it from fighting other systems — don't regress them:
 
 ### Modes (`modes.js` + state in `main.js`)
 
-All 4 modes ride the **same core** (explode + isolate/highlight + visibility);
+All modes ride the **same core** (explode + isolate/highlight + visibility);
 only the card content and which parts are lit change:
 
 1. **Explore** — tap a part → isolate + name it.
@@ -254,9 +255,26 @@ can be adjusted on the surfaces the app is actually used on.
    sentence by sentence. See "Fix's narrated gestures" below. The authored `CONTENT[*].fix`
    procedure (one beat per step, carrying an authored verb) is the fallback when
    DGPT is unconfigured or unreachable — never the only path.
+   **Fix always opens on the question**, planner or no planner. The ask screen —
+   "what should we fix?", the symptom chips, the mic — *is* the mode; the
+   walkthrough is what an answer produces. Without DGPT the answer is the
+   authored procedure instead of a generated plan, but the question, the
+   suggestions, the "fix something else" chip and the **Done → ask again** loop
+   all behave identically. It used to skip straight to the authored procedure
+   when the planner was unreachable, which silently turned Fix into a
+   walkthrough of a repair nobody asked for, with the suggestions never shown
+   and no way back to them. Don't reintroduce an `aiAvailable()` gate on any of
+   those four paths.
 3. **Assemble** — a **drag-to-build puzzle** (see below); the user places each
    group, by dragging it or by **saying what it is**.
-4. **Quiz** — highlight a part, ask the user to name it.
+4. **Quiz** — highlight a part, ask the user to name it. **Flagged `hidden` in
+   `MODE_LIST`**, so it has no button and no route (`selectableModes` feeds
+   both). Everything else about it still works — `enterQuiz`, `resolveQuiz`, the
+   `CONTENT[*].quiz` blocks, the `quiz.*` strings — and dropping the flag brings
+   it straight back. It is hidden because this is a *repair* tutor: Explore
+   teaches the parts, and Fix and Assemble already test you on them by making
+   you do the thing, so a fourth tab bought a naming drill at the cost of
+   pushing the three that matter into an icons-only row on a phone.
 
 Authored content in `CONTENT` (keyed by model id) references parts by **keyword**
 (`match: ['cylinder','gas','lift']`), resolved against the live part list at
@@ -608,6 +626,60 @@ TTS, STT and AI all **degrade gracefully**: no ElevenLabs key → browser
 speech + Whisper STT; no DeutschlandGPT → Web Speech recognition + a canned
 local answer.
 
+### Look (`index.html`'s style block + `icons.js`)
+
+The whole visual layer lives in one `<style>` block driven by CSS custom
+properties, so a theme is a token swap and nothing else. Two rules carry it:
+
+1. **Blue is the app pointing at something; amber is something being wrong.**
+   Selection, focus, the carried puzzle part, a quiz highlight — blue. The Fix
+   step's part — amber, on the card *and* on the object, kept in step from one
+   place (`ACCENT_3D` + `setAccentColor` in main.js, `body[data-mode='fix']` in
+   the stylesheet). Amber appears nowhere else, which is the only reason it
+   means anything. Fix's 3D tint is deliberately weak (`FIX_TINT`): emissive
+   adds on top of the material and the renderer's 1.35 exposure amplifies it,
+   so a "reasonable" value repaints a dark seat as a flat tan slab — and the
+   gestures need a part that still looks like the part.
+2. **Glass, never opaque.** Panels, cards, fabs and captions share one recipe.
+   Every blur routes through `--glass-blur` so `body.ar-active` can drop it from
+   18px to 6px in a single declaration — over a live camera feed on a mid-range
+   phone that blur is real framerate, and lost framerate reads as anchor drift.
+
+Three things here are load-bearing and easy to undo by accident:
+
+- **The canvas is transparent and `scene.background` is `null`.** The backdrop
+  (gradient, masked dot grid, breathing dome glow) is CSS, painted *behind* the
+  canvas, so the glow sits behind the object rather than only around the chrome.
+  Setting a `scene.background` again would cover all of it. ar.js already
+  saves/restores the field, and `null` round-trips.
+- **`body.ar-active` must paint nothing.** The dom-overlay root *is* `<body>`,
+  so an opaque background there sits between the user and their room. The
+  ambient layer is hidden outright in a session.
+- **Icons are siblings of labels, never nested.** `applyStaticTranslations()`
+  repaints `[data-i18n]` with `textContent`, which would wipe an icon inside it
+  — hence the `<span class="lbl">` split and `setLabel()`. `setLabel` replaces
+  whatever `svg.ico` is already in the button at any depth; a direct-child
+  search silently appends a *second* icon on every state change.
+
+Fonts (Inter + JetBrains Mono, latin + latin-ext) are **self-hosted** in
+`public/fonts/`, not loaded from the Google CDN — a venue's wifi is exactly
+where a CDN font renders the whole UI in the fallback face.
+
+**The phone header is one row, and it stays one row**: Controls · the modes ·
+Home, and nothing else. Preferences don't belong there — **theme and language
+both live in the Controls panel** (theme as a field beside Language). A second
+header row of toggles cost a third of the viewport above the object, which is
+the thing the user actually came to look at. Two consequences to keep in mind:
+
+- The mode bar's mobile width is sized against the **longest selected label**,
+  which is German "Zusammenbauen"; unselected modes collapse to icons below
+  1180px. Adding a visible mode, or a longer label, will overflow it — check
+  German before assuming it fits.
+- The corner cluster still holds the language toggle for the **home screen**
+  only (`body.home-open`): there is no panel to open there, and a German
+  speaker needs that switch before anything else is reachable. That is why the
+  cluster sits above the home overlay's z-index.
+
 ### Language (`i18n.js`)
 
 The app is **English or German, and strictly one at a time**. The rule the whole
@@ -816,6 +888,14 @@ Then the site is at `https://<owner>.github.io/titanom_hack_2026/`.
   `STRINGS` (i18n.js) behind `t()`; authored model content goes in `modes.js` as
   an `{ en, de }` pair behind `tr()`. Display a part with `partLabel(p)`, match
   it on `p.name`.
+- **No emoji in strings, and no icon markup either.** The dictionary holds
+  words; the picture comes from `icons.js` — `data-icon="mic"` in static markup,
+  `setLabel(el, text, 'mic')` for anything built or relabelled in JS. An emoji
+  inside a translated string renders differently on every platform, can't be
+  recoloured or sized with its label, and has to be repeated per language.
+- **No hard-coded colours in CSS.** Everything is a token in `index.html`'s
+  `:root` / `[data-theme='dark']` blocks, so both themes and the AR overrides
+  stay in one place. A 3D colour that mirrors a token says so in a comment.
 - Always clone materials before mutating per-part visual state.
 - Model paths must use `import.meta.env.BASE_URL` (never a leading `/`) so they
   resolve under the Pages sub-path.

@@ -10,9 +10,9 @@
  *   /scan                 …its camera view
  *   /objects              …its object list
  *   /<model>              an object, at the default mode
- *   /<model>/<mode>       an object in one of the four modes
+ *   /<model>/<mode>       an object in one of its modes
  *
- * e.g. `#/markus-chair/fix`, `#/bicycle/quiz`.
+ * e.g. `#/markus-chair/fix`, `#/bicycle/assemble`.
  *
  * **Why the hash.** There is no server here — a static Vite build served from a
  * GitHub Pages *project sub-path* (`base: './'`). A real path like

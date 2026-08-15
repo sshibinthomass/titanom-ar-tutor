@@ -53,7 +53,9 @@ const ADVANCE_SECONDS = 1.2;  // pause on the completed step before the next pro
 const RING_BASE = 1.35;       // scatter ring radius, in model radii
 const RING_STAGGER = 0.24;    // alternate rows so parts don't overlap
 
-const CARRY_COLOR = 0x4ecdc4;
+// Blue is "the app is pointing at this" everywhere in the app; a carried part
+// and its target slot are exactly that. (Matches --accent / ACCENT_3D.blue.)
+const CARRY_COLOR = 0x5b9dff;
 const REJECT_COLOR = 0xff4444;
 
 // ---- Module state ----------------------------------------------------------

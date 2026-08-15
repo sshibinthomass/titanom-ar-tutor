@@ -164,9 +164,22 @@ export function canonicalName(display) {
 
 // Ids only — the button labels come from the i18n dictionary (`mode.<id>`), so
 // the mode bar re-labels itself on a language switch without touching this list.
+//
+// `hidden` retires a mode from the UI without deleting it, the same way the
+// registry retires a model: no button, and no route (see selectableModes) — but
+// enterQuiz(), resolveQuiz(), every `CONTENT[*].quiz` block and the `quiz.*`
+// strings are all still here and still work. Quiz is hidden because the app is
+// a *repair* tutor: Explore teaches the parts, Fix and Assemble both already
+// test you on them by making you do the thing, and a fourth tab pushed the
+// three that matter into an icons-only row. Dropping the flag brings it back.
 export const MODE_LIST = [
-  { id: 'explore' }, { id: 'fix' }, { id: 'assemble' }, { id: 'quiz' },
+  { id: 'explore' }, { id: 'fix' }, { id: 'assemble' }, { id: 'quiz', hidden: true },
 ];
+
+/** The modes a user can reach — the list minus anything `hidden`. One source for
+ *  both the mode bar and the link vocabulary, so a retired mode can't be reached
+ *  by typing its URL either. */
+export const selectableModes = () => MODE_LIST.filter((m) => !m.hidden);
 
 // ---- Authored content, keyed by model registry id --------------------------
 

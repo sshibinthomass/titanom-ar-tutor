@@ -294,14 +294,33 @@ function eachMaterial(mesh, fn) {
   for (const m of mats) fn(m);
 }
 
-/** Glow a single part on/off. Remembers each material's original emissive. */
-export function setHighlight(part, on, color = 0x4ecdc4) {
+/**
+ * The colour a highlight uses when the caller doesn't name one.
+ *
+ * It is a module-level setting rather than an argument because the *meaning* of
+ * a highlight changes with the mode, not with the call site: in Fix a lit part
+ * is the thing that's wrong (amber), everywhere else it is simply the thing
+ * you're looking at (blue). main.js sets it once per mode; the puzzle keeps
+ * passing its own carry/reject colours and is unaffected.
+ */
+let ACCENT = 0x5b9dff;
+export function setAccentColor(hex) { ACCENT = hex; }
+
+/**
+ * Glow a single part on/off. Remembers each material's original emissive.
+ *
+ * `intensity` is worth passing down for a large part: at full strength the
+ * emissive swamps the texture, so a lit seat reads as a flat amber slab rather
+ * than a seat being pointed at. Small parts (a bolt, a caster) need the full
+ * value to be visible at all.
+ */
+export function setHighlight(part, on, color = null, intensity = 1.6) {
   eachMaterial(part.mesh, (m) => {
     if (!m.emissive) return;
     if (on) {
       if (m.userData._origEmissive === undefined) m.userData._origEmissive = m.emissive.getHex();
-      m.emissive.setHex(color);
-      m.emissiveIntensity = 1.6; // strong glow so it pops on dark materials
+      m.emissive.setHex(color ?? ACCENT);
+      m.emissiveIntensity = intensity;
     } else {
       m.emissive.setHex(m.userData._origEmissive ?? 0x000000);
       m.emissiveIntensity = 1.0;
@@ -411,8 +430,13 @@ export function setDimmed(part, on) {
  * opts.highlight (default true): glow the spotlit parts with an emissive tint.
  * Pass `false` to leave them at their original material so their real texture
  * shows through — the parts still stand out because everything else is drawn as
- * a wireframe ghost. Explore and Fix both do this: the part you are being told
- * about must look like the real thing you are holding, not a teal wash.
+ * a wireframe ghost. Explore does this: the part you are being told about must
+ * look like the real thing you are holding, not a coloured wash.
+ *
+ * opts.intensity lets a caller keep both. Fix spotlights *and* tints, because
+ * amber is how this app says "this is the bit that's wrong" — but at a fraction
+ * of the default strength, so the tint sits over the texture instead of
+ * replacing it. Full strength is for small parts that would otherwise be lost.
  */
 export function isolateParts(parts, indices, opts = {}) {
   const highlight = opts.highlight ?? true;
@@ -420,7 +444,7 @@ export function isolateParts(parts, indices, opts = {}) {
   parts.forEach((p) => { setDimmed(p, false); setHighlight(p, false); });
   if (set.size === 0) return;
   parts.forEach((p, i) => {
-    if (set.has(i)) { if (highlight) setHighlight(p, true); }
+    if (set.has(i)) { if (highlight) setHighlight(p, true, opts.color ?? null, opts.intensity ?? 1.6); }
     else setDimmed(p, true);
   });
 }

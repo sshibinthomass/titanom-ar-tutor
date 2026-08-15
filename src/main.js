@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { buildExplodedView, setExplode, setPartExplode, isolateParts, clearPartStates, setHighlight, setGhostStyle, findParts } from './explode.js';
+import { buildExplodedView, setExplode, setPartExplode, isolateParts, clearPartStates, setHighlight, setGhostStyle, setAccentColor, findParts } from './explode.js';
+import { hydrateIcons, setLabel, iconSvg } from './icons.js';
 import { updateTweens, tweenTo, cancelTween, isTweening, easeInOutCubic, flyToParts, moveCamera } from './animate.js';
 import { attachPicker, attachDragger } from './select.js';
-import { MODE_LIST, resolveFix, resolveAssemble, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest, fixSuggestions, resolvePlanParts, partLabel, canonicalName } from './modes.js';
+import { selectableModes, resolveFix, resolveAssemble, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest, fixSuggestions, resolvePlanParts, partLabel, canonicalName } from './modes.js';
 import { LANGS, getLang, setLang, onLangChange, t, locale, applyStaticTranslations } from './i18n.js';
 import { isARSupported, startAR, updateAR, endAR, requestMove, setInteractor, setManipulationEnabled, setPivotScale, getFitScale } from './ar.js';
 import { startPuzzle, stopPuzzle, updatePuzzle, puzzleInteractor, isPuzzleActive, puzzleAutoPlace, puzzleHintIndices, puzzleStatus, puzzleAnswerByName, puzzleAnswerCandidates } from './puzzle.js';
@@ -99,10 +100,14 @@ renderer.toneMappingExposure = 1.35;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-// Scene backdrop tracks the UI theme (set for real by applyTheme() below);
-// this light default just avoids a first-frame flash before that runs.
-const SCENE_BG = { light: 0xe9ecf1, dark: 0x14161c };
-scene.background = new THREE.Color(SCENE_BG.light);
+// No scene backdrop at all: the canvas is transparent (`alpha: true` above) and
+// the page paints the background — a gradient, a masked dot grid and the tutor's
+// dome glow, all in CSS. A solid `scene.background` would sit *in front* of
+// those and the object would float on a flat slab instead of inside the space.
+// Both themes are therefore handled entirely by the stylesheet; applyTheme()
+// only has to flip the data-theme attribute. AR already expects this — ar.js
+// saves and restores `scene.background` around a session, and null round-trips.
+scene.background = null;
 
 // The "disabled part" wireframe has to stay legible on three very different
 // backdrops, so it is re-coloured per backdrop rather than picking one tint and
@@ -192,8 +197,11 @@ const ui = {
 };
 
 // Paint the static chrome in the selected language before anything else runs,
-// so the first frame is never English-then-German.
+// so the first frame is never English-then-German. Icons are drawn straight
+// after: they live in sibling nodes, so translating a label never disturbs one
+// and this only has to happen once.
 applyStaticTranslations();
+hydrateIcons();
 
 // ---- State -----------------------------------------------------------------
 
@@ -429,7 +437,7 @@ function highlight(index, on) {
   if (!mat || !mat.emissive) return;
   if (on) {
     _origEmissive.set(index, mat.emissive.getHex());
-    mat.emissive.setHex(0x3355ff);
+    mat.emissive.setHex(0x5b9dff);   // --accent: legend hover is the app pointing, not a fault
     mat.emissiveIntensity = 0.8;
   } else {
     mat.emissive.setHex(_origEmissive.get(index) ?? 0x000000);
@@ -607,16 +615,24 @@ function say(text) {
 // Build the mode-switch bar once. The captions come from the dictionary and are
 // re-read on a language switch (relabelModes), so the bar itself is built once
 // and never rebuilt — the buttons keep their listeners and their active state.
-for (const m of MODE_LIST) {
+for (const m of selectableModes()) {
   const btn = document.createElement('button');
   btn.className = 'modebtn';
   btn.dataset.mode = m.id;
-  btn.textContent = t(`mode.${m.id}`);
+  // Icon names match the mode ids one-for-one (icons.js), so a mode added to
+  // MODE_LIST needs an icon of the same name and nothing else here.
+  setLabel(btn, t(`mode.${m.id}`), m.id);
+  // The bar collapses unselected modes to icons on narrower screens, so the
+  // name has to survive somewhere reachable.
+  btn.title = t(`mode.${m.id}`);
   btn.addEventListener('click', () => enterMode(m.id));
   ui.modebar.appendChild(btn);
 }
 function relabelModes() {
-  for (const b of ui.modebar.children) b.textContent = t(`mode.${b.dataset.mode}`);
+  for (const b of ui.modebar.children) {
+    setLabel(b, t(`mode.${b.dataset.mode}`));
+    b.title = t(`mode.${b.dataset.mode}`);
+  }
 }
 
 function setModeButtons(active) {
@@ -633,7 +649,9 @@ function showCard(kicker, bodyHtml, meta = '', { chips = null, nav = false } = {
     for (const c of chips) {
       const el = document.createElement('button');
       el.className = 'chip';
-      el.textContent = c.label;
+      // `icon` is optional: the Fix suggestion chips are authored symptoms, and
+      // giving every symptom the same picture would say nothing.
+      setLabel(el, c.label, c.icon || null);
       el.addEventListener('click', c.onClick);
       ui.cardChips.appendChild(el);
     }
@@ -701,10 +719,29 @@ function flyTo(indices) {
   });
 }
 
+/**
+ * Blue is the app pointing at something; amber is something being *wrong*.
+ *
+ * Fix is the only mode with a fault in it, so it is the only mode that gets to
+ * use amber — on the card (the stylesheet keys off `body[data-mode]`) and on the
+ * object itself (setAccentColor). Keeping the two in step from one place is
+ * what stops the card and the model disagreeing about which colour means what.
+ * Values match --accent / --amber in index.html.
+ */
+const ACCENT_3D = { blue: 0x5b9dff, amber: 0xffbf66 };
+/** How hard Fix tints a spotlit part. Low on purpose, and lower than it looks
+ *  like it should be: emissive adds on top of the material and the renderer's
+ *  1.35 exposure amplifies it, so 0.5 turned a dark grey seat into a flat tan
+ *  slab. At this value the part reads as *warm* and still reads as a seat —
+ *  which it has to, because the gestures play out on it. */
+const FIX_TINT = 0.28;
+
 function enterMode(id) {
   track('mode-switch', { metadata: { mode: id, model: ui.model.value } });
   currentMode = id;
   setModeButtons(id);
+  document.body.dataset.mode = id;                 // the card's colour rule reads this
+  setAccentColor(id === 'fix' ? ACCENT_3D.amber : ACCENT_3D.blue);
   syncRoute();        // every mode is a page; entering one is arriving at it
   cardExplode = null; // drop any stale inline slider before the card is rebuilt
   stopPuzzle();       // before resetParts, which assumes it owns part positions
@@ -766,9 +803,18 @@ function addCardExplodeSlider() {
 let fixState = 'ask';   // 'ask' (waiting for a problem) | 'planning' | 'guided'
 let fixSeq = 0;         // newest fix request wins if two plans race
 
+/**
+ * Fix always opens by *asking*. That question is the mode — you say what's
+ * wrong (or tap a symptom), and only then does it plan and walk you through it.
+ *
+ * It used to skip straight to the authored procedure when DGPT was unreachable,
+ * which quietly changed what the mode *is*: a walkthrough of a repair nobody
+ * asked for, with the suggestions never shown. Without AI the answer to the
+ * question is simply the authored procedure instead of a generated plan (see
+ * startFixRequest) — the same screen, a less specific answer.
+ */
 function enterFix() {
   fixSeq++; // drop any plan still in flight from a previous visit / old part list
-  if (!aiAvailable()) { runAuthoredFix(); return; }
   showFixAsk();
 }
 
@@ -798,8 +844,11 @@ function showFixAsk(lead = '') {
   cancelBeats();
   clearPartStates(parts);
   fixExplode(); // Fix sits at its own spread throughout, including while asking
+  // No icon on these: they are authored symptoms, and the same wrench on each
+  // one would decorate without distinguishing. The chip shape already says
+  // "tappable".
   const chips = fixSuggestions(currentKey()).map((label) => ({
-    label: `🔧 ${label}`,
+    label,
     onClick: () => startFixRequest(label),
   }));
   showCard(
@@ -816,6 +865,15 @@ async function startFixRequest(request) {
   const my = ++fixSeq;
   fixState = 'planning';
   track('fix-request', { input: request, metadata: { model: ui.model.value, lang: getLang() } });
+
+  // No planner to ask: answer with the authored procedure straight away rather
+  // than showing a "planning…" card for a round trip that will never happen.
+  if (!aiAvailable()) {
+    track('fix-plan-fallback', { metadata: { model: ui.model.value, reason: 'no-ai' } });
+    runAuthoredFix();
+    return;
+  }
+
   showCard(kicker('fix'), `<b>“${esc(request)}”</b><span class="partdesc">${t('fix.planning')}</span>`);
   showCaption(esc(t('fix.planningCaption', { request })));
 
@@ -956,11 +1014,12 @@ async function playBeats(preface) {
     // Spotlight follows the sentence. A whole-object beat ("lay the chair on
     // its side") un-ghosts everything first — the chair tipping is the point,
     // and a wireframe chair tipping over reads as nothing at all.
-    // `highlight: false` for the same reason Explore does it: the part you are
-    // about to put a spanner on must look like the real part, not a teal wash —
-    // the ghosted wireframe around it is what makes it stand out.
+    // The tint is amber (see ACCENT_3D) and deliberately weak: the part you are
+    // about to put a spanner on must still look like the real part, so this
+    // warms it rather than repainting it — the ghosted wireframe around it is
+    // still what makes it stand out.
     if (isObjectAction(b.action)) clearPartStates(parts);
-    else isolateParts(parts, b.indices.length ? b.indices : s.indices, { highlight: false });
+    else isolateParts(parts, b.indices.length ? b.indices : s.indices, { intensity: FIX_TINT });
     if (b.indices.length) {
       focusedPart = partLabel(parts[b.indices[0]]); // "what is this?" follows the narration
       flyTo(b.indices);
@@ -990,16 +1049,21 @@ function renderStep(preface = '') {
   const s = steps[stepIndex];
   const stepIndices = s.indices || [];
 
-  // Spotlight this step's part(s) in their real material, ghost the rest.
-  isolateParts(parts, stepIndices, { highlight: false });
+  // Spotlight this step's part(s), ghost the rest. Fix warms its part amber (the
+  // thing that's wrong); any other walkthrough leaves the material alone.
+  isolateParts(parts, stepIndices, modeId === 'fix' ? { intensity: FIX_TINT } : { highlight: false });
   flyTo(stepIndices); // and bring it to the user rather than making them orbit for it
 
   const partName = stepIndices.length ? partLabel(parts[stepIndices[0]]) : null;
   focusedPart = partName;
-  const chips = modeId === 'fix' && aiAvailable()
+  // Not gated on the planner: "something else" only re-asks the question, and
+  // Fix now always has a question to go back to. Without this the no-AI
+  // walkthrough is a one-way street — the suggestions become unreachable the
+  // moment you pick one.
+  const chips = modeId === 'fix'
     ? [
-        { label: t('fix.sayAgain'), onClick: () => renderStep() },
-        { label: t('fix.somethingElse'), onClick: () => { stopSpeaking(); showFixAsk(); } },
+        { label: t('fix.sayAgain'), icon: 'speak', onClick: () => renderStep() },
+        { label: t('fix.somethingElse'), icon: 'mic', onClick: () => { stopSpeaking(); showFixAsk(); } },
       ]
     : null;
   // The spoken script is on the card, one line per beat, and lights up as it is
@@ -1012,14 +1076,17 @@ function renderStep(preface = '') {
     { nav: true, chips }
   );
   ui.stepPrev.disabled = stepIndex === 0;
-  ui.stepNext.textContent = stepIndex === steps.length - 1 ? t('btn.done') : t('btn.next');
+  const last = stepIndex === steps.length - 1;
+  setLabel(ui.stepNext, t(last ? 'btn.done' : 'btn.next'), last ? 'check' : 'next');
   playBeats(preface);
 }
 function goStep(delta) {
   if (!steps.length) return;
-  // 'Done ✔' on the last Fix step closes the plan and asks for the next problem.
+  // 'Done' on the last Fix step closes the plan and asks for the next problem —
+  // the mode's question is where it starts and where it returns to, planner or
+  // no planner. (Without one, the next answer is the authored procedure again.)
   if (delta > 0 && stepIndex === steps.length - 1) {
-    if (stepKicker === 'fix' && aiAvailable()) showFixAsk(t('fix.done'));
+    if (stepKicker === 'fix') showFixAsk(t('fix.done'));
     return;
   }
   stepIndex = Math.max(0, Math.min(steps.length - 1, stepIndex + delta));
@@ -1091,8 +1158,8 @@ function renderPuzzleCard(bodyHtml, meta, done) {
     `${bodyHtml}<div class="progress"><i style="width:${pct}%"></i></div>`,
     meta,
     { chips: [
-      { label: t('assemble.hint'), onClick: puzzleHint },
-      { label: t('assemble.placeForMe'), onClick: () => { track('puzzle-assist'); puzzleAutoPlace(); } },
+      { label: t('assemble.hint'), icon: 'hint', onClick: puzzleHint },
+      { label: t('assemble.placeForMe'), icon: 'place', onClick: () => { track('puzzle-assist'); puzzleAutoPlace(); } },
     ] });
 }
 
@@ -1132,7 +1199,8 @@ function onPuzzleCorrect({ step, assisted }) {
   focusedPart = shown || null;
   playSfx('snap'); // the whole audible reward for a correct drop
   renderPuzzleCard(
-    `<b>${assisted ? '' : '✅ '}${esc(shown)}</b><span class="partdesc">${esc(step.text)}</span>`,
+    // The tick is earned, so it only appears on a placement the learner made.
+    `<b class="named">${assisted ? '' : iconSvg('check')}${esc(shown)}</b><span class="partdesc">${esc(step.text)}</span>`,
     puzzleMeta(),
     puzzleStatus().stepIndex + 1
   );
@@ -1192,8 +1260,8 @@ function onPuzzleComplete({ mistakes, assists }) {
     `<b>${esc(t('assemble.complete', { model: modelLabel() }))}</b><span class="partdesc">${esc(line)}</span>`,
     t('assemble.completeMeta'),
     { chips: [
-      { label: t('assemble.again'), onClick: () => enterMode('assemble') },
-      { label: t('assemble.explore'), onClick: () => enterMode('explore') },
+      { label: t('assemble.again'), icon: 'again', onClick: () => enterMode('assemble') },
+      { label: t('assemble.explore'), icon: 'explore', onClick: () => enterMode('explore') },
     ] }
   );
   say(line);
@@ -1396,8 +1464,8 @@ function renderQuiz() {
   focusedPart = q.indices.length ? partLabel(parts[q.indices[0]]) : focusedPart;
   showCard(kicker('quiz'), esc(q.question), quizMeta(), {
     chips: [
-      { label: t('quiz.reveal'), onClick: revealQuiz },
-      { label: t('quiz.next'), onClick: nextQuiz },
+      { label: t('quiz.reveal'), icon: 'check', onClick: revealQuiz },
+      { label: t('quiz.next'), icon: 'next', onClick: nextQuiz },
     ],
   });
   say(q.question);
@@ -1407,7 +1475,7 @@ function revealQuiz() {
   quizRevealed = true;
   const q = quizItems[quizIndex];
   showCard(kicker('quiz'), `${esc(q.question)}<br><b>${esc(t('quiz.answer', { answer: q.answer }))}</b>`, quizMeta(), {
-    chips: [{ label: t('quiz.next'), onClick: nextQuiz }],
+    chips: [{ label: t('quiz.next'), icon: 'next', onClick: nextQuiz }],
   });
 }
 function nextQuiz() {
@@ -1522,7 +1590,10 @@ async function handleSpeech(text) {
   // content input this mode exists to receive (a suggestion chip, spoken), not a
   // command; it never navigates or switches modes. Speaking again while a plan
   // is still being drafted simply replaces it (fixSeq — newest request wins).
-  if (currentMode === 'fix' && (fixState === 'ask' || fixState === 'planning') && aiAvailable()) {
+  // Not gated on the planner being reachable: the ask screen is shown either
+  // way, so an answer to it has to be accepted either way — startFixRequest
+  // falls back to the authored procedure.
+  if (currentMode === 'fix' && (fixState === 'ask' || fixState === 'planning')) {
     startFixRequest(phrase);
     return;
   }
@@ -1697,7 +1768,7 @@ if (!recognizer) {
 // armed (the VAD is deciding), armed but idle (a hold will be instant).
 function paintMic() {
   const hands = micListening && ui.handsfree.checked;
-  ui.micBtn.textContent = t(micHeld ? 'btn.micHold' : hands ? 'btn.micListening' : 'btn.mic');
+  setLabel(ui.micBtn, t(micHeld ? 'btn.micHold' : hands ? 'btn.micListening' : 'btn.mic'));
   ui.micBtn.classList.toggle('listening', micHeld || hands);
   ui.micBtn.classList.toggle('holding', micHeld);
   ui.micBtn.classList.toggle('armed', micListening && !micHeld && !hands);
@@ -1783,7 +1854,7 @@ let arSupported = true;
   track('ar-support', { metadata: { supported } });
   if (!supported) {
     arSupported = false;
-    ui.startAR.textContent = t('btn.arUnsupported');
+    setLabel(ui.startAR, t('btn.arUnsupported'));
     ui.startAR.disabled = true;
     ui.startAR.title = t('btn.arTitle');
   }
@@ -1864,8 +1935,11 @@ ui.sheetBackdrop.addEventListener('click', () => toggleSheet(false));
 function applyTheme(theme) {
   const dark = theme === 'dark';
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-  scene.background = new THREE.Color(dark ? SCENE_BG.dark : SCENE_BG.light);
-  ui.themeToggle.textContent = t(dark ? 'btn.light' : 'btn.dark');
+  // The backdrop is the stylesheet's job now (see scene.background = null), so
+  // the only 3D thing a theme owes is the ghost wireframe, which has to stay
+  // legible against whichever backdrop it ends up on.
+  // The button offers the theme you'd switch TO, so it shows the other one's icon.
+  setLabel(ui.themeToggle, t(dark ? 'btn.light' : 'btn.dark'), dark ? 'sun' : 'moon');
   applyGhostTheme();
   try { localStorage.setItem('theme', theme); } catch {}
 }
@@ -1894,7 +1968,7 @@ ui.lang.value = getLang();
 // one-tap toggle has to say to be predictable.
 function labelLangToggle() {
   const other = LANGS.find((l) => l.id !== getLang()) || LANGS[0];
-  ui.langToggle.textContent = `🌐 ${other.short}`;
+  setLabel(ui.langToggle, other.short);
   ui.langToggle.dataset.next = other.id;
 }
 labelLangToggle();
@@ -1925,7 +1999,7 @@ onLangChange((next) => {
   applyTheme(isDark() ? 'dark' : 'light');   // re-label the theme button
   paintMic();                        // caption + title, in whichever mic state we're in
   if (!recognizer) ui.micBtn.title = t('btn.micTitle');
-  if (!arSupported) { ui.startAR.textContent = t('btn.arUnsupported'); ui.startAR.title = t('btn.arTitle'); }
+  if (!arSupported) { setLabel(ui.startAR, t('btn.arUnsupported')); ui.startAR.title = t('btn.arTitle'); }
   ui.status.textContent = t(statusKey, statusVars);
   buildLegend();                     // part names are display names
   enterMode(currentMode);            // re-resolve the mode's content in the new language
@@ -2020,7 +2094,9 @@ ui.homeBtn.addEventListener('click', () => goTo({ kind: 'home', view: 'choose' }
 // would blank ui.model.value and leave currentModel() undefined.
 const routeVocab = () => ({
   models: selectableModels().map((o) => o.key),
-  modes: MODE_LIST.map((m) => m.id),
+  // Hidden modes are not link vocabulary either: a bookmark to a retired mode
+  // lands on the default rather than on a screen with no button to leave it by.
+  modes: selectableModes().map((m) => m.id),
   defaultMode: 'explore',
 });
 
@@ -2093,7 +2169,15 @@ function setDocumentTitle(route) {
   document.title = `${modelLabel(MODELS[route.model])} · ${t(`kicker.${route.mode}`)} · ${app}`;
 }
 
-onRouteChange(() => applyRoute(currentRoute(routeVocab())));
+onRouteChange(() => {
+  const route = currentRoute(routeVocab());
+  applyRoute(route);
+  // Boot normalises the URL; so must this, or a link naming something the app no
+  // longer offers — a bookmark to a retired mode, a typo — leaves the address bar
+  // claiming a screen the user isn't on. `replace` fires no hashchange, and
+  // re-applying a route the app is already on is a no-op regardless.
+  navigate(routePath(route), { replace: true });
+});
 
 // ---- Go --------------------------------------------------------------------
 
