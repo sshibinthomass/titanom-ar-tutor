@@ -65,7 +65,7 @@ modules are focused, mostly-pure helpers it calls.
 | [src/ar.js](src/ar.js) | WebXR `immersive-ar` session: hit-test reticle, tap-to-place, long-press to grab then one-finger drag-to-move / pinch scale + twist rotate; voice "move it" re-places on a fresh anchor. Also hands the finger's target ray to an **interactor** (the puzzle). |
 | [src/tts.js](src/tts.js) | Text-to-speech. ElevenLabs primary (streamed via MediaSource so audio starts on the first chunk), browser `speechSynthesis` fallback; race-proof (one voice at a time) and interruptible. |
 | [src/sfx.js](src/sfx.js) | The puzzle's sound cues (snap / reject / dismantle). ElevenLabs **sound generation**, pre-generated + cached; WebAudio synth fallback. |
-| [src/voice.js](src/voice.js) | Mic capture: WebAudio VAD + MediaRecorder → the stt.js provider chain (noise-robust, works on iOS); Web Speech API fallback. Fires barge-in the moment the user speaks. |
+| [src/voice.js](src/voice.js) | Mic capture: MediaRecorder → the stt.js provider chain (works on iOS), bounded either by **push-to-talk** (the default — hold 🎤) or by the opt-in WebAudio **VAD**; Web Speech API fallback. Fires barge-in the moment the user speaks. |
 | [src/stt.js](src/stt.js) | Transcription provider chain: ElevenLabs **Scribe v2** primary (browser-direct, no proxy hop) → DGPT Whisper fallback. |
 | [src/ai.js](src/ai.js) | DeutschlandGPT chat client (OpenAI-compatible `/chat/completions`). |
 | [src/tutor.js](src/tutor.js) | "Brain" glue: classify a spoken phrase into an app command vs. a free-form question, then answer via AI with context. |
@@ -528,23 +528,56 @@ content that mode exists to receive, and neither can navigate or switch modes:
    a question straight back to the question channel, so asking mid-build still
    works and never costs a wrong try.
 
-Capture (`voice.js`) is an always-on pipeline, not the Web Speech API: a
-WebAudio **VAD** (band-limited 300–3400 Hz energy over an adaptive
-minimum-statistics noise floor — steady energy that never dips for ~3 s is
-re-learned as ambient, so a fan or AGC-boosted room tone can't lock the VAD
-in "speech" — with hysteresis + a minimum-duration gate, ticked from an
-AudioWorklet on the audio thread because Chrome throttles JS timers to 1 Hz
-in occluded windows and under battery saver) finds utterances,
-`MediaRecorder` captures them, and the `stt.js` provider chain transcribes
-them: **ElevenLabs Scribe v2** first (`/v1/speech-to-text`, model
-`scribe_v2` via `VITE_ELEVENLABS_STT_MODEL` — browser-direct because
-ElevenLabs serves CORS, so no proxy hop), DGPT Whisper as fallback
-(`ai.transcribe()`, `/v2/audio/transcriptions`, `VITE_DGPT_STT_MODEL`). A
-4xx from Scribe retires it for the session; network errors fall back
-per-utterance. Transcripts that are only an STT filler-hallucination
-("you", "thank you") are dropped. Web Speech survives only as the fallback
-when neither remote STT is configured; otherwise the pipeline works on any
-browser with a mic, iOS Safari included.
+Capture (`voice.js`) is a `MediaRecorder` feeding the `stt.js` provider chain —
+**ElevenLabs Scribe v2** first (`/v1/speech-to-text`, model `scribe_v2` via
+`VITE_ELEVENLABS_STT_MODEL` — browser-direct because ElevenLabs serves CORS, so
+no proxy hop), DGPT Whisper as fallback (`ai.transcribe()`,
+`/v2/audio/transcriptions`, `VITE_DGPT_STT_MODEL`). A 4xx from Scribe retires it
+for the session; network errors fall back per-utterance. Transcripts that are
+only an STT filler-hallucination ("you", "thank you") are dropped. Web Speech
+survives only as the fallback when neither remote STT is configured; otherwise
+the pipeline works on any browser with a mic, iOS Safari included.
+
+**Who decides where an utterance starts and ends** is the part that matters, and
+there are two answers because they fail in opposite ways:
+
+1. **Push-to-talk — the default.** The user holds the 🎤 and the press/release
+   *are* the boundaries. There is nothing to tune and nothing to mis-hear, so a
+   quiet voice, a noisy hall, an AGC-boosted room and a long thinking pause
+   mid-sentence all behave identically. This is what a demo stands on.
+2. **Hands-free — the opt-in** (Controls → *Hands-free mic*, persisted in
+   `localStorage` beside theme and language). A WebAudio **VAD** guesses the
+   boundaries: band-limited 300–3400 Hz energy over an adaptive
+   minimum-statistics noise floor (steady energy that never dips for ~3 s is
+   re-learned as ambient, so a fan or AGC-boosted room tone can't lock it in
+   "speech"), with hysteresis + a minimum-duration gate, ticked from an
+   **AudioWorklet** on the audio thread because Chrome throttles JS timers to
+   1 Hz in occluded windows and under battery saver. It is what keeps the tutor
+   usable with both hands on the object — the case AR exists for — but it is a
+   guess, and a wrong guess halves a sentence or never fires at all.
+
+Both share **one armed mic**, so toggling costs no `getUserMedia` and a hold
+always works even with hands-free on. Rules that hold it together:
+
+- **A press outranks the VAD.** While the button is down, `step()` returns early:
+  the press already stated where speech begins, so continuing to guess could only
+  overrule a fact with an estimate. Only the `MAX_UTTER_MS` runaway cap survives.
+- **One button, two gestures.** Hold = talk. Tap (< `MIC_TAP_MS`) = arm the mic,
+  or mute it if it was already armed. Arming matters: after it, a hold records
+  from the first millisecond instead of waiting on `getUserMedia`. `press()`
+  arms on demand too, so a first-time hold still works — it just loses its
+  opening moment, and the caption says the mic is now ready.
+- **`release()` reports whether it sent**, which is how main.js tells a hold from
+  a tap. It reports `pressFlushed` when the press was already closed by the
+  runaway cap, so a 15-second hold doesn't end by claiming the question vanished.
+- **The button must not be stolen mid-sentence.** `touch-action: none` +
+  `setPointerCapture` keep a hold from being read as a scroll, a selection or a
+  long-press callout; `pointercancel` and `window`'s `blur` close the utterance
+  rather than leaving the recorder open. Space/Enter mirror it for the keyboard.
+- **`beforexrselect` is preventDefault-ed on the button.** It sits in the AR
+  dom-overlay, where a touch also reaches WebXR as a `select` — i.e. tap-to-place
+  or a puzzle drag. A hold lasts seconds, so without this, asking a question
+  re-places the chair.
 
 Answering: `tutor.answerQuestion()` builds a system prompt with the current
 model, its part names, active mode, focused part (resolves "this"/"it"), and
