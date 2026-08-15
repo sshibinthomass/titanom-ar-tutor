@@ -14,6 +14,7 @@ import { createRecognizer } from './voice.js';
 import { answerQuestion, answerDiagnosis, explainNextPart, generateFixPlan, resolveSpokenPart } from './tutor.js';
 import { startFixAnim, stopFixAnim, updateFixAnim, isObjectAction } from './fixanim.js';
 import { aiAvailable } from './ai.js';
+import { initHome, openHome, refreshHome } from './home.js';
 import { initTelemetry, track } from './telemetry.js';
 
 // ---- Model registry --------------------------------------------------------
@@ -56,6 +57,12 @@ const MODELS = {
     credit: 'Office Chair Modern — thethieme, CC-BY-4.0',
     creditUrl: 'https://sketchfab.com/3d-models/office-chair-modern-675f34f7304e4d92812a41e9750539aa',
     defaultMode: 'component', // single fused mesh → must split by connected pieces
+    // Not offered to the user: it is a second chair next to the hero Markus,
+    // which makes both the home picker and the scan's "chair" answer ambiguous
+    // for no teaching value. Kept in the registry (with its authored content in
+    // modes.js) because it is the app's proof that `component` splitting works
+    // on a fused mesh — drop this flag to put it back in the pickers.
+    hidden: true,
   },
   bicycle: {
     label: 'Bicycle',
@@ -177,6 +184,7 @@ const ui = {
   sheetBackdrop: document.getElementById('sheetBackdrop'),
   lang: document.getElementById('lang'),
   langToggle: document.getElementById('langToggle'),
+  homeBtn: document.getElementById('homeBtn'),
 };
 
 // Paint the static chrome in the selected language before anything else runs,
@@ -202,11 +210,19 @@ function modelLabel(m = currentModel()) {
   return (getLang() === 'de' && m?.labelDe) || m?.label || '';
 }
 
+/** The models the user may choose — the registry minus anything `hidden`. One
+ *  list, feeding both the panel's dropdown and the home screen's picker. */
+function selectableModels() {
+  return Object.entries(MODELS)
+    .filter(([, m]) => !m.hidden)
+    .map(([key, m]) => ({ key, label: modelLabel(m) }));
+}
+
 // Populate model dropdown.
-for (const [key, m] of Object.entries(MODELS)) {
+for (const { key, label } of selectableModels()) {
   const opt = document.createElement('option');
   opt.value = key;
-  opt.textContent = modelLabel(m);
+  opt.textContent = label;
   ui.model.appendChild(opt);
 }
 // The <option> captions are re-read on a language switch; the selected value is
@@ -1830,6 +1846,7 @@ onLangChange((next) => {
   relabelModes();
   labelLangToggle();
   relabelModels();
+  refreshHome();                     // the home picker lists model names too
   ui.lang.value = next;
   applyTheme(isDark() ? 'dark' : 'light');   // re-label the theme button
   ui.micBtn.textContent = t(micListening ? 'btn.micListening' : 'btn.mic');
@@ -1878,9 +1895,50 @@ renderer.setAnimationLoop((time, frame) => {
   renderer.render(scene, camera);
 });
 
+// ---- Home screen -----------------------------------------------------------
+// The front door: scan the real object with the camera, or pick from the list.
+// It is an overlay over the live scene, so choosing is just a model load.
+
+/**
+ * Vision label (vision.js's closed set) → model key. `none` is deliberately
+ * absent: an unmapped label is the "couldn't tell" path, and home.js sends the
+ * user back to the picker rather than guessing at a model.
+ *
+ * "chair" lands on the hero Markus, not the office chair — every mode's content
+ * is authored for the Markus, and the office chair is hidden from the pickers
+ * for the same reason.
+ */
+const SCAN_MODELS = {
+  chair: 'markus-chair',
+  bicycle: 'bicycle',
+  bed: 'bed',
+};
+
+initHome({
+  getOptions: selectableModels,
+  scanMap: SCAN_MODELS,
+  onPick: (key) => {
+    if (!MODELS[key] || key === ui.model.value) return; // already loaded: just reveal the scene
+    ui.model.value = key;   // a programmatic set fires no 'change', so load by hand
+    track('model-load', { metadata: { model: key, source: 'home' } });
+    loadModel(key);
+  },
+});
+
+ui.homeBtn.addEventListener('click', () => {
+  stopSpeaking();   // don't let an answer carry on talking over the chooser
+  openHome();
+});
+
 // ---- Go --------------------------------------------------------------------
 
 // Boot straight into the hero IKEA Markus and fetch nothing else — the other
 // models are only loaded when the user actually selects one. Read the value off
 // the dropdown (not DEFAULT_MODEL) so UI and loaded model can never desync.
+//
+// The load starts *behind* the home screen rather than after a choice: the
+// Markus is both the default and the "chair" the scan resolves to, so by the
+// time the user has framed a photo or read the list it is usually already
+// built. Picking anything else just loads it then, exactly as the dropdown does.
 loadModel(ui.model.value);
+openHome();

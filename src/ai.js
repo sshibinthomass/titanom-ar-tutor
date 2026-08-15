@@ -21,6 +21,10 @@ const MODEL = import.meta.env.VITE_DGPT_MODEL || 'claude-4.5-sonnet';
 // speech), so it gets the strongest model; conversational answers stay on the
 // faster default above.
 export const PLAN_MODEL = import.meta.env.VITE_DGPT_PLAN_MODEL || 'claude-opus-5';
+// The home screen's object scan (vision.js) sends an image content part, so this
+// model must be multimodal — the default is, but a deployment that points
+// VITE_DGPT_MODEL at a text-only model needs this override or the scan 400s.
+export const VISION_MODEL = import.meta.env.VITE_DGPT_VISION_MODEL || MODEL;
 // Speech-to-text model for /audio/transcriptions. whisper-1 is verified against
 // the live API; the platform also offers voxtral-mini-2507, chirp-3, scribe_v1/v2.
 const STT_MODEL = import.meta.env.VITE_DGPT_STT_MODEL || 'whisper-1';
