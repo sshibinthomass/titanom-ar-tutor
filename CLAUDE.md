@@ -54,9 +54,9 @@ modules are focused, mostly-pure helpers it calls.
 | [src/puzzle.js](src/puzzle.js) | Assemble's drag-to-build engine: scatter, ghost slots, snap magnetism, reject. Surface-agnostic — driven by a world-space ray. |
 | [src/select.js](src/select.js) | Raycast tap/click part-picking (drag threshold so orbiting ≠ tapping) + the desktop part-dragger. |
 | [src/ar.js](src/ar.js) | WebXR `immersive-ar` session: hit-test reticle, tap-to-place, long-press to grab then one-finger drag-to-move / pinch scale + twist rotate; voice "move it" re-places on a fresh anchor. Also hands the finger's target ray to an **interactor** (the puzzle). |
-| [src/tts.js](src/tts.js) | Text-to-speech. ElevenLabs primary, browser `speechSynthesis` fallback. |
+| [src/tts.js](src/tts.js) | Text-to-speech. ElevenLabs primary, browser `speechSynthesis` fallback; race-proof (one voice at a time) and interruptible. |
 | [src/sfx.js](src/sfx.js) | The puzzle's sound cues (snap / reject / dismantle). ElevenLabs **sound generation**, pre-generated + cached; WebAudio synth fallback. |
-| [src/voice.js](src/voice.js) | Speech-to-text via Web Speech API (`SpeechRecognition`), auto-restarting recognizer. |
+| [src/voice.js](src/voice.js) | Speech-to-text: WebAudio VAD + MediaRecorder → DGPT Whisper (noise-robust, works on iOS); Web Speech API fallback. Fires barge-in the moment the user speaks. |
 | [src/ai.js](src/ai.js) | DeutschlandGPT chat client (OpenAI-compatible `/chat/completions`). |
 | [src/tutor.js](src/tutor.js) | "Brain" glue: classify a spoken phrase into an app command vs. a free-form question, then answer via AI with context. |
 | [src/telemetry.js](src/telemetry.js) | Langfuse tracing. Batches ingestion events to a credential-free proxy (Vite in dev, Worker in prod). No-op when unconfigured. |
@@ -246,16 +246,40 @@ casters too.
 
 ### Voice + AI flow
 
-Mic → `voice.js` transcript → `tutor.classifyCommand()`:
-- **command** (next/back/repeat/reset/explode, or a mode switch, or "explain
-  this") → runs against the current mode in `main.js`.
-- **question** → `tutor.answerQuestion()` builds a system prompt with the current
-  model, its part names, active mode, and focused part, calls DeutschlandGPT, and
-  speaks the ≤2-sentence answer via `tts.speak()`.
+The mic (🎤 Ask) is a **pure question channel** — a spoken phrase is never
+parsed into an app command, so misheard noise can't switch modes or "act on
+its own". Don't reintroduce voice commands; the two strictly-matched
+exceptions in `handleSpeech` (a bare mute phrase, and "move it" inside an AR
+session, which has no button) are deliberate and complete.
 
-`say()` in main.js remembers the last spoken line for the "repeat" command. TTS
-and AI both **degrade gracefully**: no ElevenLabs key → browser speech; no
-DeutschlandGPT → a canned local answer.
+Capture (`voice.js`) is an always-on pipeline, not the Web Speech API: a
+WebAudio **VAD** (band-limited 300–3400 Hz energy over an adaptive noise
+floor, with hysteresis + a minimum-duration gate) finds utterances,
+`MediaRecorder` captures them, and DGPT's Whisper endpoint
+(`ai.transcribe()`, `/v2/audio/transcriptions`, model `whisper-1` via
+`VITE_DGPT_STT_MODEL`) transcribes them. Transcripts that are only a Whisper
+filler-hallucination ("you", "thank you") are dropped. Web Speech survives
+only as the fallback when DGPT is unconfigured; with DGPT the pipeline works
+on any browser with a mic, iOS Safari included.
+
+Answering: `tutor.answerQuestion()` builds a system prompt with the current
+model, its part names, active mode, and focused part (pinned to the selected
+part in Explore), calls DeutschlandGPT, and speaks the ≤2-sentence answer via
+`tts.speak()`.
+
+**Nothing ever overlaps.** Three interlocking guards — don't regress them:
+1. **Barge-in**: the VAD's `onSpeechStart` fires the instant the user talks
+   and main.js stops TTS, so the user can always interrupt an answer. While
+   TTS is audible the VAD demands more sustained energy (`isTtsSpeaking`), so
+   speaker bleed the echo canceller misses can't self-trigger; getUserMedia
+   requests `echoCancellation` + `noiseSuppression` + `autoGainControl`.
+2. **`speak()` is race-proof**: a generation token discards any utterance
+   superseded while its ElevenLabs audio was still being generated.
+3. **Newest question wins**: `handleSpeech` drops an answer if a newer
+   question arrived (`askSeq`) or the user is mid-utterance (`isCapturing`).
+
+TTS, STT and AI all **degrade gracefully**: no ElevenLabs key → browser
+speech; no DeutschlandGPT → Web Speech recognition + a canned local answer.
 
 ### Telemetry (`telemetry.js`)
 

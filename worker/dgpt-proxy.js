@@ -7,8 +7,9 @@
  * Worker secrets, so no key ever reaches the browser.
  *
  * Routes (by path):
- *   /langfuse/*  → https://cloud.langfuse.com/*   (Basic auth = public:secret)
- *   everything else → DeutschlandGPT chat completions (Bearer key)
+ *   /langfuse/*             → https://cloud.langfuse.com/*   (Basic auth = public:secret)
+ *   /audio/transcriptions   → DeutschlandGPT Whisper STT (multipart passthrough)
+ *   everything else         → DeutschlandGPT chat completions (Bearer key)
  *
  * Deploy:
  *   cd worker
@@ -59,12 +60,30 @@ export default {
       });
     }
 
-    // ── DeutschlandGPT (default) ──────────────────────────────────────────
     // Prefer the Worker's own secret key; fall back to a client-sent header.
     const auth = env.DGPT_API_KEY
       ? `Bearer ${env.DGPT_API_KEY}`
       : request.headers.get('Authorization') || '';
 
+    // ── DeutschlandGPT speech-to-text (Whisper) ───────────────────────────
+    // Multipart passthrough: keep the client's Content-Type (it carries the
+    // multipart boundary) and forward the body bytes untouched.
+    if (url.pathname.startsWith('/audio/')) {
+      const upstream = await fetch(`https://api.deutschlandgpt.de/v2${url.pathname}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': request.headers.get('Content-Type') || 'application/octet-stream',
+          Authorization: auth,
+        },
+        body: await request.arrayBuffer(),
+      });
+      return new Response(await upstream.text(), {
+        status: upstream.status,
+        headers: { ...CORS, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // ── DeutschlandGPT chat (default) ─────────────────────────────────────
     const upstream = await fetch('https://api.deutschlandgpt.de/v2/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: auth },

@@ -16,10 +16,48 @@ const BASE_ENV = import.meta.env.VITE_DGPT_BASE_URL;
 const BASE = (BASE_ENV || (import.meta.env.DEV ? '/dgpt-api' : 'https://api.deutschlandgpt.de/v2')).replace(/\/$/, '');
 const KEY = import.meta.env.VITE_DGPT_API_KEY;
 const MODEL = import.meta.env.VITE_DGPT_MODEL || 'claude-4.5-sonnet';
+// Speech-to-text model for /audio/transcriptions. whisper-1 is verified against
+// the live API; the platform also offers voxtral-mini-2507, chirp-3, scribe_v1/v2.
+const STT_MODEL = import.meta.env.VITE_DGPT_STT_MODEL || 'whisper-1';
 
 // Available if we have a key, or a custom endpoint (proxy/Worker) that adds auth itself.
 export function aiAvailable() {
   return !!(KEY || BASE_ENV);
+}
+
+// STT rides the same key/proxy as chat, so availability is the same question.
+export function sttAvailable() {
+  return aiAvailable();
+}
+
+/**
+ * Transcribe a recorded utterance (a Blob from MediaRecorder) via the
+ * OpenAI-compatible Whisper endpoint. Returns the transcript text ('' if the
+ * clip contained no speech). The filename extension matters: the server sniffs
+ * the container from it, so pass one that matches the recorder's mime type.
+ */
+export async function transcribe(blob, { filename = 'utterance.webm', trace = null } = {}) {
+  if (!aiAvailable()) throw new Error('DeutschlandGPT not configured (set VITE_DGPT_API_KEY)');
+  const form = new FormData();
+  form.append('file', blob, filename);
+  form.append('model', STT_MODEL);
+  const startTime = new Date().toISOString();
+  // No manual Content-Type — the browser must set the multipart boundary itself.
+  const res = await fetch(`${BASE}/audio/transcriptions`, {
+    method: 'POST',
+    headers: { ...(KEY ? { Authorization: `Bearer ${KEY}` } : {}) },
+    body: form,
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    const msg = `DeutschlandGPT STT ${res.status}: ${body.slice(0, 200)}`;
+    trace?.generation({ name: 'stt', model: STT_MODEL, startTime, level: 'ERROR', statusMessage: msg });
+    throw new Error(msg);
+  }
+  const data = await res.json();
+  const text = (data.text || '').trim();
+  trace?.generation({ name: 'stt', model: STT_MODEL, output: text, startTime });
+  return text;
 }
 
 /**

@@ -1,16 +1,16 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { buildExplodedView, setExplode, setPartExplode, isolateParts, clearPartStates, setHighlight, findParts } from './explode.js';
+import { buildExplodedView, setExplode, setPartExplode, isolateParts, clearPartStates, setHighlight } from './explode.js';
 import { updateTweens, tweenTo, cancelTween, isTweening, easeInOutCubic, flyToParts, moveCamera } from './animate.js';
 import { attachPicker, attachDragger } from './select.js';
 import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames, knowledgeDigest, describePart } from './modes.js';
 import { isARSupported, startAR, updateAR, endAR, requestMove, setInteractor, setManipulationEnabled, setPivotScale, getFitScale } from './ar.js';
 import { startPuzzle, stopPuzzle, updatePuzzle, puzzleInteractor, isPuzzleActive, puzzleAutoPlace, puzzleHintIndices, puzzleStatus } from './puzzle.js';
-import { speak, stop as stopSpeaking } from './tts.js';
+import { speak, stop as stopSpeaking, isSpeaking } from './tts.js';
 import { primeSfx, playSfx } from './sfx.js';
-import { createRecognizer, speechRecognitionAvailable } from './voice.js';
-import { classifyCommand, answerQuestion, looksLikeQuestion, answerDiagnosis, explainNextPart } from './tutor.js';
+import { createRecognizer } from './voice.js';
+import { answerQuestion, answerDiagnosis, explainNextPart } from './tutor.js';
 import { initTelemetry, track } from './telemetry.js';
 
 // ---- Model registry --------------------------------------------------------
@@ -506,15 +506,13 @@ let quizItems = [];    // quiz: [{ index, question, answer }]
 let quizIndex = 0;
 let quizRevealed = false;
 let focusedPart = null; // name of the currently highlighted part (for the tutor)
-let lastSpoken = '';    // for the "repeat" voice command
 let cardExplode = null; // Explore card's inline explode slider { slider, val }, or null
 
 function currentKey() { return ui.model.value; }
 
-// Speak text via ElevenLabs (with fallback) and remember it for "repeat".
+// Speak text via ElevenLabs (with fallback).
 function say(text) {
   if (!text) return;
-  lastSpoken = text;
   speak(text);
 }
 
@@ -957,217 +955,62 @@ function showCaption(html) {
   showCaption._t = setTimeout(() => ui.voiceCaption.classList.remove('show'), 7000);
 }
 
-async function explainFocused() {
-  const q = focusedPart ? `What is the ${focusedPart} and how do I service it?` : 'What am I looking at?';
-  showCaption('…thinking');
-  // In Explore, keep "explain this" scoped to the one selected part.
-  const ans = await answerQuestion(getContext(), q, { focusOnly: currentMode === 'explore' });
-  showCaption(ans);
-  say(ans);
-}
+const ASK_HINT = 'Ask me anything about it — I answer out loud. Start talking to interrupt an answer.';
 
-/**
- * Explore mode is the "ask about a part" flow: a spoken phrase either selects a
- * part (a bare name or "show me the seat") or asks a question about the part
- * already selected — answered by DeutschlandGPT constrained to that part only,
- * then spoken via ElevenLabs. A question is never swallowed as a re-select.
- */
-async function handleExploreSpeech(text) {
-  const asking = looksLikeQuestion(text);
+// The mic is a **question channel, nothing else**: a spoken phrase never drives
+// the app (no mode switches, no "next", no part selection). Misheard noise used
+// to turn into commands and the app would "act on its own" — that's gone. Two
+// deliberate, strictly-matched exceptions survive because they have no button
+// equivalent: silencing the tutor mid-answer, and re-placing the model in AR.
+const MUTE_RE = /^\s*(stop|stopp|be quiet|quiet|shut up|silence|stop talking|stop speaking)[.!\s]*$/i;
+const MOVE_RE = /\b(move|reposition)\b/i;
 
-  // Not a question → treat as a selection ("gas cylinder", "show me the seat").
-  if (!asking && selectPartByName(text)) {
-    showCaption(`“${text}”`);
-    track('voice-intent', { input: text, metadata: { kind: 'part-select', part: focusedPart } });
-    return;
-  }
-
-  // A question, but nothing selected yet: if it names a part, select that one so
-  // we have something to answer about; otherwise nudge the user to pick a part.
-  if (!(selectedPart >= 0 && focusedPart)) {
-    if (!selectPartByName(text)) {
-      const hint = 'Tap a part first, then ask me anything about it.';
-      showCaption(hint);
-      say(hint);
-      return;
-    }
-  }
-
-  // Answer strictly about the selected part — and nothing else.
-  showCaption(`“${text}” · …thinking`);
-  const ans = await answerQuestion(getContext(), text, { focusOnly: true });
-  showCaption(ans);
-  say(ans);
-  track('voice-question', { input: text, metadata: { kind: 'part-question', part: focusedPart } });
-}
-
-// Flip a checkbox and fire its change listeners (so wireframe/tint/autorotate
-// behave exactly as if the user clicked them). `on` undefined → toggle.
-function setToggle(el, on) {
-  el.checked = on === undefined ? !el.checked : !!on;
-  el.dispatchEvent(new Event('change'));
-}
-
-// Reframe the camera + collapse the explode (same as the Reset-view button).
-function recenterView() {
-  setExplodeAmount(0, { animate: true });
-  homeView({ animate: true });
-}
-
-// Highlight a part the user named out loud. Returns true if one matched.
-function selectPartByName(text) {
-  const t = text.toLowerCase();
-  const names = [...new Set(parts.map((p) => (p.name || '').toLowerCase()).filter(Boolean))];
-  // Prefer a full-name hit ("gas cylinder"); fall back to a significant token
-  // ("cylinder", "backrest") so partial phrases still land. Longest match wins.
-  let best = null;
-  for (const name of names) {
-    if (t.includes(name) && (!best || name.length > best.key.length)) best = { name, key: name };
-    for (const tok of name.split(/\s+/)) {
-      if (tok.length >= 3 && new RegExp(`\\b${tok}\\b`).test(t) && (!best || tok.length > best.key.length)) {
-        best = { name, key: tok };
-      }
-    }
-  }
-  if (!best) return false;
-
-  const indices = findParts(parts, [best.name]);
-  if (!indices.length) return false;
-  selectedPart = indices[0];
-  isolateParts(parts, indices, { highlight: false }); // match the tap: fully textured, rest ghosted
-  focusedPart = parts[indices[0]].name;
-  showCard('Explore', `<b>${parts[indices[0]].name}</b>`, `${indices.length > 1 ? indices.length + ' pieces' : parts[indices[0]].triangleCount.toLocaleString() + ' triangles'} · say “explain this” for detail`);
-  say(parts[indices[0]].name);
-  return true;
-}
-
-// Switch the active model when the user names one out loud. Returns true if handled.
-// Order matters: the first key whose keyword appears wins, so the secondary
-// office chair claims its multi-word phrases before the hero takes bare "chair".
-const MODEL_KEYWORDS = {
-  'office-chair': ['office chair', 'other chair', 'modern chair'],
-  'markus-chair': ['markus', 'ikea', 'the chair', 'chair'],
-  bicycle: ['bicycle', 'bike', 'cycle'],
-  bed: ['bed'],
-};
-function switchModelByVoice(text) {
-  const t = text.toLowerCase();
-  const hasVerb = /(load|switch|change|open|go to|select|bring up|give me|show me|display|put up)/.test(t);
-  const short = t.split(/\s+/).length <= 3; // a bare "bicycle" is intent enough
-  for (const [key, words] of Object.entries(MODEL_KEYWORDS)) {
-    if (words.some((w) => t.includes(w))) {
-      if (key === ui.model.value) { showCaption(`Already on the ${currentModel().label}.`); return true; }
-      if (!hasVerb && !short) return false; // "the chair squeaks" shouldn't switch models
-      ui.model.value = key;
-      ui.model.dispatchEvent(new Event('change'));
-      showCaption(`Loading the ${MODELS[key].label}…`);
-      say(`Here is the ${MODELS[key].label}.`);
-      return true;
-    }
-  }
-  return false;
-}
-
-// Diagnose mode: match a spoken symptom to one of the authored symptom chips.
-function pickSymptomByVoice(text) {
-  if (currentMode !== 'diagnose' || !diagnoses.length) return false;
-  const t = text.toLowerCase();
-  for (let i = 0; i < diagnoses.length; i++) {
-    if (diagnoses[i].symptoms.some((s) => t.includes(s.toLowerCase()))) { showDiagnosis(i); return true; }
-  }
-  return false;
-}
-
-// Quiz mode: did the spoken phrase contain the answer? Reveal + react.
-function answerQuizByVoice(text) {
-  if (currentMode !== 'quiz' || !quizItems.length || quizRevealed) return false;
-  const q = quizItems[quizIndex];
-  const key = String(q.answer).toLowerCase().replace(/^the\s+/, '').split(/[\s(]+/)[0];
-  if (key.length >= 3 && text.toLowerCase().includes(key)) {
-    revealQuiz();
-    say(`Correct — it's ${q.answer}.`);
-    return true;
-  }
-  return false;
-}
-
-const HELP_LINE = 'Try: “next”, “back”, “repeat”, “explode”, “put it together”, “fix it”, “quiz me”, “diagnose”, “show me the seat”, “load the bicycle”, “start AR”, or ask any question.';
-
-// Execute a parsed (model-independent) voice command.
-async function runCommand(cmd) {
-  if (cmd.mode) { enterMode(cmd.mode); return; }
-  switch (cmd.action) {
-    case 'next':
-      // In the puzzle there is nothing to skip to — "next" means "do it for me".
-      if (isPuzzleActive()) { track('puzzle-assist', { metadata: { via: 'voice' } }); puzzleAutoPlace(); }
-      else if (currentMode === 'fix') goStep(1);
-      else if (currentMode === 'quiz') nextQuiz();
-      break;
-    case 'back':
-      if (isPuzzleActive()) puzzleHint();   // no going back mid-build; offer the hint instead
-      else if (currentMode === 'fix') goStep(-1);
-      break;
-    case 'repeat': say(lastSpoken); break;
-    case 'reset': enterMode(currentMode); break;
-    case 'explode':
-      setExplodeAmount(parseFloat(ui.explode.max) * (cmd.amount || 1), { animate: true, duration: 1100 });
-      break;
-    case 'collapse': setExplodeAmount(0, { animate: true, duration: 1100 }); break;
-    case 'recenter': recenterView(); break;
-    case 'reveal': if (currentMode === 'quiz') revealQuiz(); break;
-    case 'wireframe': setToggle(ui.wireframe, cmd.value); break;
-    case 'tint': setToggle(ui.tint, cmd.value); break;
-    case 'autorotate': setToggle(ui.autorotate, cmd.value); break;
-    case 'startAR': await startARFlow(); break;
-    case 'exitAR': await endAR(); break;
-    case 'move': moveARFlow(); break;
-    case 'stopSpeaking': stopSpeaking(); break;
-    case 'stopListening': recognizer?.stop(); showCaption('Mic off. Tap 🎤 to talk again.'); break;
-    case 'help': showCaption(HELP_LINE); say('You can say next, back, explode, fix it, quiz me, diagnose, show me a part, load a different model, or ask me any question.'); break;
-    case 'explain': await explainFocused(); break;
-    default: break;
-  }
-}
+let askSeq = 0; // newest question wins: older in-flight answers are dropped
 
 async function handleSpeech(text) {
-  const cmd = classifyCommand(text);
-  if (cmd.type === 'command') {
-    showCaption(`“${text}”`);
-    track('voice-command', { input: text, metadata: { action: cmd.action || null, mode: cmd.mode || null } });
-    await runCommand(cmd);
+  const t = text.trim();
+  if (!t) return;
+
+  if (MUTE_RE.test(t)) { stopSpeaking(); showCaption('Okay — ask away.'); track('voice-mute', { input: t }); return; }
+  // AR-only: "move it" re-enters placement — voice is the only way (see moveARFlow).
+  if (renderer.xr.isPresenting && t.split(/\s+/).length <= 4 && MOVE_RE.test(t)) {
+    moveARFlow();
+    track('voice-move', { input: t });
     return;
   }
 
-  // Not a global command — try the data-driven intents that need the live
-  // model/part/symptom lists, in order of specificity, before falling back to AI.
-  if (pickSymptomByVoice(text)) { showCaption(`“${text}”`); track('voice-intent', { input: text, metadata: { kind: 'symptom' } }); return; }
-  if (answerQuizByVoice(text)) { showCaption(`“${text}”`); track('voice-intent', { input: text, metadata: { kind: 'quiz-answer' } }); return; }
-  if (switchModelByVoice(text)) { track('voice-intent', { input: text, metadata: { kind: 'model-switch' } }); return; }
-
-  // Explore is the dedicated "ask about a part" mode — select vs. ask is decided
-  // there, and answers are pinned to the selected part.
-  if (currentMode === 'explore') { await handleExploreSpeech(text); return; }
-
-  // Other modes: an explicit "show me X" navigation phrase can still highlight a
-  // part; anything else is a general question about the whole object.
-  const wantsPart = /(show|highlight|select|isolate|where|find|point to|light up|take me to|look at|focus on|which is)/.test(text.toLowerCase());
-  if (wantsPart && selectPartByName(text)) { showCaption(`“${text}”`); track('voice-intent', { input: text, metadata: { kind: 'part-select', part: focusedPart } }); return; }
-
-  showCaption(`“${text}” · …thinking`);
-  const ans = await answerQuestion(getContext(), cmd.text);
+  const my = ++askSeq;
+  showCaption(`“${t}” · …thinking`);
+  track('voice-question', { input: t, metadata: { mode: currentMode, part: focusedPart } });
+  // In Explore with a part selected, pin the answer to that part — that's the
+  // thing the user is asking about. Otherwise answer about the whole object.
+  const scoped = currentMode === 'explore' && selectedPart >= 0 && !!focusedPart;
+  const ans = await answerQuestion(getContext(), t, { focusOnly: scoped });
+  if (my !== askSeq) return;             // a newer question superseded this answer
+  if (recognizer?.isCapturing()) return; // the user is mid-question — never talk over them
   showCaption(ans);
   say(ans);
 }
 
 const recognizer = createRecognizer({
-  lang: 'en-US',
   onResult: handleSpeech,
+  // Barge-in: the instant the user starts talking, the tutor yields — their next
+  // question must never compete with a half-finished answer.
+  onSpeechStart: () => stopSpeaking(),
+  // Lets the VAD demand more sustained energy while the tutor is audible, so
+  // speaker bleed the echo canceller misses can't trigger a false barge-in.
+  isTtsSpeaking: isSpeaking,
+  onStatus: (phase) => { if (phase === 'transcribing') showCaption('🎧 …'); },
+  onError: (msg) => showCaption(msg),
   onStateChange: (listening) => {
     ui.micBtn.classList.toggle('listening', listening);
     ui.micBtn.textContent = listening ? '🎤 Listening…' : '🎤 Ask';
   },
 });
-if (!recognizer) { ui.micBtn.disabled = true; ui.micBtn.title = 'Voice input needs Chrome'; }
+if (!recognizer) {
+  ui.micBtn.disabled = true;
+  ui.micBtn.title = 'Voice needs a microphone plus a DeutschlandGPT key (or Chrome).';
+}
 ui.micBtn.addEventListener('click', () => {
   if (!recognizer) return;
   stopSpeaking();
@@ -1175,7 +1018,7 @@ ui.micBtn.addEventListener('click', () => {
     recognizer.stop();
   } else {
     recognizer.start();
-    showCaption(HELP_LINE); // once listening, everything below is voice-drivable
+    showCaption(ASK_HINT);
   }
 });
 

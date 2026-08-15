@@ -33,6 +33,8 @@ jobs:
           VITE_DGPT_BASE_URL: ${{ secrets.VITE_DGPT_BASE_URL }}
           VITE_DGPT_API_KEY: ${{ secrets.VITE_DGPT_API_KEY }}
           VITE_DGPT_MODEL: ${{ secrets.VITE_DGPT_MODEL }}
+          # Mic speech-to-text model; empty falls back to whisper-1 in code.
+          VITE_DGPT_STT_MODEL: ${{ secrets.VITE_DGPT_STT_MODEL }}
           # Only the Worker's /langfuse URL is bundled — the Langfuse keys
           # themselves live as Worker secrets, never in the client bundle.
           VITE_LANGFUSE_BASE_URL: ${{ secrets.VITE_LANGFUSE_BASE_URL }}
