@@ -166,15 +166,13 @@ const STRINGS = {
   'mode.explore':       { en: '🔍 Explore',                 de: '🔍 Erkunden' },
   'mode.fix':           { en: '🔧 Fix',                     de: '🔧 Reparieren' },
   'mode.assemble':      { en: '🧩 Assemble',                de: '🧩 Zusammenbauen' },
-  'mode.quiz':          { en: '❓ Quiz',                     de: '❓ Quiz' },
 
-  // Card kickers: the same four names without the emoji. Kept separate from
+  // Card kickers: the same three names without the emoji. Kept separate from
   // `mode.*` because the card header is typographic (small caps, no icon) and
   // because main.js keys its mode logic on the id, never on this label.
   'kicker.explore':     { en: 'Explore',                    de: 'Erkunden' },
   'kicker.fix':         { en: 'Fix',                        de: 'Reparieren' },
   'kicker.assemble':    { en: 'Assemble',                   de: 'Zusammenbauen' },
-  'kicker.quiz':        { en: 'Quiz',                       de: 'Quiz' },
 
   // -- Explore ---------------------------------------------------------------
   'explore.intro':      { en: 'Tap any part to isolate it, then tap 🎤 and ask about it. Drag the slider to spread the parts apart.',
@@ -245,14 +243,6 @@ const STRINGS = {
   'assemble.fallbackText': { en: 'Attach the next part: {part}.', de: 'Bring das nächste Teil an: {part}.' },
   'assemble.genericTitle': { en: 'Assemble from parts',     de: 'Aus Einzelteilen zusammenbauen' },
   'assemble.title':     { en: 'Assemble the chair',         de: 'Den Stuhl zusammenbauen' },
-
-  // -- Quiz ------------------------------------------------------------------
-  'quiz.reveal':        { en: 'Reveal answer',              de: 'Antwort zeigen' },
-  'quiz.next':          { en: 'Next question ▶',            de: 'Nächste Frage ▶' },
-  'quiz.counter':       { en: 'Question {index} of {total}', de: 'Frage {index} von {total}' },
-  'quiz.answer':        { en: 'Answer: {answer}',           de: 'Antwort: {answer}' },
-  'quiz.none':          { en: 'No quiz authored for this model yet.',
-                          de: 'Für dieses Modell gibt es noch kein Quiz.' },
 
   // -- Voice -----------------------------------------------------------------
   'voice.askHint':      { en: 'Ask me anything about it — I answer out loud. Start talking to interrupt an answer.',

@@ -4,7 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { buildExplodedView, setExplode, setPartExplode, isolateParts, clearPartStates, setHighlight, setGhostStyle, findParts } from './explode.js';
 import { updateTweens, tweenTo, cancelTween, isTweening, easeInOutCubic, flyToParts, moveCamera } from './animate.js';
 import { attachPicker, attachDragger } from './select.js';
-import { MODE_LIST, resolveFix, resolveAssemble, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest, fixSuggestions, resolvePlanParts, partLabel, canonicalName } from './modes.js';
+import { MODE_LIST, resolveFix, resolveAssemble, applyNames, knowledgeDigest, partInfoDigest, fixSuggestions, resolvePlanParts, partLabel, canonicalName } from './modes.js';
 import { LANGS, getLang, setLang, onLangChange, t, locale, applyStaticTranslations } from './i18n.js';
 import { isARSupported, startAR, updateAR, endAR, requestMove, setInteractor, setManipulationEnabled, setPivotScale, getFitScale } from './ar.js';
 import { startPuzzle, stopPuzzle, updatePuzzle, puzzleInteractor, isPuzzleActive, puzzleAutoPlace, puzzleHintIndices, puzzleStatus, puzzleAnswerByName, puzzleAnswerCandidates } from './puzzle.js';
@@ -486,8 +486,8 @@ function setExplodeAmount(amount, { animate = false, duration = 700 } = {}) {
     onExplodeChange();
     return;
   }
-  // Already there (e.g. Explore → Quiz, both at the same spread): don't collapse
-  // and re-expand for nothing.
+  // Already there (re-entering the mode you are already in): don't collapse and
+  // re-expand for nothing.
   if (Math.abs(to - from) < 1e-4) return;
 
   const n = parts.length;
@@ -589,9 +589,6 @@ let steps = [];        // fix / assemble: [{ index, text }]
 let stepIndex = 0;
 let stepTitle = '';
 let stepKicker = '';
-let quizItems = [];    // quiz: [{ index, question, answer }]
-let quizIndex = 0;
-let quizRevealed = false;
 let focusedPart = null; // name of the currently highlighted part (for the tutor)
 let cardExplode = null; // Explore card's inline explode slider { slider, val }, or null
 
@@ -649,18 +646,13 @@ function showCard(kicker, bodyHtml, meta = '', { chips = null, nav = false } = {
 function hideCard() { ui.card.classList.remove('show'); }
 
 // Reset all part visuals to a clean, fully-assembled, fully-visible state.
-// The collapse animates, but a mode that immediately re-spreads (Fix, Quiz)
-// replaces the tween before it ticks, so there's no collapse-then-expand
-// flicker on the way in — see setExplodeAmount's no-op guard.
+// The collapse animates, but Fix immediately re-spreads and replaces the tween
+// before it ticks, so there's no collapse-then-expand flicker on the way in —
+// see setExplodeAmount's no-op guard.
 function resetParts() {
   clearPartStates(parts);
   for (const p of parts) p.mesh.visible = true;
   setExplodeAmount(0, { animate: true });
-}
-
-// Spread parts a little so the highlighted one is easy to see in a procedure.
-function mildExplode() {
-  setExplodeAmount(parseFloat(ui.explode.max) * 0.35, { animate: true });
 }
 
 /**
@@ -716,7 +708,6 @@ function enterMode(id) {
   if (id === 'explore') return enterExplore();
   if (id === 'fix') return enterFix();
   if (id === 'assemble') return enterAssemble();
-  if (id === 'quiz') return enterQuiz();
 }
 
 // The card header for a mode. `stepKicker` holds the mode **id**, never this
@@ -1376,44 +1367,6 @@ function puzzleHint() {
   track('puzzle-hint');
 }
 
-// --- Quiz: highlight a part, ask you to name it ---
-function enterQuiz() {
-  quizItems = resolveQuiz(currentKey(), parts);
-  quizIndex = 0;
-  mildExplode();
-  if (!quizItems.length) { showCard(kicker('quiz'), t('quiz.none')); return; }
-  renderQuiz();
-}
-function quizMeta() {
-  return t('quiz.counter', { index: quizIndex + 1, total: quizItems.length });
-}
-function renderQuiz() {
-  const q = quizItems[quizIndex];
-  quizRevealed = false;
-  isolateParts(parts, q.indices);
-  flyTo(q.indices); // the part being asked about has to be visible to be answerable
-  focusedPart = q.indices.length ? partLabel(parts[q.indices[0]]) : focusedPart;
-  showCard(kicker('quiz'), esc(q.question), quizMeta(), {
-    chips: [
-      { label: t('quiz.reveal'), onClick: revealQuiz },
-      { label: t('quiz.next'), onClick: nextQuiz },
-    ],
-  });
-  say(q.question);
-}
-function revealQuiz() {
-  if (quizRevealed) return;
-  quizRevealed = true;
-  const q = quizItems[quizIndex];
-  showCard(kicker('quiz'), `${esc(q.question)}<br><b>${esc(t('quiz.answer', { answer: q.answer }))}</b>`, quizMeta(), {
-    chips: [{ label: t('quiz.next'), onClick: nextQuiz }],
-  });
-}
-function nextQuiz() {
-  quizIndex = (quizIndex + 1) % quizItems.length;
-  renderQuiz();
-}
-
 // --- Part picking (tap) — behaviour depends on the active mode ---
 attachPicker(renderer, camera, () => parts, (index) => {
   if (currentMode === 'explore') {
@@ -1437,10 +1390,6 @@ attachPicker(renderer, camera, () => parts, (index) => {
       focusedPart = null;
       showCard(kicker('explore'), t('explore.intro'), t('explore.partCount', { count: parts.length }));
     }
-  }
-  else if (currentMode === 'quiz' && index >= 0) {
-    // Tapping a part in quiz mode is a shortcut to reveal.
-    revealQuiz();
   }
 });
 

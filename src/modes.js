@@ -165,7 +165,7 @@ export function canonicalName(display) {
 // Ids only — the button labels come from the i18n dictionary (`mode.<id>`), so
 // the mode bar re-labels itself on a language switch without touching this list.
 export const MODE_LIST = [
-  { id: 'explore' }, { id: 'fix' }, { id: 'assemble' }, { id: 'quiz' },
+  { id: 'explore' }, { id: 'fix' }, { id: 'assemble' },
 ];
 
 // ---- Authored content, keyed by model registry id --------------------------
@@ -208,24 +208,6 @@ const CONTENT = {
       { symptom: { en: 'Wheel wobbles', de: 'Laufrad eiert' },
         text: { en: 'A wobble is a wheel out of true — a bent rim or loose spokes. Highlighted is the wheel.',
                 de: 'Ein eierndes Laufrad hat einen Höhen- oder Seitenschlag — verzogene Felge oder lose Speichen. Hervorgehoben ist das Laufrad.' } },
-    ],
-    quiz: [
-      { match: ['frame'],
-        question: { en: 'Name this central triangular structure everything bolts to.',
-                    de: 'Wie heißt diese zentrale Dreiecksstruktur, an der alles verschraubt ist?' },
-        answer: { en: 'frame', de: 'der Rahmen' } },
-      { match: ['tire', 'tyre', 'rubber'],
-        question: { en: 'What is this round part that grips the road?',
-                    de: 'Wie heißt dieses runde Teil, das auf der Straße greift?' },
-        answer: { en: 'tyre', de: 'der Reifen' } },
-      { match: ['seat', 'saddle'],
-        question: { en: 'What do you sit on — what is this called?',
-                    de: 'Worauf sitzt du — wie heißt dieses Teil?' },
-        answer: { en: 'saddle', de: 'der Sattel' } },
-      { match: ['chain'],
-        question: { en: 'What transfers your pedalling to the rear wheel?',
-                    de: 'Was überträgt deine Tretbewegung auf das Hinterrad?' },
-        answer: { en: 'chain', de: 'die Kette' } },
     ],
   },
 
@@ -318,20 +300,6 @@ const CONTENT = {
         text: { en: 'A seat that rocks but does not sink is loose seat-plate bolts between the cushion and the tilt mechanism. Flip the chair and tighten the four mounting bolts. Highlighted is the seat.',
                 de: 'Ein Sitz, der wackelt, aber nicht absackt, hat lose Schrauben der Sitzplatte zwischen Polster und Wippmechanik. Dreh den Stuhl um und zieh die vier Befestigungsschrauben nach. Hervorgehoben ist der Sitz.' },
       },
-    ],
-    quiz: [
-      { match: ['cylinder', 'gas', 'lift', 'strut'],
-        question: { en: 'What part lets you raise and lower the seat?', de: 'Mit welchem Teil kannst du den Sitz höher und tiefer stellen?' },
-        answer: { en: 'the gas cylinder (pneumatic lift)', de: 'die Gasdruckfeder (pneumatische Höhenverstellung)' } },
-      { match: ['star base', 'star', 'spider'],
-        question: { en: 'What is the five-armed part on the floor called?', de: 'Wie heißt das fünfarmige Teil auf dem Boden?' },
-        answer: { en: 'the star base', de: 'das Fußkreuz' } },
-      { match: ['caster', 'wheel', 'roller'],
-        question: { en: 'What are the rolling parts called?', de: 'Wie heißen die rollenden Teile?' },
-        answer: { en: 'casters', de: 'die Rollen' } },
-      { match: ['backrest'],
-        question: { en: 'What part supports your back?', de: 'Welches Teil stützt deinen Rücken?' },
-        answer: { en: 'the backrest', de: 'die Rückenlehne' } },
     ],
   },
 
@@ -434,33 +402,6 @@ const CONTENT = {
                 de: 'Eine durchhängende oder ausgeleierte Netzbespannung hat ihre Spannung verloren und lässt sich nicht nachspannen — die zwei Netzlagen sind fest am Rahmen, mit dem Lendenstützband dazwischen eingenäht. Tausch die komplette Rückenlehne. Hervorgehoben ist die Netzbespannung.' },
       },
     ],
-    quiz: [
-      { match: ['cylinder', 'gas', 'lift'],
-        question: { en: 'What part lets you raise and lower the seat?', de: 'Mit welchem Teil kannst du den Sitz höher und tiefer stellen?' },
-        answer: { en: 'the gas cylinder (pneumatic lift)', de: 'die Gasdruckfeder (pneumatische Höhenverstellung)' } },
-      { match: ['star'],
-        question: { en: 'What is the five-armed part on the floor called?', de: 'Wie heißt das fünfarmige Teil auf dem Boden?' },
-        answer: { en: 'the star base', de: 'das Fußkreuz' } },
-      { match: ['caster', 'wheel', 'roller'],
-        question: { en: 'What are the rolling parts called?', de: 'Wie heißen die rollenden Teile?' },
-        answer: { en: 'casters — safety casters that brake when the chair is empty',
-                  de: 'die Rollen — Sicherheitsrollen, die bremsen, sobald niemand sitzt' } },
-      { match: ['recline'],
-        question: { en: 'Which control locks the backrest upright?', de: 'Welche Bedienung arretiert die Rückenlehne aufrecht?' },
-        answer: { en: 'the left-hand recline lock lever', de: 'der linke Arretierhebel der Rückenlehne' } },
-      { match: ['tension'],
-        question: { en: 'What sets how hard the chair resists leaning back?', de: 'Womit stellst du ein, wie stark sich der Stuhl gegen das Zurücklehnen wehrt?' },
-        answer: { en: 'the tilt tension knob under the seat front', de: 'der Wippwiderstand-Drehknopf vorn unter dem Sitz' } },
-      { match: ['headrest'],
-        question: { en: 'What supports your head at the very top of the chair?', de: 'Was stützt deinen Kopf ganz oben am Stuhl?' },
-        answer: { en: 'the headrest', de: 'die Kopfstütze' } },
-      { match: ['mesh'],
-        question: { en: 'What is the breathable part your back rests against?', de: 'Wie heißt das atmungsaktive Teil, an dem dein Rücken anliegt?' },
-        answer: { en: 'the Vissle mesh back', de: 'die Vissle-Netzbespannung' } },
-      { match: ['lumbar'],
-        question: { en: 'What is sewn between the mesh layers at belt height?', de: 'Was ist in Gürtelhöhe zwischen die Netzlagen eingenäht?' },
-        answer: { en: 'the lumbar support band', de: 'das Lendenstützband' } },
-    ],
   },
 
   // Placeholder for the radial engine — tune keywords once the GLB is in.
@@ -491,14 +432,6 @@ const CONTENT = {
       { symptom: { en: 'Knocking noise', de: 'Klopfendes Geräusch' },
         text: { en: 'A knock under load is often a rod or main bearing. Highlighted is the rotating assembly.',
                 de: 'Ein Klopfen unter Last kommt oft von einem Pleuel- oder Hauptlager. Hervorgehoben ist der Kurbeltrieb.' } },
-    ],
-    quiz: [
-      { match: ['piston'],
-        question: { en: 'What part travels up and down inside the cylinder?', de: 'Welches Teil bewegt sich im Zylinder auf und ab?' },
-        answer: { en: 'piston', de: 'der Kolben' } },
-      { match: ['crank'],
-        question: { en: 'What converts the pistons’ motion into rotation?', de: 'Was wandelt die Kolbenbewegung in eine Drehbewegung um?' },
-        answer: { en: 'crankshaft', de: 'die Kurbelwelle' } },
     ],
   },
 };
@@ -852,14 +785,6 @@ export function partInfoDigest(modelKey) {
   // matches the name in the parts list the LLM is given — otherwise a German
   // session would get English keys and echo them back into `PART:` headers.
   return Object.entries(info).map(([name, desc]) => `${localizeName(name)}: ${tr(desc)}`).join(' | ');
-}
-
-/** Quiz entries → [{ indices, question, answer }] (only those that matched parts). */
-export function resolveQuiz(modelKey, parts) {
-  const entries = CONTENT[modelKey]?.quiz ?? [];
-  return entries
-    .map((e) => ({ indices: findParts(parts, e.match), question: tr(e.question), answer: tr(e.answer) }))
-    .filter((e) => e.indices.length > 0);
 }
 
 function genericTeardown(parts) {
