@@ -40,60 +40,6 @@ function germanStyle() {
 }
 
 /**
- * Diagnose-mode answer. The user picked (or spoke) a symptom that maps to one
- * specific part; ask DeutschlandGPT to explain THAT fault on THAT part, strictly
- * grounded in the authored diagnosis so it can't drift to other parts or invent
- * specifics (torque values, model numbers, steps). Low temperature + an explicit
- * "don't guess" instruction keep it honest; if the AI is unreachable we fall
- * back to the authored line, so the demo never goes silent.
- *
- * ctx: getContext() result (uses modelLabel + diagnostics digest).
- * opts: { symptom, part, reference, question? } — reference is the authored
- * ground-truth diagnosis line; question is an optional user follow-up.
- */
-export async function answerDiagnosis(ctx, { symptom, part, reference, question }) {
-  const trace = startTrace('ai-diagnose', {
-    input: question || symptom,
-    metadata: { model: ctx.modelLabel, part, symptom },
-  });
-
-  if (!aiAvailable()) {
-    trace.end({ output: reference, metadata: { aiAvailable: false } });
-    return reference; // graceful fallback: the canned diagnosis line
-  }
-
-  const system = [
-    languageRule(),
-    germanStyle(),
-    'You are an augmented-reality repair tutor speaking out loud to a user.',
-    `The user is looking at a ${ctx.modelLabel} through their phone camera.`,
-    `They report this symptom: "${symptom}". The relevant part is the ${part}.`,
-    'Explain the cause and the key fix for THIS symptom on THIS part only — nothing else.',
-    'Ground your answer strictly in the reference facts below plus well-established, general repair knowledge for this exact part.',
-    'Do NOT invent part names, model numbers, measurements, torque values, prices, or steps that the reference does not support. Do not mention other parts or unrelated faults.',
-    "If a detail is not covered by the reference, stay general and say what to check rather than guessing. Never state something you are not sure about.",
-    `Reference facts (the ground truth): ${reference}`,
-    ctx.diagnostics && `Broader authored knowledge for this model, for context only: ${ctx.diagnostics}`,
-    'Answer the specific question if one is given, otherwise explain the cause and fix. At most two short spoken sentences. No markdown, no lists.',
-  ].filter(Boolean).join(' ');
-
-  const user = question || `Why does "${symptom}" happen on the ${part}, and how do I fix it?`;
-
-  try {
-    const answer = await chat(
-      [{ role: 'system', content: system }, { role: 'user', content: user }],
-      { temperature: 0.2, maxTokens: 160, trace, name: 'diagnose-answer' }
-    );
-    trace.end({ output: answer });
-    return answer;
-  } catch (e) {
-    console.warn('answerDiagnosis failed:', e.message);
-    trace.end({ output: reference, metadata: { error: e.message } });
-    return reference; // fall back to the authored line on any AI error
-  }
-}
-
-/**
  * Fix mode's planner: turn a spoken problem ("it keeps sinking", "the armrest
  * wobbles") into a step-by-step repair plan the app can *animate* — each step
  * names the exact parts to spotlight, so isolate + camera flight + TTS all ride
@@ -131,7 +77,7 @@ export async function generateFixPlan(ctx, request) {
     'Note on the JSON below: the field names and the "action" values are fixed English identifiers and must be copied exactly. The language rule applies to the "title", "intro" and "text" values, which are the only parts the user ever hears.',
     'You are an augmented-reality repair tutor. Produce a step-by-step repair plan that an app will animate on a 3D exploded model, highlighting the named parts and speaking each step out loud.',
     `The object is a ${ctx.modelLabel}. Its parts, with the EXACT names the app knows them by: ${partNames.join('; ')}.`,
-    ctx.diagnostics && `Ground truth about this exact object — prefer it and never contradict it: ${ctx.diagnostics}`,
+    ctx.faults && `Ground truth about this exact object — prefer it and never contradict it: ${ctx.faults}`,
     'Reply with ONLY a JSON object — no markdown fences, no prose before or after — in exactly this shape:',
     '{"title":"short plan title","intro":"one spoken sentence saying what we will do and why","steps":[{"beats":[{"text":"ONE spoken sentence","parts":["exact part name"],"action":"unscrew"}]}]}',
     'Rules: 3 to 6 steps, in the real repair order.',
@@ -283,7 +229,7 @@ export async function explainNextPart(ctx, { attempted, expected, stepText }) {
     // repeat. Telling them they were wrong adds nothing they don't already know.
     `Do NOT mention that they made a mistake, and do not refer to the "${attempted}" as a wrong choice. No "not yet", no "instead", no correction language — just say what to fit and why.`,
     'Be direct and practical. Do not invent measurements, tools or part names. No markdown, no lists.',
-    ctx.diagnostics && `Reference knowledge for this model: ${ctx.diagnostics}`,
+    ctx.faults && `Reference knowledge for this model: ${ctx.faults}`,
   ].filter(Boolean).join(' ');
 
   try {
@@ -369,7 +315,7 @@ export async function resolveSpokenPart(ctx, phrase, candidates) {
 
 /**
  * Answer a free-form question about the current object via DeutschlandGPT.
- * context: { modelLabel, parts:[names], mode, focusedPart, partInfo, diagnostics }
+ * context: { modelLabel, parts:[names], mode, focusedPart, partInfo, faults }
  *
  * Returns { part, action, answer }: `part` is the part the question turned out
  * to be about (a name from context.parts, or null) so the app can highlight it,
@@ -412,8 +358,7 @@ export async function answerQuestion(context, question) {
     // ground truth. Giving the LLM ALL of them lets it answer about whichever
     // part the question concerns without the app guessing from keywords first.
     context.partInfo && `Reference facts per part — treat these as ground truth and never contradict them: ${context.partInfo}`,
-    context.mode === 'diagnose' && 'They are in Diagnose mode, troubleshooting a fault: name the most likely faulty part and the key fix.',
-    context.diagnostics && `Repair and fault knowledge for THIS model — prefer it when relevant, and answer in your own words: ${context.diagnostics}`,
+    context.faults && `Repair and fault knowledge for THIS model — prefer it when relevant, and answer in your own words: ${context.faults}`,
     'First work out which single part from the parts list the question is mainly about, if any.',
     'Reply in EXACTLY this format: a first line reading PART: <that part\'s name copied exactly from the parts list, or NONE>, a second line reading ACTION: <verb or NONE>, then the spoken answer on the next line.',
     `ACTION is the single physical motion your answer tells the user to perform on that part — the app animates it on the 3D model. It MUST be one of: ${FIX_ACTIONS.join(', ')}. Meanings: ${FIX_ACTION_GUIDE} Use NONE when the answer is purely informational or PART is NONE.`,

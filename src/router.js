@@ -10,7 +10,7 @@
  *   /scan                 …its camera view
  *   /objects              …its object list
  *   /<model>              an object, at the default mode
- *   /<model>/<mode>       an object in one of the five modes
+ *   /<model>/<mode>       an object in one of the four modes
  *
  * e.g. `#/markus-chair/fix`, `#/bicycle/quiz`.
  *

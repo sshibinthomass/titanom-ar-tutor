@@ -166,16 +166,14 @@ const STRINGS = {
   'mode.explore':       { en: '🔍 Explore',                 de: '🔍 Erkunden' },
   'mode.fix':           { en: '🔧 Fix',                     de: '🔧 Reparieren' },
   'mode.assemble':      { en: '🧩 Assemble',                de: '🧩 Zusammenbauen' },
-  'mode.diagnose':      { en: '🩺 Diagnose',                de: '🩺 Diagnose' },
   'mode.quiz':          { en: '❓ Quiz',                     de: '❓ Quiz' },
 
-  // Card kickers: the same five names without the emoji. Kept separate from
+  // Card kickers: the same four names without the emoji. Kept separate from
   // `mode.*` because the card header is typographic (small caps, no icon) and
   // because main.js keys its mode logic on the id, never on this label.
   'kicker.explore':     { en: 'Explore',                    de: 'Erkunden' },
   'kicker.fix':         { en: 'Fix',                        de: 'Reparieren' },
   'kicker.assemble':    { en: 'Assemble',                   de: 'Zusammenbauen' },
-  'kicker.diagnose':    { en: 'Diagnose',                   de: 'Diagnose' },
   'kicker.quiz':        { en: 'Quiz',                       de: 'Quiz' },
 
   // -- Explore ---------------------------------------------------------------
@@ -247,13 +245,6 @@ const STRINGS = {
   'assemble.fallbackText': { en: 'Attach the next part: {part}.', de: 'Bring das nächste Teil an: {part}.' },
   'assemble.genericTitle': { en: 'Assemble from parts',     de: 'Aus Einzelteilen zusammenbauen' },
   'assemble.title':     { en: 'Assemble the chair',         de: 'Den Stuhl zusammenbauen' },
-
-  // -- Diagnose --------------------------------------------------------------
-  'diagnose.pick':      { en: 'What is the symptom? Pick one:', de: 'Was ist das Symptom? Wähle eines aus:' },
-  'diagnose.working':   { en: '…diagnosing',                de: '…wird diagnostiziert' },
-  'diagnose.likely':    { en: 'Likely part: {part}',        de: 'Wahrscheinliches Teil: {part}' },
-  'diagnose.none':      { en: 'No symptoms authored for this model yet.',
-                          de: 'Für dieses Modell sind noch keine Symptome hinterlegt.' },
 
   // -- Quiz ------------------------------------------------------------------
   'quiz.reveal':        { en: 'Reveal answer',              de: 'Antwort zeigen' },

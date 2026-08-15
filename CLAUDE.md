@@ -7,7 +7,7 @@ Guidance for working in this repo. Read this before making changes.
 **AR Repair Tutor** — a Titanom × DeutschlandGPT hackathon app (Aug 2026, theme
 Education × AI, ElevenLabs award). Point a phone at the floor (WebXR hit-test),
 place an **exploded 3D object**, and an AI voice tutor teaches, repairs, and
-diagnoses it hands-free. The desktop 3D view works everywhere; markerless AR is
+quizzes you on it hands-free. The desktop 3D view works everywhere; markerless AR is
 **Android Chrome only** (iOS/desktop fall back to the orbit viewer).
 
 The app runs in **English or German** — one at a time, everywhere (see
@@ -59,7 +59,7 @@ modules are focused, mostly-pure helpers it calls.
 | [src/explode.js](src/explode.js) | The **core**. Splits a glTF into parts and drives the exploded view + per-part highlight/dim/isolate. |
 | [src/animate.js](src/animate.js) | Tween engine (keyed channels, driven from the render loop) + the camera flight that frames a part. |
 | [src/fixanim.js](src/fixanim.js) | Fix's gesture library: 22 part gestures (remove/lift_off/unscrew/tap_loose/press_fit/align/tug/spin/grease/wipe/…) + 6 whole-object ones (tip_over/flip_over/stand_up/sit_test/rock_test/roll_away). The LLM picks the verb per spoken beat; this module owns the motion. |
-| [src/modes.js](src/modes.js) | The 5 modes + **authored per-model content** (fix steps, assemble prompts, diagnoses, quizzes) and semantic part names. |
+| [src/modes.js](src/modes.js) | The 4 modes + **authored per-model content** (fix steps, assemble prompts, known faults, quizzes) and semantic part names. |
 | [src/puzzle.js](src/puzzle.js) | Assemble's drag-to-build engine: scatter, ghost slots, snap magnetism, reject. Surface-agnostic — driven by a world-space ray. |
 | [src/select.js](src/select.js) | Raycast tap/click part-picking (drag threshold so orbiting ≠ tapping) + the desktop part-dragger. |
 | [src/ar.js](src/ar.js) | WebXR `immersive-ar` session: hit-test reticle, tap-to-place, long-press to grab then one-finger drag-to-move / pinch scale + twist rotate; voice "move it" re-places on a fresh anchor. Also hands the finger's target ray to an **interactor** (the puzzle). |
@@ -230,7 +230,7 @@ Three things keep it from fighting other systems — don't regress them:
 
 ### Modes (`modes.js` + state in `main.js`)
 
-All 5 modes ride the **same core** (explode + isolate/highlight + visibility);
+All 4 modes ride the **same core** (explode + isolate/highlight + visibility);
 only the card content and which parts are lit change:
 
 1. **Explore** — tap a part → isolate + name it.
@@ -246,7 +246,7 @@ can be adjusted on the surfaces the app is actually used on.
    names; `resolvePlanParts` maps each step's part names to indices and the
    walkthrough rides the same isolate + fly-to + TTS pipeline (Next/Back).
    Fix opens at a deliberately small spread (`FIX_EXPLODE`, a slider value of 7
-   capped at 15% of the model's range) rather than Diagnose/Quiz's 35%: the
+   capped at 15% of the model's range) rather than Quiz's 35%: the
    gestures are the point here and they only read against something still
    recognisable as a chair — tipping a model blown 35% apart looks like debris
    rotating. Each step is a list of **beats** — one spoken sentence plus the
@@ -256,13 +256,21 @@ can be adjusted on the surfaces the app is actually used on.
    DGPT is unconfigured or unreachable — never the only path.
 3. **Assemble** — a **drag-to-build puzzle** (see below); the user places each
    group, by dragging it or by **saying what it is**.
-4. **Diagnose** — pick a symptom chip → highlight the likely part.
-5. **Quiz** — highlight a part, ask the user to name it.
+4. **Quiz** — highlight a part, ask the user to name it.
 
 Authored content in `CONTENT` (keyed by model id) references parts by **keyword**
 (`match: ['cylinder','gas','lift']`), resolved against the live part list at
 runtime via `findParts()` — so it survives however the splitter cut the model.
 Resolvers fall back to a generic teardown when a model has no authored content.
+
+`CONTENT[*].faults` is the one block with **no screen of its own** — a list of
+`{ symptom, text }` (what the user would say is wrong, then the cause and the
+fix). It feeds Fix's suggestion chips (`fixSuggestions`) and, through
+`knowledgeDigest`, grounds every free-form tutor answer, so "why does it sink?"
+is answered from this chair's real faults. It is the remains of a Diagnose mode
+(symptom chip → highlight the likely part) that was removed as redundant with
+Fix; keep the knowledge when you touch it, and note the "Highlighted is the X."
+tails inside those texts are leftovers of that screen, stripped at read time.
 
 **Hero model — IKEA Markus (`markus-chair`).** It splits in `group` mode into
 **47 meshes**, every one named individually in `SEMANTIC_NAMES['markus-chair']`
@@ -270,7 +278,7 @@ Resolvers fall back to a generic teardown when a model has no authored content.
 Tilt tension knob, Caster wheels/stem/brake hood ×5, Mesh panel front/rear,
 Lumbar support band ×10, …). The names were identified visually part-by-part in
 Blender and checked against the official IKEA assembly manual (AA-251870-21);
-its fix/assemble/diagnose/quiz content and the per-part `MARKUS_INFO`
+its fix/assemble/faults/quiz content and the per-part `MARKUS_INFO`
 descriptions are grounded in that manual and real IKEA part numbers — so keep
 new Markus content factual, not invented.
 
@@ -679,7 +687,7 @@ Scene graph once placed: `anchor` (world pose, on the floor) → `pivot` (user
 rotate/scale about the floor contact) → `group` (the model, fit to ~0.7 m).
 That fit is measured against the **assembled** model — `main.js` passes
 `fitBox: restBounds()`, since the live bounds grow with the explode amount and
-starting AR from a spread-out mode (Fix/Diagnose/Quiz) would otherwise scale the
+starting AR from a spread-out mode (Fix/Quiz) would otherwise scale the
 object down to fit its exploded silhouette: entering from Fix placed a chair that
 stood 0.39 m once reassembled, and from a full explode, 0.21 m. HTML
 UI is kept as a `dom-overlay` so the mode bar/cards/mic render over the camera

@@ -165,7 +165,7 @@ export function canonicalName(display) {
 // Ids only — the button labels come from the i18n dictionary (`mode.<id>`), so
 // the mode bar re-labels itself on a language switch without touching this list.
 export const MODE_LIST = [
-  { id: 'explore' }, { id: 'fix' }, { id: 'assemble' }, { id: 'diagnose' }, { id: 'quiz' },
+  { id: 'explore' }, { id: 'fix' }, { id: 'assemble' }, { id: 'quiz' },
 ];
 
 // ---- Authored content, keyed by model registry id --------------------------
@@ -198,17 +198,14 @@ const CONTENT = {
                   de: 'Drück den Wulst zurück auf die Felge und pump auf den Druck auf, der auf der Flanke steht.' } },
       ],
     },
-    diagnose: [
-      { symptoms: [{ en: 'Brakes squeal', de: 'Bremsen quietschen' }, 'squeal', 'squeak', 'noise', 'braking'],
-        match: ['brake', 'chrome', 'pad', 'caliper'],
+    faults: [
+      { symptom: { en: 'Brakes squeal', de: 'Bremsen quietschen' },
         text: { en: 'A squeal under braking is almost always worn pads or a dirty rim. Highlighted is the braking area — check pad wear.',
                 de: 'Quietschen beim Bremsen kommt fast immer von abgenutzten Bremsbelägen oder einer verschmutzten Felge. Hervorgehoben ist der Bremsbereich — prüf den Belagverschleiß.' } },
-      { symptoms: [{ en: 'Chain slips', de: 'Kette rutscht durch' }, 'slipping', 'chain', 'skipping', 'gears'],
-        match: ['chain', 'gear', 'cog', 'sprocket', 'derailleur'],
+      { symptom: { en: 'Chain slips', de: 'Kette rutscht durch' },
         text: { en: 'Chain slip usually means a stretched chain or worn cassette. Highlighted is the drivetrain.',
                 de: 'Eine durchrutschende Kette bedeutet meist eine gelängte Kette oder eine verschlissene Kassette. Hervorgehoben ist der Antrieb.' } },
-      { symptoms: [{ en: 'Wheel wobbles', de: 'Laufrad eiert' }, 'wobble', 'wheel', 'buckle', 'true'],
-        match: ['wheel', 'rim', 'spoke'],
+      { symptom: { en: 'Wheel wobbles', de: 'Laufrad eiert' },
         text: { en: 'A wobble is a wheel out of true — a bent rim or loose spokes. Highlighted is the wheel.',
                 de: 'Ein eierndes Laufrad hat einen Höhen- oder Seitenschlag — verzogene Felge oder lose Speichen. Hervorgehoben ist das Laufrad.' } },
     ],
@@ -254,83 +251,70 @@ const CONTENT = {
                   de: 'Setz den Sitz wieder auf die Gasfeder und drück kräftig nach unten, damit der Konus fest sitzt.' } },
       ],
     },
-    // Diagnose = symptom → likely part. symptoms[0] is the chip label; every
-    // string in the array is also a voice-match keyword (spoken transcript is
-    // substring-matched against them, so include short single words, not just
-    // the display phrase). `match` targets a part by name.includes() — note
-    // 'base' would hit BOTH "Star base" and "Base hub", so we use 'star' and
-    // 'hub' to keep them distinct. Ordered most-common first; keep single-word
-    // keywords unique across entries so voice picks the intended symptom.
-    diagnose: [
+    // The faults this object is known to have: `symptom` is what the user would
+    // say is wrong, `text` is the cause and the fix. Not a screen of its own —
+    // the symptoms become Fix's suggestion chips (fixSuggestions) and the whole
+    // list grounds the AI tutor (knowledgeDigest), so a spoken "why does it
+    // sink?" is answered from this chair's real faults. Ordered most-common
+    // first: only the first few become chips.
+    faults: [
       {
-        symptoms: [{ en: 'Seat keeps sinking', de: 'Sitz sackt immer ab' }, 'sinking', 'sinks', 'drops', 'lowering', 'goes down', 'losing height', 'wont stay up'],
-        match: ['cylinder', 'gas', 'lift', 'piston', 'strut'],
+        symptom: { en: 'Seat keeps sinking', de: 'Sitz sackt immer ab' },
         text: { en: 'A seat that slowly sinks under your weight is a failed gas cylinder — the pneumatic seal has lost its charge. It cannot be refilled, so swap the whole gas lift. Highlighted is the cylinder.',
                 de: 'Ein Sitz, der unter deinem Gewicht langsam absackt, hat eine defekte Gasdruckfeder — die Dichtung hat ihren Druck verloren. Nachfüllen geht nicht, also tausch die ganze Gasfeder. Hervorgehoben ist die Gasdruckfeder.' },
       },
       {
-        symptoms: [{ en: 'Won\'t rise', de: 'Geht nicht mehr hoch' }, 'wont rise', 'wont go up', 'wont raise', 'wont lift', 'stays down', 'stuck low'],
-        match: ['cylinder', 'gas', 'lift', 'piston', 'strut'],
+        symptom: { en: 'Won\'t rise', de: 'Geht nicht mehr hoch' },
         text: { en: 'If pressing the lever no longer raises the seat, the gas cylinder has lost its pressure completely. First confirm the lever actually pushes the valve pin; if it does, replace the gas lift. Highlighted is the cylinder.',
                 de: 'Wenn der Hebel den Sitz nicht mehr anhebt, hat die Gasdruckfeder ihren Druck komplett verloren. Prüf zuerst, ob der Hebel den Ventilstift überhaupt drückt; wenn ja, tausch die Gasfeder. Hervorgehoben ist die Gasdruckfeder.' },
       },
       {
-        symptoms: [{ en: 'Height lever stuck', de: 'Höhenverstellhebel klemmt' }, 'lever', 'paddle', 'wont adjust', 'height stuck', 'cant change height'],
-        match: ['lever', 'height'],
+        symptom: { en: 'Height lever stuck', de: 'Höhenverstellhebel klemmt' },
         text: { en: 'No height change when you lift the paddle points to a stuck or disconnected height lever — its linkage is not pressing the cylinder valve pin. Check the arm or cable down to the valve. Highlighted is the height lever.',
                 de: 'Wenn sich beim Ziehen des Hebels nichts an der Höhe tut, klemmt der Höhenverstellhebel oder seine Verbindung ist ausgehängt — er drückt den Ventilstift der Gasfeder nicht mehr. Prüf das Gestänge oder den Bowdenzug bis zum Ventil. Hervorgehoben ist der Höhenverstellhebel.' },
       },
       {
-        symptoms: [{ en: 'Chair wobbles', de: 'Stuhl wackelt' }, 'wobble', 'wobbles', 'unstable', 'rocking', 'leaning', 'tilts', 'shaky'],
-        match: ['star'],
+        symptom: { en: 'Chair wobbles', de: 'Stuhl wackelt' },
         text: { en: 'Side-to-side wobble usually means a cracked or flexing star base, or one arm not sitting flat. Set it on hard floor and press each arm to find the give. Highlighted is the star base.',
                 de: 'Seitliches Wackeln bedeutet meist ein gerissenes oder nachgebendes Fußkreuz oder einen Arm, der nicht flach aufliegt. Stell den Stuhl auf harten Boden und drück jeden Arm einzeln herunter, um das Spiel zu finden. Hervorgehoben ist das Fußkreuz.' },
       },
       {
-        symptoms: [{ en: 'Cracked base', de: 'Fußkreuz gerissen' }, 'crack', 'cracked', 'split base', 'broken base', 'snapped'],
-        match: ['star'],
+        symptom: { en: 'Cracked base', de: 'Fußkreuz gerissen' },
         text: { en: 'A visible crack in a plastic star base is a safety risk and cannot be reliably glued — replace the base. A metal base can sometimes be re-welded. Highlighted is the star base.',
                 de: 'Ein sichtbarer Riss in einem Kunststoff-Fußkreuz ist ein Sicherheitsrisiko und lässt sich nicht zuverlässig kleben — tausch das Fußkreuz. Ein Metallfußkreuz kann man manchmal nachschweißen. Hervorgehoben ist das Fußkreuz.' },
       },
       {
-        symptoms: [{ en: 'Won\'t roll', de: 'Rollt nicht mehr' }, 'jammed', 'stuck wheel', 'dragging', 'hard to move', 'wont roll', 'caught'],
-        match: ['caster', 'wheel', 'roller'],
+        symptom: { en: 'Won\'t roll', de: 'Rollt nicht mehr' },
         text: { en: 'A chair that drags or will not roll has a jammed caster — usually hair and carpet fibre wound around the axle. Pop the caster out, clear it, or swap in a new one. Highlighted is the caster set.',
                 de: 'Ein Stuhl, der schleift oder nicht mehr rollt, hat eine blockierte Rolle — meist Haare und Teppichfasern um die Achse gewickelt. Zieh die Rolle heraus, reinige sie oder setz eine neue ein. Hervorgehoben sind die Rollen.' },
       },
       {
-        symptoms: [{ en: 'Rolls away', de: 'Rollt von allein weg' }, 'rolls away', 'drifts', 'slides', 'wont stay put', 'rolls on its own'],
-        match: ['caster', 'wheel', 'roller'],
+        symptom: { en: 'Rolls away', de: 'Rollt von allein weg' },
         text: { en: 'A chair that rolls on its own has worn casters or the wrong wheel for the floor — fit braked casters, or the correct hard-floor or carpet type. Highlighted is the caster set.',
                 de: 'Ein Stuhl, der von allein wegrollt, hat abgenutzte Rollen oder die falschen Rollen für den Boden — montiere gebremste Rollen oder den passenden Typ für Hartboden bzw. Teppich. Hervorgehoben sind die Rollen.' },
       },
       {
-        symptoms: [{ en: 'Squeaks and creaks', de: 'Quietscht und knarzt' }, 'squeak', 'squeaks', 'creak', 'noise', 'clicking', 'grinding'],
-        match: ['hub'],
+        symptom: { en: 'Squeaks and creaks', de: 'Quietscht und knarzt' },
         text: { en: 'Squeaks and creaks come from the central mechanism and swivel — the tilt springs, the seat-plate bolts, or the cylinder top bearing. Tighten the under-seat bolts and grease the swivel. Highlighted is the base hub.',
                 de: 'Quietschen und Knarzen kommt aus der zentralen Mechanik und dem Drehlager — den Wippfedern, den Schrauben der Sitzplatte oder dem oberen Lager der Gasfeder. Zieh die Schrauben unter dem Sitz nach und fette das Drehlager. Hervorgehoben ist die Nabe des Fußkreuzes.' },
       },
       {
-        symptoms: [{ en: 'Won\'t swivel', de: 'Dreht sich nicht mehr' }, 'wont swivel', 'wont turn', 'stiff swivel', 'hard to turn', 'seized'],
-        match: ['hub'],
+        symptom: { en: 'Won\'t swivel', de: 'Dreht sich nicht mehr' },
         text: { en: 'A seat that will not rotate has a seized swivel bearing in the base hub, usually dry or rust-bound. Lift the seat off and grease the bearing race. Highlighted is the base hub.',
                 de: 'Ein Sitz, der sich nicht mehr drehen lässt, hat ein festsitzendes Drehlager in der Nabe — meist trocken oder verrostet. Heb den Sitz ab und fette die Laufbahn des Lagers. Hervorgehoben ist die Nabe des Fußkreuzes.' },
       },
       {
-        symptoms: [{ en: 'Loose backrest', de: 'Rückenlehne lose' }, 'backrest', 'back wobbles', 'wont recline', 'reclines too far', 'floppy back'],
-        match: ['backrest'],
+        symptom: { en: 'Loose backrest', de: 'Rückenlehne lose' },
         text: { en: 'A loose or free-flopping backrest is loose mounting bolts or a worn recline-tension knob on the back bracket. Tighten the bracket bolts and reset the tension. Highlighted is the backrest.',
                 de: 'Eine lose oder frei kippende Rückenlehne bedeutet gelockerte Befestigungsschrauben oder einen verschlissenen Spannknopf am Lehnenhalter. Zieh die Halterschrauben nach und stell die Spannung neu ein. Hervorgehoben ist die Rückenlehne.' },
       },
       {
-        symptoms: [{ en: 'Loose armrest', de: 'Armlehne lose' }, 'armrest', 'arm wobbles', 'arm loose', 'broken arm'],
-        match: ['armrest', 'arm'],
+        symptom: { en: 'Loose armrest', de: 'Armlehne lose' },
         text: { en: 'A wobbly armrest is almost always loose bolts under the seat pan where the arm mounts. Tighten them; if the arm itself is cracked, replace it. Highlighted is the armrest.',
                 de: 'Eine wackelnde Armlehne kommt fast immer von losen Schrauben unter der Sitzschale, wo die Lehne befestigt ist. Zieh sie nach; ist die Lehne selbst gerissen, tausch sie aus. Hervorgehoben ist die Armlehne.' },
       },
       {
-        symptoms: [{ en: 'Seat wobbles', de: 'Sitz wackelt' }, 'seat loose', 'seat rocks', 'loose seat', 'seat moves'],
-        match: ['seat'],
+        symptom: { en: 'Seat wobbles', de: 'Sitz wackelt' },
         text: { en: 'A seat that rocks but does not sink is loose seat-plate bolts between the cushion and the tilt mechanism. Flip the chair and tighten the four mounting bolts. Highlighted is the seat.',
                 de: 'Ein Sitz, der wackelt, aber nicht absackt, hat lose Schrauben der Sitzplatte zwischen Polster und Wippmechanik. Dreh den Stuhl um und zieh die vier Befestigungsschrauben nach. Hervorgehoben ist der Sitz.' },
       },
@@ -386,80 +370,66 @@ const CONTENT = {
                   de: 'Setz Sitz und Mechanik wieder auf die Gasfeder und setz dich kräftig drauf — dein Gewicht verkeilt den Konus. IKEA weist darauf hin, dass Arbeiten an der Gasfeder geschultem Personal vorbehalten sind, also arbeite umsichtig.' } },
       ],
     },
-    // symptoms[0] is the chip label; every string is also a voice-match keyword
-    // (spoken transcript is substring-matched), so keep single words unique across
-    // entries. `match` hits a part by name.includes() — 'back' would light BOTH
-    // "Backrest" and "Mesh back", so use 'backrest' vs 'mesh' to keep them apart.
-    diagnose: [
+    // Known faults — symptom + cause/fix. Feeds Fix's suggestion chips and the
+    // tutor's grounding digest; see the office chair's list above.
+    faults: [
       {
-        symptoms: [{ en: 'Seat keeps sinking', de: 'Sitz sackt immer ab' }, 'sinking', 'sinks', 'drops', 'lowering', 'goes down', 'losing height'],
-        match: ['cylinder', 'gas', 'lift'],
+        symptom: { en: 'Seat keeps sinking', de: 'Sitz sackt immer ab' },
         text: { en: 'A Markus that slowly sinks under your weight has a failed gas cylinder — the pneumatic seal has lost its charge and cannot be refilled. Swap the whole gas lift. Highlighted is the gas cylinder.',
                 de: 'Ein MARKUS, der unter deinem Gewicht langsam absackt, hat eine defekte Gasdruckfeder — die Dichtung hat ihren Druck verloren und lässt sich nicht nachfüllen. Tausch die komplette Gasfeder. Hervorgehoben ist die Gasdruckfeder.' },
       },
       {
-        symptoms: [{ en: 'Won\'t rise', de: 'Geht nicht mehr hoch' }, 'wont rise', 'wont go up', 'wont raise', 'stays down', 'stuck low'],
-        match: ['cylinder', 'gas', 'lift'],
+        symptom: { en: 'Won\'t rise', de: 'Geht nicht mehr hoch' },
         text: { en: 'If the paddle no longer raises the seat, the gas cylinder has lost its pressure completely. Confirm the lever actually pushes the valve pin; if it does, replace the gas lift. Highlighted is the gas cylinder.',
                 de: 'Wenn der Hebel den Sitz nicht mehr anhebt, hat die Gasdruckfeder ihren Druck komplett verloren. Prüf, ob der Hebel den Ventilstift überhaupt drückt; wenn ja, tausch die Gasfeder. Hervorgehoben ist die Gasdruckfeder.' },
       },
       {
-        symptoms: [{ en: 'Backrest won\'t lock', de: 'Rückenlehne rastet nicht ein' }, 'wont lock', 'recline', 'wont hold', 'flops back', 'no lock'],
-        match: ['recline'],
+        symptom: { en: 'Backrest won\'t lock', de: 'Rückenlehne rastet nicht ein' },
         text: { en: 'The Markus backrest is sprung forward and held by the LEFT-hand lever — the recline lock, which holds one of three positions. If the back will not stay upright, the lock is not engaging: work the left lever and check its shaft into the mechanism. Highlighted is the recline lock.',
                 de: 'Die MARKUS-Rückenlehne ist nach vorn gefedert und wird vom LINKEN Hebel gehalten — der Arretierung, die eine von drei Positionen hält. Bleibt die Lehne nicht aufrecht, greift die Arretierung nicht: beweg den linken Hebel und prüf seine Welle bis in die Mechanik. Hervorgehoben ist der Arretierhebel.' },
       },
       {
-        symptoms: [{ en: 'Reclines too easily', de: 'Kippt zu leicht nach hinten' }, 'too easy', 'too loose', 'tips back', 'tension', 'springs back'],
-        match: ['tension'],
+        symptom: { en: 'Reclines too easily', de: 'Kippt zu leicht nach hinten' },
         text: { en: 'A back that leans too freely or snaps forward is the tilt tension set too loose for your weight. Find the knob under the front-centre of the seat and turn it toward + for more resistance, − for less. Highlighted is the tension knob.',
                 de: 'Eine Lehne, die zu leicht nachgibt oder nach vorn zurückschnappt, hat einen für dein Gewicht zu gering eingestellten Wippwiderstand. Such den Drehknopf mittig vorn unter dem Sitz und dreh ihn Richtung + für mehr Widerstand, Richtung − für weniger. Hervorgehoben ist der Wippwiderstand-Drehknopf.' },
       },
       {
-        symptoms: [{ en: 'Chair wobbles', de: 'Stuhl wackelt' }, 'wobble', 'wobbles', 'unstable', 'rocking', 'shaky'],
-        match: ['star'],
+        symptom: { en: 'Chair wobbles', de: 'Stuhl wackelt' },
         text: { en: 'Side-to-side wobble usually means a cracked or flexing star base, or one arm not sitting flat. Set it on hard floor and press each arm to find the give. Highlighted is the star base.',
                 de: 'Seitliches Wackeln bedeutet meist ein gerissenes oder nachgebendes Fußkreuz oder einen Arm, der nicht flach aufliegt. Stell den Stuhl auf harten Boden und drück jeden Arm einzeln herunter, um das Spiel zu finden. Hervorgehoben ist das Fußkreuz.' },
       },
       {
-        symptoms: [{ en: 'Cracked base', de: 'Fußkreuz gerissen' }, 'crack', 'cracked', 'split base', 'broken base', 'snapped'],
-        match: ['star'],
+        symptom: { en: 'Cracked base', de: 'Fußkreuz gerissen' },
         text: { en: 'A visible crack in the star base is a safety risk. Markus bases are metal and can sometimes be re-welded, but replacement is safer. Highlighted is the star base.',
                 de: 'Ein sichtbarer Riss im Fußkreuz ist ein Sicherheitsrisiko. MARKUS-Fußkreuze sind aus Metall und lassen sich manchmal nachschweißen, aber ein Austausch ist sicherer. Hervorgehoben ist das Fußkreuz.' },
       },
       {
-        symptoms: [{ en: 'Won\'t roll', de: 'Rollt nicht mehr' }, 'jammed', 'stuck wheel', 'dragging', 'hard to move', 'wont roll'],
-        match: ['caster', 'wheel', 'roller'],
+        symptom: { en: 'Won\'t roll', de: 'Rollt nicht mehr' },
         text: { en: 'A chair that drags has a jammed caster — usually hair and carpet fibre wound around the axle. Pop the caster out, clear it, or swap in a new one. Highlighted is the caster set.',
                 de: 'Ein Stuhl, der schleift, hat eine blockierte Rolle — meist Haare und Teppichfasern um die Achse gewickelt. Zieh die Rolle heraus, reinige sie oder setz eine neue ein. Hervorgehoben sind die Rollen.' },
       },
       {
-        symptoms: [{ en: 'Rolls away', de: 'Rollt von allein weg' }, 'rolls away', 'drifts', 'slides', 'wont stay put'],
-        match: ['caster', 'wheel', 'roller'],
+        symptom: { en: 'Rolls away', de: 'Rollt von allein weg' },
         text: { en: 'Markus casters are safety casters — they brake automatically when nobody is sitting, so an empty chair should never drift. If it rolls away on its own, a brake hood is worn or jammed: pop that caster out and replace it (IKEA part 100049021). Highlighted is the caster set.',
                 de: 'MARKUS-Rollen sind Sicherheitsrollen — sie bremsen automatisch, sobald niemand sitzt, ein leerer Stuhl sollte also nie wegrollen. Rollt er trotzdem von allein, ist eine Bremskappe verschlissen oder blockiert: zieh die Rolle heraus und tausch sie (IKEA-Teil 100049021). Hervorgehoben sind die Rollen.' },
       },
       {
-        symptoms: [{ en: 'Squeaks and creaks', de: 'Quietscht und knarzt' }, 'squeak', 'squeaks', 'creak', 'noise', 'clicking', 'grinding'],
-        match: ['tilt'],
+        symptom: { en: 'Squeaks and creaks', de: 'Quietscht und knarzt' },
         text: { en: 'Squeaks and creaks come from the tilt mechanism and swivel — dry springs, loose fasteners on the seat plate, or the cylinder top bearing. Snug the two flange bolts and two screws under the seat with the allen key, and grease the pivot. Highlighted is the tilt mechanism.',
                 de: 'Quietschen und Knarzen kommt aus der Wippmechanik und dem Drehlager — trockene Federn, lose Schrauben an der Sitzplatte oder das obere Lager der Gasfeder. Zieh die zwei Flansch- und zwei Senkschrauben unter dem Sitz mit dem Inbusschlüssel nach und fette den Drehpunkt. Hervorgehoben ist die Wippmechanik.' },
       },
       {
-        symptoms: [{ en: 'Headrest slips', de: 'Kopfstütze rutscht' }, 'headrest', 'head rest', 'wont stay up', 'slides down', 'wont adjust'],
-        match: ['headrest'],
+        symptom: { en: 'Headrest slips', de: 'Kopfstütze rutscht' },
         text: { en: 'A headrest that sinks or will not hold its angle has a worn friction joint at its stem. Tighten the headrest bracket; if the ratchet is stripped, the headrest is replaced as a unit. Highlighted is the headrest.',
                 de: 'Eine Kopfstütze, die absinkt oder ihren Winkel nicht hält, hat ein ausgeschlagenes Reibgelenk am Schaft. Zieh den Halter der Kopfstütze nach; ist die Rasterung ausgeleiert, wird die Kopfstütze komplett getauscht. Hervorgehoben ist die Kopfstütze.' },
       },
       {
-        symptoms: [{ en: 'Loose armrest', de: 'Armlehne lose' }, 'armrest', 'arm wobbles', 'arm loose', 'broken arm'],
-        match: ['armrest', 'arm'],
+        symptom: { en: 'Loose armrest', de: 'Armlehne lose' },
         text: { en: 'Each Markus armrest is held by two countersunk screws into the seat side — a wobbly arm means they have worked loose, so snug them with the allen key. The arms are identical left/right and fixed height; no adjustable version exists. Highlighted is the armrest.',
                 de: 'Jede MARKUS-Armlehne ist mit zwei Senkschrauben an der Sitzseite befestigt — eine wackelnde Lehne bedeutet, dass sie sich gelöst haben, zieh sie also mit dem Inbusschlüssel nach. Die Lehnen sind links und rechts identisch und in der Höhe fest; eine verstellbare Variante gibt es nicht. Hervorgehoben ist die Armlehne.' },
       },
       {
-        symptoms: [{ en: 'Mesh sagging', de: 'Netzbespannung hängt durch' }, 'mesh', 'saggy', 'stretched', 'baggy back', 'worn mesh'],
-        match: ['mesh'],
+        symptom: { en: 'Mesh sagging', de: 'Netzbespannung hängt durch' },
         text: { en: 'A sagging or stretched mesh back has lost its tension and cannot be re-tightened — the two mesh layers are fixed to the frame with the lumbar band sewn between them. Replace the back assembly. Highlighted is the mesh back.',
                 de: 'Eine durchhängende oder ausgeleierte Netzbespannung hat ihre Spannung verloren und lässt sich nicht nachspannen — die zwei Netzlagen sind fest am Rahmen, mit dem Lendenstützband dazwischen eingenäht. Tausch die komplette Rückenlehne. Hervorgehoben ist die Netzbespannung.' },
       },
@@ -514,13 +484,11 @@ const CONTENT = {
                   de: 'Setz den Zylinderkopf wieder auf und zieh die Schrauben über Kreuz mit Drehmoment an.' } },
       ],
     },
-    diagnose: [
-      { symptoms: [{ en: 'Low power', de: 'Wenig Leistung' }, 'power', 'weak', 'compression'],
-        match: ['piston', 'ring', 'cylinder'],
+    faults: [
+      { symptom: { en: 'Low power', de: 'Wenig Leistung' },
         text: { en: 'Low power points to compression loss — worn rings or a scored bore. Highlighted is the piston assembly.',
                 de: 'Wenig Leistung deutet auf Kompressionsverlust hin — verschlissene Kolbenringe oder eine riefige Laufbuchse. Hervorgehoben ist die Kolbengruppe.' } },
-      { symptoms: [{ en: 'Knocking noise', de: 'Klopfendes Geräusch' }, 'knock', 'noise', 'rattle'],
-        match: ['crank', 'bearing', 'rod'],
+      { symptom: { en: 'Knocking noise', de: 'Klopfendes Geräusch' },
         text: { en: 'A knock under load is often a rod or main bearing. Highlighted is the rotating assembly.',
                 de: 'Ein Klopfen unter Last kommt oft von einem Pleuel- oder Hauptlager. Hervorgehoben ist der Kurbeltrieb.' } },
     ],
@@ -653,7 +621,7 @@ const ASSEMBLE_STEPS = {
 
 /**
  * Suggestion chips for Fix's ask-screen ("What should we fix?"). Derived from
- * the authored diagnose symptoms — the problems we already know this object
+ * the authored fault symptoms — the problems we already know this object
  * has — so the suggestions ride the existing authored knowledge instead of
  * becoming a second, parallel hardcode. They are just canned voice inputs:
  * tapping one feeds the same DGPT planner a spoken phrase would.
@@ -661,8 +629,8 @@ const ASSEMBLE_STEPS = {
 export function fixSuggestions(modelKey) {
   const c = CONTENT[modelKey];
   const out = [];
-  for (const d of c?.diagnose ?? []) {
-    const label = tr(d.symptoms[0]);
+  for (const d of c?.faults ?? []) {
+    const label = tr(d.symptom);
     if (!out.includes(label)) out.push(label);
     if (out.length >= 4) break;
   }
@@ -756,40 +724,29 @@ export function resolveAssemble(modelKey, parts) {
   return { title: t('assemble.genericTitle'), steps };
 }
 
-/** Diagnose entries → [{ label, symptoms, indices, text }]. */
-export function resolveDiagnose(modelKey, parts) {
-  const entries = CONTENT[modelKey]?.diagnose ?? [];
-  return entries.map((e) => ({
-    label: tr(e.symptoms[0]),   // the chip caption, in the selected language
-    symptoms: e.symptoms,
-    indices: findParts(parts, e.match),
-    text: tr(e.text),
-  }));
-}
-
 /**
  * A compact, spoken-friendly digest of everything we've authored about a model:
  * the repair procedure and every symptom → cause → fix. Handed to the AI tutor
  * as grounding so free-form questions ("why does it sink?", "how do I fix the
  * wobble?", "what makes it squeak?") are answered from THIS chair's real faults
- * and repairs, not generic guesses — while the canned chips stay for a reliable
- * tap/voice demo. The UI-only "Highlighted is the X." tail is stripped so the AI
- * doesn't parrot it. Returns '' when a model has no authored content.
+ * and repairs, not generic guesses. The "Highlighted is the X." tail is a
+ * leftover of the old symptom picker and is stripped, so the AI doesn't parrot a
+ * sentence about highlighting. Returns '' when a model has no authored content.
  */
 export function knowledgeDigest(modelKey) {
   const c = CONTENT[modelKey];
   if (!c) return '';
-  // Strip the UI-only "Highlighted is the X." tail in either language, so the
-  // AI doesn't parrot a sentence about the app's own highlighting.
+  // Strip the "Highlighted is the X." tail in either language, so the AI doesn't
+  // parrot a sentence about the app's own highlighting.
   const clean = (s) => tr(s).replace(/\s*(?:Highlighted is|Hervorgehoben (?:ist|sind))[^.]*\.\s*$/i, '').trim();
   const lines = [];
   if (c.about) lines.push(tr(c.about));
   if (c.fix?.title) {
     lines.push(`${t('digest.procedure')} — ${tr(c.fix.title)}: ${c.fix.steps.map((s) => clean(s.text)).join(' ')}`);
   }
-  if (c.diagnose?.length) {
+  if (c.faults?.length) {
     lines.push(`${t('digest.faults')} ` +
-      c.diagnose.map((d) => `${tr(d.symptoms[0])}: ${clean(d.text)}`).join(' '));
+      c.faults.map((d) => `${tr(d.symptom)}: ${clean(d.text)}`).join(' '));
   }
   return lines.join(' ');
 }

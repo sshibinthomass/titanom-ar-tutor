@@ -4,14 +4,14 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { buildExplodedView, setExplode, setPartExplode, isolateParts, clearPartStates, setHighlight, setGhostStyle, findParts } from './explode.js';
 import { updateTweens, tweenTo, cancelTween, isTweening, easeInOutCubic, flyToParts, moveCamera } from './animate.js';
 import { attachPicker, attachDragger } from './select.js';
-import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest, fixSuggestions, resolvePlanParts, partLabel, canonicalName } from './modes.js';
+import { MODE_LIST, resolveFix, resolveAssemble, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest, fixSuggestions, resolvePlanParts, partLabel, canonicalName } from './modes.js';
 import { LANGS, getLang, setLang, onLangChange, t, locale, applyStaticTranslations } from './i18n.js';
 import { isARSupported, startAR, updateAR, endAR, requestMove, setInteractor, setManipulationEnabled, setPivotScale, getFitScale } from './ar.js';
 import { startPuzzle, stopPuzzle, updatePuzzle, puzzleInteractor, isPuzzleActive, puzzleAutoPlace, puzzleHintIndices, puzzleStatus, puzzleAnswerByName, puzzleAnswerCandidates } from './puzzle.js';
 import { speak, stop as stopSpeaking, isSpeaking } from './tts.js';
 import { primeSfx, playSfx } from './sfx.js';
 import { createRecognizer } from './voice.js';
-import { answerQuestion, answerDiagnosis, explainNextPart, generateFixPlan, resolveSpokenPart } from './tutor.js';
+import { answerQuestion, explainNextPart, generateFixPlan, resolveSpokenPart } from './tutor.js';
 import { startFixAnim, stopFixAnim, updateFixAnim, isObjectAction } from './fixanim.js';
 import { aiAvailable } from './ai.js';
 // `homeView` here is the *camera's* default framing; the home screen's current
@@ -486,8 +486,8 @@ function setExplodeAmount(amount, { animate = false, duration = 700 } = {}) {
     onExplodeChange();
     return;
   }
-  // Already there (e.g. Fix → Diagnose, both at the same mild spread): don't
-  // collapse and re-expand for nothing.
+  // Already there (e.g. Explore → Quiz, both at the same spread): don't collapse
+  // and re-expand for nothing.
   if (Math.abs(to - from) < 1e-4) return;
 
   const n = parts.length;
@@ -533,7 +533,7 @@ function restBounds() {
 }
 
 // Lift the whole exploded group so its lowest point rests on the ground plane
-// (never sinks below it — the complaint in Diagnose, where parts fan out downward).
+// (never sinks below it — the complaint in the spread modes, where parts fan out downward).
 // Works in the group's PARENT frame, so it's correct both on the desktop scene
 // (parent = scene, ground = world y0) and in AR (parent = pivot, ground = the
 // floor anchor at pivot y0). Yaw + uniform scale preserve the vertical axis, so
@@ -589,8 +589,6 @@ let steps = [];        // fix / assemble: [{ index, text }]
 let stepIndex = 0;
 let stepTitle = '';
 let stepKicker = '';
-let diagnoses = [];    // diagnose: [{ symptoms, index, text }]
-let diagnoseSeq = 0;   // guards against out-of-order AI answers when chips are tapped quickly
 let quizItems = [];    // quiz: [{ index, question, answer }]
 let quizIndex = 0;
 let quizRevealed = false;
@@ -651,8 +649,8 @@ function showCard(kicker, bodyHtml, meta = '', { chips = null, nav = false } = {
 function hideCard() { ui.card.classList.remove('show'); }
 
 // Reset all part visuals to a clean, fully-assembled, fully-visible state.
-// The collapse animates, but a mode that immediately re-spreads (Fix, Diagnose,
-// Quiz) replaces the tween before it ticks, so there's no collapse-then-expand
+// The collapse animates, but a mode that immediately re-spreads (Fix, Quiz)
+// replaces the tween before it ticks, so there's no collapse-then-expand
 // flicker on the way in — see setExplodeAmount's no-op guard.
 function resetParts() {
   clearPartStates(parts);
@@ -718,7 +716,6 @@ function enterMode(id) {
   if (id === 'explore') return enterExplore();
   if (id === 'fix') return enterFix();
   if (id === 'assemble') return enterAssemble();
-  if (id === 'diagnose') return enterDiagnose();
   if (id === 'quiz') return enterQuiz();
 }
 
@@ -1379,38 +1376,6 @@ function puzzleHint() {
   track('puzzle-hint');
 }
 
-// --- Diagnose: pick a symptom → highlight the likely part ---
-function enterDiagnose() {
-  diagnoses = resolveDiagnose(currentKey(), parts);
-  mildExplode();
-  if (!diagnoses.length) {
-    showCard(kicker('diagnose'), t('diagnose.none'));
-    return;
-  }
-  const chips = diagnoses.map((d, i) => ({
-    label: d.label,
-    onClick: () => showDiagnosis(i),
-  }));
-  showCard(kicker('diagnose'), t('diagnose.pick'), '', { chips });
-}
-async function showDiagnosis(i) {
-  const d = diagnoses[i];
-  const myReq = ++diagnoseSeq;               // newest pick wins if answers race
-  isolateParts(parts, d.indices);
-  flyTo(d.indices);
-  const chips = diagnoses.map((dd, j) => ({ label: dd.label, onClick: () => showDiagnosis(j) }));
-  const partName = d.indices.length ? partLabel(parts[d.indices[0]]) : '';
-  focusedPart = partName || focusedPart;
-  const meta = partName ? t('diagnose.likely', { part: partName }) : '';
-  // Highlight the part immediately, then let dGPT explain the fault — grounded in
-  // the authored diagnosis (d.text) so it stays on this part and can't invent.
-  showCard(kicker('diagnose'), t('diagnose.working'), meta, { chips });
-  const ans = await answerDiagnosis(getContext(), { symptom: d.label, part: partName, reference: d.text });
-  if (myReq !== diagnoseSeq) return;         // a newer symptom was picked meanwhile
-  showCard(kicker('diagnose'), esc(ans), meta, { chips });
-  say(ans);
-}
-
 // --- Quiz: highlight a part, ask you to name it ---
 function enterQuiz() {
   quizItems = resolveQuiz(currentKey(), parts);
@@ -1498,9 +1463,9 @@ function getContext() {
     // ALL authored per-part facts (MARKUS_INFO). Never shown or spoken directly
     // — they ground the LLM's answer about whichever part the question concerns.
     partInfo: partInfoDigest(currentKey()),
-    // Authored fix + diagnosis knowledge for this model, so the AI tutor grounds
+    // Authored repair + fault knowledge for this model, so the AI tutor grounds
     // free-form answers in the real faults instead of guessing.
-    diagnostics: knowledgeDigest(currentKey()),
+    faults: knowledgeDigest(currentKey()),
   };
 }
 
@@ -1553,7 +1518,7 @@ async function handleSpeech(text) {
   }
 
   // Fix mode, waiting for a problem: the utterance IS the fix request — the
-  // content input this mode exists to receive (a Diagnose chip, spoken), not a
+  // content input this mode exists to receive (a suggestion chip, spoken), not a
   // command; it never navigates or switches modes. Speaking again while a plan
   // is still being drafted simply replaces it (fixSeq — newest request wins).
   if (currentMode === 'fix' && (fixState === 'ask' || fixState === 'planning') && aiAvailable()) {
@@ -1847,7 +1812,7 @@ ui.langToggle.addEventListener('click', () => setLang(ui.langToggle.dataset.next
  *
  * The chrome and the labels are re-read in place, but the *card* is not: its
  * content is authored text resolved when the mode was entered, and half of it
- * (a generated Fix plan, a diagnosis the LLM wrote) exists only in the language
+ * (a generated Fix plan, an answer the LLM wrote) exists only in the language
  * it was produced in. Re-entering the mode is the honest way to get a fully
  * German (or fully English) screen — the alternative is a card that stays half
  * translated, which is exactly what this feature exists to prevent.
