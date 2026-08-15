@@ -759,16 +759,21 @@ function onPuzzleStep({ index, step }) {
   say(index === 0 ? `${step.prompt} Drag the right piece into the glowing outline.` : step.prompt);
 }
 
+/**
+ * The piece went in. The reward is the **sound plus the card** — the naming line
+ * is read, not spoken: a spoken confirmation runs longer than the pause before
+ * the next step arms, so it collided with the next prompt (and, being newer, the
+ * prompt cut it off mid-word). One voice per placement, and it is the one that
+ * tells the learner what to do next.
+ */
 function onPuzzleCorrect({ step, assisted }) {
   focusedPart = step.name || null;
-  playSfx('snap'); // lands on the placement; the spoken line follows a beat later
-  const lead = assisted ? 'That one is the' : 'Yes — the';
+  playSfx('snap'); // the whole audible reward for a correct drop
   renderPuzzleCard(
     `<b>${assisted ? '' : '✅ '}${step.name}</b><span class="partdesc">${step.text}</span>`,
     puzzleMeta(),
     puzzleStatus().stepIndex + 1
   );
-  say(`${lead} ${step.name}. ${step.text}`);
   track(assisted ? 'puzzle-assist-placed' : 'puzzle-correct', {
     metadata: { model: ui.model.value, part: step.name },
   });

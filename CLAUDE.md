@@ -154,8 +154,13 @@ and the tutor says **why** that part comes later.
 Three design rules hold the learning value; don't quietly undo them:
 
 - **Prompt before label.** `ASSEMBLE_PROMPT` asks by function or position and
-  never names the part; `ASSEMBLE_TEXT` (the naming line) is spoken only *after*
-  a correct placement. Naming it up front turns recall into fetching.
+  never names the part; `ASSEMBLE_TEXT` (the naming line) is revealed only
+  *after* a correct placement. Naming it up front turns recall into fetching.
+  The reveal is **shown on the card, not spoken** — a correct drop's only audio
+  is the `snap` cue. Speaking it collided with the next step's prompt (and lost,
+  since the newer utterance interrupts), so the one voice per placement is the
+  one that says what to do next. `ADVANCE_SECONDS` is sized to let the cue ring
+  out before that prompt; don't shorten it back.
 - **A failed drop points forward, not back.** The shake and the red flash
   already say the drop failed, so the words don't repeat it: they name the part
   to reach for. `explainNextPart()` (tutor.js) leads with the expected part and

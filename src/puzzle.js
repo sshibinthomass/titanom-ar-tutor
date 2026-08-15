@@ -46,7 +46,10 @@ const SCATTER_LAMBDA = 5.5;   // the opening teardown — slower, so it reads as
 const SCATTER_STAGGER = 0.075; // seconds between each group leaving, top-down
 const SNAP_LAMBDA = 16;       // damping settling into the slot
 const REJECT_SECONDS = 0.8;   // red flash + shake duration
-const ADVANCE_SECONDS = 0.55; // pause on the completed step before the next prompt
+const ADVANCE_SECONDS = 1.2;  // pause on the completed step before the next prompt.
+                              // Nothing is spoken on a correct drop, so this is
+                              // sized to let the snap cue (~1 s) finish first —
+                              // cue, then the next prompt, never both at once.
 const RING_BASE = 1.35;       // scatter ring radius, in model radii
 const RING_STAGGER = 0.24;    // alternate rows so parts don't overlap
 
