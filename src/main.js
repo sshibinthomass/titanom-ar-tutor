@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { buildExplodedView, setExplode, setPartExplode, isolateParts, clearPartStates, setHighlight, findParts } from './explode.js';
+import { buildExplodedView, setExplode, setPartExplode, isolateParts, clearPartStates, setHighlight, setGhostStyle, findParts } from './explode.js';
 import { updateTweens, tweenTo, cancelTween, isTweening, easeInOutCubic, flyToParts, moveCamera } from './animate.js';
 import { attachPicker, attachDragger } from './select.js';
 import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest, fixSuggestions, resolvePlanParts } from './modes.js';
@@ -84,6 +84,22 @@ const scene = new THREE.Scene();
 // this light default just avoids a first-frame flash before that runs.
 const SCENE_BG = { light: 0xe9ecf1, dark: 0x14161c };
 scene.background = new THREE.Color(SCENE_BG.light);
+
+// The "disabled part" wireframe has to stay legible on three very different
+// backdrops, so it is re-coloured per backdrop rather than picking one tint and
+// hoping: dark ink on the light backdrop, a bright line on the dark one, and in
+// AR — where the backdrop is whatever room the user is standing in — a saturated
+// cyan at full self-lit strength, which no ordinary floor or wall competes with.
+const GHOST_STYLE = {
+  light: { color: 0x24476e, opacity: 0.85, intensity: 0.5 },
+  dark: { color: 0x7fd4ff, opacity: 0.8, intensity: 0.95 },
+  ar: { color: 0x00e0ff, opacity: 0.95, intensity: 1.2 },
+};
+function applyGhostTheme() {
+  setGhostStyle(renderer.xr.isPresenting
+    ? GHOST_STYLE.ar
+    : (document.documentElement.dataset.theme === 'dark' ? GHOST_STYLE.dark : GHOST_STYLE.light));
+}
 
 const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 5000);
 camera.position.set(3, 2.2, 3.5);
@@ -481,7 +497,13 @@ ui.tint.addEventListener('change', () => { if (originalScene) rebuild(); });
 function applyWireframe(on) {
   for (const p of parts) {
     const mats = Array.isArray(p.mesh.material) ? p.mesh.material : [p.mesh.material];
-    for (const m of mats) m.wireframe = on;
+    for (const m of mats) {
+      // A ghosted part is already wireframe by design; don't un-ghost it here —
+      // move the baseline it will be restored to instead, so un-ghosting later
+      // lands on the toggle's current setting rather than the one it was ghosted under.
+      if (m.userData._origWireframe !== undefined) m.userData._origWireframe = on;
+      else m.wireframe = on;
+    }
   }
 }
 ui.wireframe.addEventListener('change', () => applyWireframe(ui.wireframe.checked));
@@ -826,9 +848,12 @@ async function playBeats(preface) {
     markBeat(i);
     // Spotlight follows the sentence. A whole-object beat ("lay the chair on
     // its side") un-ghosts everything first — the chair tipping is the point,
-    // and at 7% opacity nobody would see it happen.
+    // and a wireframe chair tipping over reads as nothing at all.
+    // `highlight: false` for the same reason Explore does it: the part you are
+    // about to put a spanner on must look like the real part, not a teal wash —
+    // the ghosted wireframe around it is what makes it stand out.
     if (isObjectAction(b.action)) clearPartStates(parts);
-    else isolateParts(parts, b.indices.length ? b.indices : s.indices);
+    else isolateParts(parts, b.indices.length ? b.indices : s.indices, { highlight: false });
     if (b.indices.length) {
       focusedPart = parts[b.indices[0]].name; // "what is this?" follows the narration
       flyTo(b.indices);
@@ -858,7 +883,8 @@ function renderStep(preface = '') {
   const s = steps[stepIndex];
   const stepIndices = s.indices || [];
 
-  isolateParts(parts, stepIndices); // spotlight this step's part(s), dim the rest
+  // Spotlight this step's part(s) in their real material, ghost the rest.
+  isolateParts(parts, stepIndices, { highlight: false });
   flyTo(stepIndices); // and bring it to the user rather than making them orbit for it
 
   const partName = stepIndices.length ? parts[stepIndices[0]].name : null;
@@ -1396,8 +1422,14 @@ async function startARFlow() {
           ? 'Grabbed — drag to move · pinch to zoom · twist to rotate · tap to release.'
           : 'Released. Long-press the object again to move or resize it.');
       },
-      onEnd: () => { document.body.classList.remove('ar-active'); arLifeSize = false; track('ar-exit'); },
+      onEnd: () => {
+        document.body.classList.remove('ar-active');
+        arLifeSize = false;
+        applyGhostTheme(); // back to the theme's ghost colour, off the camera feed
+        track('ar-exit');
+      },
     });
+    applyGhostTheme(); // the session is live now → the AR ghost colour
     setInteractor(puzzleInteractor); // the finger's target ray drives part dragging
     showCaption('Point at the floor, then tap to place the chair.');
   } catch (e) {
@@ -1438,6 +1470,7 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   scene.background = new THREE.Color(dark ? SCENE_BG.dark : SCENE_BG.light);
   ui.themeToggle.textContent = dark ? '☀️ Light' : '🌙 Dark';
+  applyGhostTheme();
   try { localStorage.setItem('theme', theme); } catch {}
 }
 applyTheme(

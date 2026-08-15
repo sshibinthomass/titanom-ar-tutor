@@ -193,6 +193,8 @@ export function buildExplodedView(root, opts = {}) {
   const useTint = opts.tint ?? false;
   const minTriangles = opts.minTriangles ?? 0;
 
+  ghosted.clear(); // the previous model's meshes are about to be thrown away
+
   root.updateWorldMatrix(true, true);
 
   // Collect meshes + a world-space clone of each geometry.
@@ -307,23 +309,98 @@ export function setHighlight(part, on, color = 0x4ecdc4) {
   });
 }
 
-/** Fade a part back (used to spotlight one part by dimming the rest). */
-export function setDimmed(part, on, opacity = 0.07) {
-  eachMaterial(part.mesh, (m) => {
+// ---- The "disabled" (ghost) look -------------------------------------------
+//
+// A part that is *not* selected is drawn as a self-lit wireframe: its texture is
+// dropped, its faces stop rendering, and its edges are painted in one flat
+// colour. That is the whole point — a merely faded part still shows its own
+// material, so on the Markus (dark grey mesh, black plastic) "faded" and
+// "selected" differ only by brightness, which is exactly what disappears on a
+// phone in daylight, in dark mode, and over an AR camera feed. A wireframe reads
+// as *deliberately switched off* on any backdrop, and it lets the one solid,
+// fully-textured part behind it show through instead of hiding it.
+//
+// The colour has to follow the backdrop, so main.js pushes a style whenever the
+// theme flips or an AR session starts/ends; `setGhostStyle` re-paints whatever is
+// currently ghosted, so a mid-mode theme switch doesn't leave stale colours.
+const GHOST = { color: 0x2f4a6d, opacity: 0.75, intensity: 0.55 };
+
+// Every part currently ghosted, so a style change can re-paint them in place.
+const ghosted = new Set();
+
+function paintGhost(mesh) {
+  eachMaterial(mesh, (m) => {
+    m.color?.setHex(GHOST.color);
+    if (m.emissive) {
+      m.emissive.setHex(GHOST.color);
+      // Self-lit: lines shaded by the scene lights go dark on the unlit side,
+      // and half a ghost is worse than none.
+      m.emissiveIntensity = GHOST.intensity;
+    }
+    m.opacity = GHOST.opacity;
+  });
+}
+
+/**
+ * Re-style the disabled look. `style` may set any of { color, opacity,
+ * intensity }; anything omitted is left alone. Applies immediately to every
+ * part that is ghosted right now.
+ */
+export function setGhostStyle(style = {}) {
+  Object.assign(GHOST, style);
+  for (const mesh of ghosted) paintGhost(mesh);
+}
+
+/** Ghost a part out (used to spotlight one part by disabling the rest). */
+export function setDimmed(part, on) {
+  const mesh = part.mesh;
+  eachMaterial(mesh, (m) => {
     if (on) {
+      // Save once: setGhostStyle re-paints live ghosts, so this must not
+      // re-capture the ghost's own values as the "original".
       if (m.userData._origTransparent === undefined) {
         m.userData._origTransparent = m.transparent;
         m.userData._origOpacity = m.opacity;
+        m.userData._origWireframe = m.wireframe;
+        m.userData._origMap = m.map ?? null;
+        m.userData._origColor = m.color ? m.color.getHex() : null;
+        if (m.emissive && m.userData._origEmissive === undefined) {
+          m.userData._origEmissive = m.emissive.getHex();
+        }
       }
+      m.wireframe = true;
       m.transparent = true;
-      m.opacity = opacity;
       m.depthWrite = false;
+      // Drop the texture: a dark albedo map would swallow the ghost colour and
+      // put us back where we started.
+      if (m.map) { m.map = null; m.needsUpdate = true; }
+      paintGhost(mesh);
     } else {
-      m.transparent = m.userData._origTransparent ?? false;
-      m.opacity = m.userData._origOpacity ?? 1;
+      if (m.userData._origTransparent === undefined) return; // never ghosted
+      m.wireframe = m.userData._origWireframe;
+      m.transparent = m.userData._origTransparent;
+      m.opacity = m.userData._origOpacity;
       m.depthWrite = true;
+      if (m.userData._origColor !== null) m.color.setHex(m.userData._origColor);
+      if (m.emissive) {
+        // _origEmissive is the permanent record of the material's real emissive
+        // (setHighlight reads it too), so it is deliberately not cleared below.
+        m.emissive.setHex(m.userData._origEmissive ?? 0x000000);
+        m.emissiveIntensity = 1.0;
+      }
+      if (m.userData._origMap) { m.map = m.userData._origMap; m.needsUpdate = true; }
+      // Drop the ghost's saved state so the next ghost re-captures the material
+      // as it stands then — otherwise a later Wireframe/tint change would be
+      // undone the next time this part is un-ghosted.
+      delete m.userData._origTransparent;
+      delete m.userData._origOpacity;
+      delete m.userData._origWireframe;
+      delete m.userData._origMap;
+      delete m.userData._origColor;
     }
   });
+  if (on) ghosted.add(mesh);
+  else ghosted.delete(mesh);
 }
 
 /**
@@ -333,8 +410,9 @@ export function setDimmed(part, on, opacity = 0.07) {
  *
  * opts.highlight (default true): glow the spotlit parts with an emissive tint.
  * Pass `false` to leave them at their original material so their real texture
- * shows through — the parts still stand out because everything else is dimmed.
- * Explore uses this so a tapped part reads as "fully textured, rest ghosted".
+ * shows through — the parts still stand out because everything else is drawn as
+ * a wireframe ghost. Explore and Fix both do this: the part you are being told
+ * about must look like the real thing you are holding, not a teal wash.
  */
 export function isolateParts(parts, indices, opts = {}) {
   const highlight = opts.highlight ?? true;
