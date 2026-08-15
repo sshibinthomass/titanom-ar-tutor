@@ -486,6 +486,103 @@ export function puzzleAutoPlace() {
   solveStep(true);
 }
 
+/**
+ * Put down whatever is being carried, without judging it.
+ *
+ * Needed before a *spoken* answer is applied: `updatePuzzle` writes the held
+ * part's position every frame from the carry target, so leaving it held while
+ * solveStep/reject queues a tween for the same part would have the two fight.
+ */
+function releaseHeld() {
+  if (!state.held) return;
+  const { index } = state.held;
+  state.held = null;
+  state.captured = false;
+  setHighlight(state.parts[index], false);
+  state.cb.onCarry?.(-1);
+  sendHome(index);
+}
+
+/**
+ * Answer the current step by **naming** a part rather than dragging one — the
+ * voice route (main.js resolves the spoken phrase to a canonical name first,
+ * locally when it can and via DGPT when the learner described the part instead
+ * of naming it).
+ *
+ * It deliberately reuses the drag outcomes instead of inventing its own: a
+ * correct name runs `solveStep()` and a wrong one runs `reject()`, so the sound
+ * cue, the red flash and shake, the card and the tutor's explanation are
+ * identical however the learner answered. Only the input differs — which is the
+ * point, since dragging and naming are meant to test the same thing.
+ *
+ * `name` is a **canonical** part name (`p.name`). Returns:
+ *   'correct' | 'wrong' | 'placed' (already built in) | 'unknown' (no such part)
+ *   | null when no puzzle is awaiting an answer.
+ */
+export function puzzleAnswerByName(name) {
+  if (!state || state.advanceIn > 0) return null;
+  const step = state.steps[state.stepIndex];
+  if (!step) return null;
+
+  const target = String(name || '').trim().toLowerCase();
+  if (!target) return 'unknown';
+  const matches = [];
+  state.parts.forEach((p, i) => {
+    const n = (p.name || '').toLowerCase();
+    // An exact part name, or the semantic group it belongs to: "Caster" has to
+    // catch Caster wheels / Caster stem / Caster brake hood. That is the same
+    // name-or-name-plus-space rule resolveAssemble groups its steps by, so a
+    // group name is exactly as good an answer as a part name — and it is the
+    // more natural thing to say, since a step *is* a group.
+    if (n === target || n.startsWith(`${target} `)) matches.push(i);
+  });
+  if (!matches.length) return 'unknown';
+
+  // One name can cover several pieces (five casters), and any of them answers
+  // the step — the same rule the drag follows in distanceToStep().
+  if (matches.some((i) => step.indices.includes(i) && !state.solved.has(i))) {
+    releaseHeld();
+    solveStep(false);
+    return 'correct';
+  }
+  const loose = matches.find((i) => !state.solved.has(i));
+  if (loose === undefined) return 'placed';
+  releaseHeld();
+  reject(loose);
+  return 'wrong';
+}
+
+/**
+ * What a spoken answer is allowed to name: `groups` — the semantic group of
+ * every step not yet built — and `parts`, the individual pieces still loose in
+ * the ring.
+ *
+ * Groups are the useful list for the LLM resolver: a step *is* a group, so they
+ * are what the puzzle grades on, and there are a dozen of them against
+ * forty-odd part names. They are sorted by label rather than left in step
+ * order, so the list itself carries no hint of what comes next — the resolver
+ * is deliberately never told which answer is the right one.
+ *
+ * Nothing here leaks to the learner; the loose parts are all visible in the
+ * ring anyway. Built parts are excluded so they can't be offered as answers.
+ */
+export function puzzleAnswerCandidates() {
+  if (!state) return { groups: [], parts: [], built: [] };
+
+  const asGroup = (s) => ({ name: s.name, label: s.label || s.name });
+  const byLabel = (a, b) => a.label.localeCompare(b.label);
+  const groups = state.steps.filter((s, k) => k >= state.stepIndex && s.name).map(asGroup).sort(byLabel);
+  // Already built. Never offered to the resolver as an answer, but still worth
+  // *recognising*: these are the only names the learner has actually been told,
+  // so naming one is a likely mistake and deserves "that one's already on"
+  // rather than "I didn't catch that".
+  const built = state.steps.filter((s, k) => k < state.stepIndex && s.name).map(asGroup).sort(byLabel);
+
+  const seen = new Set();
+  state.parts.forEach((p, i) => { if (!state.solved.has(i) && p.name) seen.add(p.name); });
+  return { groups, parts: [...seen], built };
+}
+
 /** Which part indices the current step wants (for the Hint chip). */
 export function puzzleHintIndices() {
   const step = state && state.steps[state.stepIndex];
@@ -502,6 +599,10 @@ export function puzzleStatus() {
     mistakes: state.mistakes,
     assists: state.assists,
     carrying: state.held ? state.held.index : -1,
+    // A step is on screen and unanswered — i.e. a spoken answer would land.
+    // False during the pause after a correct drop, when the next step has been
+    // solved but not yet armed.
+    awaiting: state.advanceIn <= 0 && !!state.steps[state.stepIndex],
   };
 }
 

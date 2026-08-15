@@ -180,6 +180,14 @@ const STRINGS = {
   // -- Assemble --------------------------------------------------------------
   'assemble.dragHint':  { en: 'Drag the right piece into the glowing outline.',
                           de: 'Zieh das richtige Teil in den leuchtenden Umriss.' },
+  // Shown instead of dragHint when a mic is available. Naming the piece counts
+  // as an answer, so the hint has to say so — an unadvertised voice route is one
+  // nobody uses, and in AR it is the easier of the two ways to answer.
+  'assemble.dragOrSayHint': { en: 'Drag the right piece into the glowing outline — or just say what it is.',
+                          de: 'Zieh das richtige Teil in den leuchtenden Umriss — oder sag einfach, was es ist.' },
+  'assemble.alreadyOn': { en: 'The {part} is already on.',   de: '{part} ist schon dran.' },
+  'assemble.unclear':   { en: "I didn't catch which piece you meant. Say what it looks like, or drag it in.",
+                          de: 'Ich habe nicht verstanden, welches Teil du meinst. Beschreib es, oder zieh es rein.' },
   'assemble.hint':      { en: '💡 Hint',                    de: '💡 Tipp' },
   'assemble.placeForMe':{ en: '✋ Place it for me',          de: '✋ Für mich platzieren' },
   'assemble.hintCaption': { en: 'That one — drag it into the outline.',

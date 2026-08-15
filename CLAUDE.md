@@ -149,7 +149,8 @@ can be adjusted on the surfaces the app is actually used on.
    sentence by sentence. See "Fix's narrated gestures" below. The authored `CONTENT[*].fix`
    procedure (one beat per step, carrying an authored verb) is the fallback when
    DGPT is unconfigured or unreachable — never the only path.
-3. **Assemble** — a **drag-to-build puzzle** (see below); the user places each group.
+3. **Assemble** — a **drag-to-build puzzle** (see below); the user places each
+   group, by dragging it or by **saying what it is**.
 4. **Diagnose** — pick a symptom chip → highlight the likely part.
 5. **Quiz** — highlight a part, ask the user to name it.
 
@@ -344,6 +345,45 @@ build. Voice "move it" still repositions. The puzzle also asks AR for
 **life-size** (`MODELS[*].realHeight` ÷ the 0.7 m fit) rather than tabletop
 scale, so reaching for a part rehearses the real reach.
 
+### Answering Assemble out loud
+
+A step can be answered by **saying** which piece goes on next instead of
+dragging it (`assembleVoiceAnswer` in main.js, `puzzleAnswerByName` in
+puzzle.js). It is the same question, graded the same way — only the input
+differs — and it matters for two reasons: the drag is the app's fiddliest
+interaction on a phone (all of `applyAssist` exists to prop it up), and *naming*
+a piece is a harder recall task than pointing at one, since the ghost outline
+already shows where it goes.
+
+The rules that make it work — don't regress them:
+
+1. **The resolver is never told which part is correct.** Given the answer, an
+   LLM helpfully maps any vague noise onto it and the puzzle becomes unloseable.
+   `resolveSpokenPart` (tutor.js) gets only the unbuilt step groups, sorted by
+   label so even the *order* carries no hint, and is told to report what the
+   learner said even when that is plainly wrong.
+2. **A question is not a wrong answer.** The same resolver classifies the
+   utterance, and `QUESTION` falls straight through to the question channel —
+   asking "what is a caster?" mid-build must never cost a wrong try. The one
+   round trip this adds to questions in Assemble is the price of it.
+3. **Exact matches never reach the LLM.** `localPartAnswer` strips a little
+   filler and matches names exactly, so "star base" is graded instantly. That is
+   also the only resolver when DGPT is unconfigured — there, and only there, it
+   also accepts the name inside a short phrase, guarded by `QUESTION_LEAD`.
+4. **Group names are answers.** A step *is* a group, and "caster" is what a
+   learner says — so `puzzleAnswerByName` matches a part whose name equals the
+   answer *or* starts with it plus a space, the same rule `resolveAssemble`
+   groups steps by. `canonicalPartName` then walks a near miss home through
+   `findParts`, word by word: findParts matches by substring, so "Gas lift"
+   only ever reaches "Gas cylinder" once "gas" is tried on its own.
+5. **A correct answer says nothing**, exactly like a correct drop — the snap cue
+   and the card are the whole reward, and speaking would collide with the next
+   step's prompt (see ADVANCE_SECONDS above). A wrong one goes through
+   `reject()`, so it gets the identical flash, shake and `explainNextPart` line.
+6. **Answers are refused during the advance pause** (`awaiting` is false while
+   `advanceIn > 0`), and a resolved answer is dropped if the step moved on while
+   the LLM was thinking. Both are checked against the step index, not a flag.
+
 The secondary office chair is one fused mesh → 20 connected components, mapped
 to names (Backrest, Gas cylinder, Armrest, Seat, Star base, Caster×5, Base hub,
 Height lever) in `SEMANTIC_NAMES['office-chair']`. Several islands share a name
@@ -362,11 +402,18 @@ The mic (🎤 Ask) is a **pure question channel** — a spoken phrase is never
 parsed into an app command, so misheard noise can't switch modes or "act on
 its own". Don't reintroduce voice commands; the two strictly-matched
 exceptions in `handleSpeech` (a bare mute phrase, and "move it" inside an AR
-session, which has no button) are deliberate and complete. One *mode-scoped
-content route* also exists and is not a command: while Fix mode is waiting for
-a problem (`fixState === 'ask' | 'planning'`), the utterance is the fix
-request itself — it feeds `startFixRequest` (the DGPT planner), exactly like
-tapping a suggestion chip, and never navigates or switches modes.
+session, which has no button) are deliberate and complete. Two *mode-scoped
+content routes* also exist and are not commands — in both, the utterance is the
+content that mode exists to receive, and neither can navigate or switch modes:
+
+1. **Fix, waiting for a problem** (`fixState === 'ask' | 'planning'`): the
+   utterance is the fix request itself — it feeds `startFixRequest` (the DGPT
+   planner), exactly like tapping a suggestion chip.
+2. **Assemble, with a step unanswered** (`puzzleStatus().awaiting`): the
+   utterance is the learner's *answer* to "which part goes on next?" — see
+   "Answering Assemble out loud" below. It hands anything that turns out to be
+   a question straight back to the question channel, so asking mid-build still
+   works and never costs a wrong try.
 
 Capture (`voice.js`) is an always-on pipeline, not the Web Speech API: a
 WebAudio **VAD** (band-limited 300–3400 Hz energy over an adaptive

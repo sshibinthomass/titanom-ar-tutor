@@ -302,6 +302,72 @@ export async function explainNextPart(ctx, { attempted, expected, stepText }) {
 }
 
 /**
+ * Read a spoken utterance in the Assemble puzzle as the learner's **answer** to
+ * "which part goes on next?".
+ *
+ * Why this needs an LLM rather than a keyword table: the puzzle reveals a part's
+ * name only *after* it has been placed correctly, so on the intended path the
+ * learner cannot yet know what the piece is called. Describing it by shape,
+ * position or function ("the star thing at the bottom", "the pole in the
+ * middle") is a legitimate answer to a prompt that asked about function, and
+ * resolving that to one part is exactly the semantic job DGPT is for. main.js
+ * tries an exact local match first, so this only runs for the descriptive case.
+ *
+ * The model is deliberately **not told which part is correct**. Given the answer
+ * it would helpfully map any vague noise onto it and the puzzle would become
+ * unloseable; its only job is to report what the learner said.
+ *
+ * `candidates` are display-language names of the unplaced parts. Returns
+ * { part, question }: `part` is the candidate the utterance named (null if
+ * none), and `question` is true when it wasn't an attempt at a part at all — in
+ * which case main.js falls through to the normal question channel.
+ */
+export async function resolveSpokenPart(ctx, phrase, candidates) {
+  if (!aiAvailable() || !candidates.length) return { part: null, question: false };
+
+  const trace = startTrace('ai-assemble-answer', {
+    input: phrase,
+    metadata: { model: ctx.modelLabel, candidates: candidates.length },
+  });
+
+  const system = [
+    languageRule(),
+    // Nothing here is spoken or shown: the whole reply is one machine-read
+    // header, and the part name in it is a lookup key, not prose.
+    'Exception to the language rule: this reply is machine-read and never shown to anyone. Output ONLY the single header line described below. The part name in it is copied verbatim from the candidate list, in whatever language that list uses — never translate it, never rephrase it.',
+    'You are the input parser for an assembly-training app.',
+    `A learner is rebuilding a ${ctx.modelLabel}. They were asked which part goes on next and answered out loud; this is the transcript of what they said.`,
+    `The parts still waiting to be fitted are: ${candidates.join('; ')}.`,
+    'If the utterance names or describes exactly one of those parts, output that part. Learners usually have not been told the name yet, so they describe the piece by its shape, its position or what it does — map such a description to the one part it can be.',
+    'If the utterance is a question, a request for a hint, or thinking out loud rather than an attempt to identify a part, output QUESTION.',
+    'If it is an attempt to identify a part but you cannot tell which one, or it fits several equally well, output NONE.',
+    // Without this the model reasons about what the app *wants* to hear.
+    'You are NOT told which part is the correct answer, and you must not try to work it out or guess at it. Report only what the learner actually said, even when that is plainly the wrong part.',
+    'Reply with exactly one line and nothing else: ANSWER: <a part name copied from the list, or QUESTION, or NONE>',
+  ].filter(Boolean).join(' ');
+
+  try {
+    const raw = await chat(
+      [{ role: 'system', content: system }, { role: 'user', content: phrase }],
+      { temperature: 0, maxTokens: 30, trace, name: 'assemble-answer' }
+    );
+    // Tolerate a missing header — a bare part name is still usable.
+    const line = (raw.match(/ANSWER:\s*([^\n]+)/i)?.[1] || raw).trim().replace(/[.!?"']+$/, '');
+    const question = /^(?:question|frage)$/i.test(line);
+    const none = /^(?:none|keine[sr]?|kein|unklar)$/i.test(line);
+    const part = question || none || !line ? null : line;
+    trace.end({ output: line, metadata: { part, question } });
+    return { part, question };
+  } catch (e) {
+    console.warn('resolveSpokenPart failed:', e.message);
+    trace.end({ output: null, metadata: { error: e.message } });
+    // Unreachable AI must not swallow the utterance: report it as a question so
+    // the caller hands it to the question channel instead of failing the step.
+    return { part: null, question: true };
+  }
+}
+
+/**
  * Answer a free-form question about the current object via DeutschlandGPT.
  * context: { modelLabel, parts:[names], mode, focusedPart, partInfo, diagnostics }
  *

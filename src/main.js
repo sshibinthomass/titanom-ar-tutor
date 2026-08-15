@@ -7,11 +7,11 @@ import { attachPicker, attachDragger } from './select.js';
 import { MODE_LIST, resolveFix, resolveAssemble, resolveDiagnose, resolveQuiz, applyNames, knowledgeDigest, partInfoDigest, fixSuggestions, resolvePlanParts, partLabel, canonicalName } from './modes.js';
 import { LANGS, getLang, setLang, onLangChange, t, locale, applyStaticTranslations } from './i18n.js';
 import { isARSupported, startAR, updateAR, endAR, requestMove, setInteractor, setManipulationEnabled, setPivotScale, getFitScale } from './ar.js';
-import { startPuzzle, stopPuzzle, updatePuzzle, puzzleInteractor, isPuzzleActive, puzzleAutoPlace, puzzleHintIndices, puzzleStatus } from './puzzle.js';
+import { startPuzzle, stopPuzzle, updatePuzzle, puzzleInteractor, isPuzzleActive, puzzleAutoPlace, puzzleHintIndices, puzzleStatus, puzzleAnswerByName, puzzleAnswerCandidates } from './puzzle.js';
 import { speak, stop as stopSpeaking, isSpeaking } from './tts.js';
 import { primeSfx, playSfx } from './sfx.js';
 import { createRecognizer } from './voice.js';
-import { answerQuestion, answerDiagnosis, explainNextPart, generateFixPlan } from './tutor.js';
+import { answerQuestion, answerDiagnosis, explainNextPart, generateFixPlan, resolveSpokenPart } from './tutor.js';
 import { startFixAnim, stopFixAnim, updateFixAnim, isObjectAction } from './fixanim.js';
 import { aiAvailable } from './ai.js';
 import { initTelemetry, track } from './telemetry.js';
@@ -1084,7 +1084,7 @@ function puzzleMeta() {
 // naming line is the reward for getting it right (see onPuzzleCorrect).
 function onPuzzleStep({ index, step }) {
   focusedPart = null; // don't leak the answer into the tutor's context
-  const how = index === 0 ? t('assemble.dragHint') : '';
+  const how = index === 0 ? t(recognizer ? 'assemble.dragOrSayHint' : 'assemble.dragHint') : '';
   renderPuzzleCard(
     `<b>${esc(step.prompt)}</b>${how ? `<span class="partdesc">${how}</span>` : ''}`,
     puzzleMeta()
@@ -1170,6 +1170,168 @@ function onPuzzleComplete({ mistakes, assists }) {
   );
   say(line);
   track('puzzle-complete', { metadata: { model: ui.model.value, lang: getLang(), mistakes, assists } });
+}
+
+// --- Assemble: answering out loud -------------------------------------------
+//
+// The learner can *say* which piece goes on next instead of dragging it. This
+// is a **mode-scoped content route**, structurally the same as Fix's spoken
+// problem (handleSpeech): it only exists while a step is on screen unanswered,
+// the utterance is only ever read as a part, and it can never navigate or
+// switch modes. Anything that turns out to be a question falls straight through
+// to the question channel, so the mic keeps working as it always did.
+//
+// Two reasons it earns its place over the drag: on a phone the drag is the
+// fiddliest interaction in the app (all of applyAssist exists to prop it up),
+// and naming a piece is a harder recall task than pointing at one — the ghost
+// outline already shows *where* it goes, so the drag only ever tested which.
+
+let answerSeq = 0;  // newest utterance wins if two answers race
+
+// Filler an answer gets wrapped in, stripped before an exact-name match. Kept
+// tiny and anchored on purpose: this is the zero-latency path, so it must be
+// almost impossible to trigger by accident. Anything it is unsure about is the
+// LLM resolver's problem, not something to guess at here.
+const ANSWER_FILLER = /^(?:it'?s|its|that'?s|thats|this is|i think it'?s|maybe|probably|the|a|an|das ist|das|der|die|ein|eine|es ist|ich glaube|vielleicht|wohl)\s+/i;
+// Only used on the no-AI path below, where nothing else can spot a question.
+const QUESTION_LEAD = /^(?:what|which|where|why|how|who|can|could|should|tell|show|help|wo|was|welche[rsn]?|warum|wieso|wie|wer|kann|soll|zeig|hilf)\b/i;
+// Dropped before the keyword fallback in canonicalPartName — as substrings
+// these match most of the model and would resolve to an arbitrary part.
+const ANSWER_STOPWORDS = new Set(['the', 'and', 'for', 'with', 'that', 'this', 'der', 'die', 'das', 'und', 'von', 'für', 'fur', 'mit']);
+
+/**
+ * Resolve a spoken phrase to a canonical part name without an LLM round trip.
+ *
+ * Exact match only (after stripping filler), because a false positive here is
+ * expensive: it would turn a question into a wrong answer and cost the learner
+ * a mistake. The one exception is when DGPT is unconfigured — then this is the
+ * only resolver there is, so it also accepts the name embedded in a short
+ * phrase, guarded against anything that opens like a question.
+ */
+function localPartAnswer(phrase) {
+  let s = phrase.toLowerCase().replace(/[.!?,;]+$/g, '').trim();
+  for (let i = 0; i < 3 && ANSWER_FILLER.test(s); i++) s = s.replace(ANSWER_FILLER, '').trim();
+  if (!s || s.split(/\s+/).length > 5) return null;
+
+  // Group names first: "caster" is a better answer than "caster stem", and it
+  // is what a learner actually says. `built` is matched too — not as an answer,
+  // but so puzzleAnswerByName can report 'placed' and we can say so.
+  const { groups, parts: loose, built } = puzzleAnswerCandidates();
+  const pool = [
+    ...groups.map((g) => [g.name, g.label]),
+    ...loose.map((n) => [n, partLabelByName(n)]),
+    ...built.map((g) => [g.name, g.label]),
+  ];
+  for (const [name, label] of pool) {
+    if (s === name.toLowerCase() || s === label.toLowerCase()) return name;
+  }
+  if (aiAvailable() || QUESTION_LEAD.test(s)) return null;
+  // No LLM to catch the rest, so this is the only resolver there is: accept the
+  // name embedded in a short phrase, having ruled out anything question-shaped.
+  return pool.find(([name, label]) => s.includes(name.toLowerCase()) || s.includes(label.toLowerCase()))?.[0] || null;
+}
+
+/**
+ * Display name for an answer, which may be a semantic group ("Caster") rather
+ * than a part. partLabelByName only knows parts, and would hand back the raw
+ * English group name in a German session.
+ */
+function answerLabel(name) {
+  const { groups, built } = puzzleAnswerCandidates();
+  return [...groups, ...built].find((g) => g.name === name)?.label || partLabelByName(name);
+}
+
+/**
+ * Walk the name the LLM echoed back to something puzzle.js matches on.
+ *
+ * It copies from the candidate list, which is in the *display* language, so try
+ * the display name and the canonical one first. The keyword fallback is what
+ * catches a near miss — the same `findParts` route `highlightPartByName` uses —
+ * because a resolver that silently answers "I didn't catch that" on a name that
+ * is one word off is worse than one that guesses within the model's own parts.
+ */
+function canonicalPartName(shown) {
+  const target = (shown || '').toLowerCase().trim();
+  if (!target) return null;
+
+  const { groups } = puzzleAnswerCandidates();
+  const group = groups.find((g) => g.label.toLowerCase() === target || g.name.toLowerCase() === target);
+  if (group) return group.name;
+
+  const hit = parts.find((p) => partLabel(p).toLowerCase() === target)
+           || parts.find((p) => (p.name || '').toLowerCase() === target);
+  if (hit) return hit.name;
+
+  // Last resort: the whole phrase as a keyword, then its individual words.
+  // findParts matches by substring, so a two-word near miss never lands whole —
+  // "Gas lift" only reaches "Gas cylinder" once "gas" is tried on its own.
+  // Filler words are dropped or they would match half the model.
+  const walked = String(canonicalName(target) || target).toLowerCase();
+  const whole = findParts(parts, [walked]);
+  if (whole.length) return parts[whole[0]].name;
+  const words = walked.split(/\s+/).filter((w) => w.length >= 3 && !ANSWER_STOPWORDS.has(w));
+  const loose = words.length ? findParts(parts, words) : [];
+  return loose.length ? parts[loose[0]].name : null;
+}
+
+/**
+ * Try to read `phrase` as an answer to the current step. Returns true when it
+ * was handled here, false to let handleSpeech treat it as a question.
+ */
+async function assembleVoiceAnswer(phrase) {
+  const my = ++answerSeq;
+  const before = puzzleStatus();
+  if (!before) return false;
+
+  // Fast path: they simply said the name. No round trip — and the only path
+  // that still works with no DGPT configured.
+  let name = localPartAnswer(phrase);
+
+  if (!name) {
+    if (!aiAvailable()) return false;   // nothing else can read it — try it as a question
+    showCaption(esc(t('voice.thinking', { text: phrase })));
+    const res = await resolveSpokenPart(
+      getContext(), phrase, puzzleAnswerCandidates().groups.map((g) => g.label)
+    );
+    if (my !== answerSeq) return true;  // a newer utterance owns the step now
+    if (res.question) return false;     // not an answer at all — fall through
+    name = res.part ? canonicalPartName(res.part) : null;
+    if (!name) {                        // meant a part, but which one is anyone's guess
+      const line = t('assemble.unclear');
+      showCaption(esc(line));
+      say(line);
+      track('puzzle-voice-answer', {
+        input: phrase,
+        metadata: { model: ui.model.value, lang: getLang(), part: res.part || null, outcome: 'unclear' },
+      });
+      return true;
+    }
+  }
+
+  // The resolver is async: Next, a drag, a mode change or a language switch
+  // could all have moved the puzzle on underneath it.
+  const now = puzzleStatus();
+  if (currentMode !== 'assemble' || !now?.awaiting || now.stepIndex !== before.stepIndex) return true;
+
+  const outcome = puzzleAnswerByName(name);
+  track('puzzle-voice-answer', {
+    input: phrase,
+    // Canonical name, like the drag path — telemetry stays comparable across languages.
+    metadata: { model: ui.model.value, lang: getLang(), part: name, outcome },
+  });
+
+  // 'correct' and 'wrong' say nothing here on purpose: solveStep/reject have
+  // already fired the cue, the card and (on a miss) the tutor's explanation,
+  // exactly as they do for a drag. Speaking on top would collide with those.
+  if (outcome === 'correct') hideCaption();  // the card carries the result
+  else if (outcome !== 'wrong') {            // 'placed' / 'unknown' / refused
+    const line = outcome === 'placed'
+      ? t('assemble.alreadyOn', { part: answerLabel(name) })
+      : t('assemble.unclear');
+    showCaption(esc(line));
+    say(line);
+  }
+  return true;
 }
 
 // Hint: glow the piece the step wants, briefly. Deliberately a separate act from
@@ -1319,6 +1481,15 @@ function showCaption(html) {
   showCaption._t = setTimeout(() => ui.voiceCaption.classList.remove('show'), 7000);
 }
 
+// Retire a caption early. A "…thinking" placeholder outlives what it was
+// waiting for whenever the result lands somewhere else — a spoken answer that
+// turns out to be correct says nothing and shows up on the card instead, and
+// leaving "…thinking" on screen for the full 7 s reads like a hang.
+function hideCaption() {
+  clearTimeout(showCaption._t);
+  ui.voiceCaption.classList.remove('show');
+}
+
 // The mic is a **question channel, nothing else**: a spoken phrase never drives
 // the app (no mode switches, no "next", no part selection). Misheard noise used
 // to turn into commands and the app would "act on its own" — that's gone. Two
@@ -1358,6 +1529,14 @@ async function handleSpeech(text) {
   if (currentMode === 'fix' && (fixState === 'ask' || fixState === 'planning') && aiAvailable()) {
     startFixRequest(phrase);
     return;
+  }
+
+  // Assemble, with a step on screen unanswered: the utterance is the learner's
+  // *answer* — the content this mode exists to receive, exactly like Fix's
+  // spoken problem above. It never navigates and never switches modes, and it
+  // hands anything that turns out to be a question straight back to us.
+  if (currentMode === 'assemble' && puzzleStatus()?.awaiting) {
+    if (await assembleVoiceAnswer(phrase)) return;
   }
 
   const my = ++askSeq;
@@ -1445,6 +1624,7 @@ window.__ask = handleSpeech;
 // The loop is the only caller in real use, but a hidden or backgrounded tab
 // gets no rAF at all, so this is how the animations stay testable headlessly.
 window.__tick = (dt = 1 / 60) => {
+  updatePuzzle(dt);   // first, as in the loop: the puzzle owns part positions while it runs
   updateTweens(dt);
   updateFixAnim(dt, parseFloat(ui.explode.value) || 0);
 };
