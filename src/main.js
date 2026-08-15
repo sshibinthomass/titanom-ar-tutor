@@ -802,6 +802,17 @@ function markBeat(active) {
     el.classList.toggle('active', i === active);
     el.classList.toggle('done', i < active);
   });
+  // On a phone the card scrolls (max-height 42vh), so a long script would go on
+  // being spoken after the line scrolled out of sight. Keep the line being said
+  // visible — scrolling the card itself, never the page.
+  const el = els[active];
+  if (!el) return;
+  const cr = ui.card.getBoundingClientRect();
+  const er = el.getBoundingClientRect();
+  let delta = 0;
+  if (er.top < cr.top + 8) delta = er.top - cr.top - 8;
+  else if (er.bottom > cr.bottom - 8) delta = er.bottom - cr.bottom + 8;
+  if (delta) ui.card.scrollTo({ top: ui.card.scrollTop + delta, behavior: 'smooth' });
 }
 
 /**

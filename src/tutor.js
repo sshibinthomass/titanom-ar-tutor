@@ -102,8 +102,8 @@ export async function generateFixPlan(ctx, request) {
     'Split every step into 2 to 4 "beats". A beat is ONE short spoken sentence describing ONE physical action, plus the parts it happens to and the gesture that shows it. The app speaks the beats in order and animates each one as it is spoken, so the sentence and the motion MUST describe the same thing. Never put two different actions in one beat.',
     `"action" MUST be one of: ${FIX_ACTIONS.join(', ')}. Meanings: ${FIX_ACTION_GUIDE}`,
     'Every entry in "parts" MUST be copied verbatim from the part list above — the part(s) that beat physically moves.',
-    `These actions move the WHOLE chair and take "parts": [] — ${OBJECT_ACTIONS.join(', ')}. Use tip_over for a beat that says to tip or lay the chair down, stand_up when it is set back on its feet, and sit_test for a beat about sitting on it or loading it. Every other action needs at least one part.`,
-    'Prefer the most physically specific action: lift_off/drop_in for something that comes straight off or drops straight in, unscrew/screw_in for threaded fasteners, tap_loose for a seized taper, press_fit for something pressed home, spin for wheels, turn for knobs, lever for paddles, wiggle for checking play, swap when a part is replaced by a new one, inspect only when nothing actually moves.',
+    `These actions move the WHOLE chair and take "parts": [] — ${OBJECT_ACTIONS.join(', ')}. Every other action needs at least one part.`,
+    'Pick the most physically specific action for what the sentence actually says — that is the whole point, because the user watches it happen. Use inspect ONLY when nothing moves at all; if the sentence says to clean it use wipe, to grease it use grease, to line it up use align, to check it is tight use tug, to check it for play use wiggle, to pop a cap off use unclip.',
     'Keep instructions practical and grounded in the ground truth; do NOT invent tools, torque values, measurements, or part numbers it does not support. Plain spoken language, no markdown, and keep each beat under about 25 words so it is quick to say.',
     'If the request cannot be repaired on this object (wrong object, not a repair, nonsense), return {"title":"","intro":"<one spoken sentence explaining why and what they could ask instead>","steps":[]}.',
   ].filter(Boolean).join(' ');
@@ -114,12 +114,15 @@ export async function generateFixPlan(ctx, request) {
     try {
       // Planning gets the strongest model (PLAN_MODEL, Opus by default) — a
       // one-shot structured task where quality beats latency.
-      raw = await chat(messages, { temperature: 0.2, maxTokens: 2200, trace, name: 'fix-plan', model: PLAN_MODEL });
+      // Beats make a plan verbose: 6 steps x 4 beats of JSON runs well past
+      // 2000 tokens, and a cut-off reply used to fail to parse and drop us into
+      // the authored procedure — i.e. silently answering a different question.
+      raw = await chat(messages, { temperature: 0.2, maxTokens: 4000, trace, name: 'fix-plan', model: PLAN_MODEL });
     } catch (e) {
       // The premium tier can be rate-limited or momentarily down; one retry on
       // the everyday model before giving up to the authored fallback.
       console.warn(`fix-plan on ${PLAN_MODEL} failed (${e.message}), retrying on the default model`);
-      raw = await chat(messages, { temperature: 0.2, maxTokens: 2200, trace, name: 'fix-plan-retry' });
+      raw = await chat(messages, { temperature: 0.2, maxTokens: 4000, trace, name: 'fix-plan-retry' });
     }
     const plan = extractFixPlan(raw);
     trace.end({ output: plan, metadata: { steps: plan?.steps?.length ?? 0, parsed: !!plan } });
@@ -134,10 +137,14 @@ export async function generateFixPlan(ctx, request) {
 // Tolerant JSON extraction: models sometimes wrap the object in fences or a
 // stray sentence, so slice from the first '{' to the last '}' before parsing.
 function extractFixPlan(raw) {
-  const m = String(raw || '').match(/\{[\s\S]*\}/);
-  if (!m) return null;
-  let obj;
-  try { obj = JSON.parse(m[0]); } catch { return null; }
+  const text = String(raw || '');
+  const m = text.match(/\{[\s\S]*\}/);
+  // A reply cut off by the token limit has no closing brace at all, so the
+  // greedy match above finds nothing — fall back to the truncation repair.
+  const candidate = m ? m[0] : text.slice(text.indexOf('{'));
+  if (!candidate || candidate[0] !== '{') return null;
+  let obj = null;
+  try { obj = JSON.parse(candidate); } catch { obj = parseTruncated(candidate); }
   if (!obj || !Array.isArray(obj.steps)) return null;
   const steps = obj.steps
     // A step is a list of beats; a step that came back in the older flat shape
@@ -152,6 +159,39 @@ function extractFixPlan(raw) {
     intro: typeof obj.intro === 'string' ? obj.intro.trim() : '',
     steps,
   };
+}
+
+/**
+ * Salvage a plan whose JSON was cut off mid-flight (the model hit its token
+ * limit). Walks the text tracking string state and bracket depth, finds the
+ * last point where a complete step object closed, and shuts the structure
+ * there — so the user gets the steps that did arrive instead of being dropped
+ * into an unrelated authored procedure. Returns null if not even one step
+ * finished.
+ */
+function parseTruncated(s) {
+  let inStr = false, esc = false, lastStepEnd = -1;
+  const stack = [];
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (esc) { esc = false; continue; }
+    if (c === '\\') { esc = true; continue; }
+    if (c === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (c === '{' || c === '[') stack.push(c);
+    else if (c === '}' || c === ']') {
+      stack.pop();
+      // Depth 2 left on the stack = the root object and the "steps" array, so
+      // the brace just closed was one whole step.
+      if (c === '}' && stack.length === 2) lastStepEnd = i;
+    }
+  }
+  if (lastStepEnd < 0) return null;
+  try {
+    const plan = JSON.parse(s.slice(0, lastStepEnd + 1) + ']}');
+    console.warn(`fix-plan reply was truncated; recovered ${plan.steps?.length ?? 0} complete steps`);
+    return plan;
+  } catch { return null; }
 }
 
 function normalizeBeat(b) {

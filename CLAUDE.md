@@ -50,7 +50,7 @@ modules are focused, mostly-pure helpers it calls.
 | [src/main.js](src/main.js) | App shell: renderer/scene/camera/lights, model registry, UI wiring, mode state machine, voice + AR glue, render loop. |
 | [src/explode.js](src/explode.js) | The **core**. Splits a glTF into parts and drives the exploded view + per-part highlight/dim/isolate. |
 | [src/animate.js](src/animate.js) | Tween engine (keyed channels, driven from the render loop) + the camera flight that frames a part. |
-| [src/fixanim.js](src/fixanim.js) | Fix's gesture library: 14 part gestures (remove/lift_off/unscrew/tap_loose/press_fit/spin/swap/…) + 3 whole-object ones (tip_over/stand_up/sit_test). The LLM picks the verb per spoken beat; this module owns the motion. |
+| [src/fixanim.js](src/fixanim.js) | Fix's gesture library: 22 part gestures (remove/lift_off/unscrew/tap_loose/press_fit/align/tug/spin/grease/wipe/…) + 6 whole-object ones (tip_over/flip_over/stand_up/sit_test/rock_test/roll_away). The LLM picks the verb per spoken beat; this module owns the motion. |
 | [src/modes.js](src/modes.js) | The 5 modes + **authored per-model content** (fix steps, assemble prompts, diagnoses, quizzes) and semantic part names. |
 | [src/puzzle.js](src/puzzle.js) | Assemble's drag-to-build engine: scatter, ghost slots, snap magnetism, reject. Surface-agnostic — driven by a world-space ray. |
 | [src/select.js](src/select.js) | Raycast tap/click part-picking (drag threshold so orbiting ≠ tapping) + the desktop part-dragger. |
@@ -179,20 +179,47 @@ What keeps the three channels in step:
   outrank the walkthrough instead of talking over its own answer.
 - **The spotlight follows the sentence**, not the step — and a whole-object beat
   un-ghosts everything first, because a chair tipping over at 7% opacity is
-  invisible.
+  invisible. The card scrolls the spoken line into view too (on a phone it is
+  capped at 42vh, so a long script would otherwise be narrated off-screen).
 
-Inside `fixanim.js`, three rules are load-bearing — don't regress them:
+A plan is verbose — 6 steps x 4 beats of JSON runs past 2000 tokens — so the
+planner asks for 4000 and `parseTruncated()` salvages a reply that still gets
+cut off, keeping every step that completed. Without it a truncated reply failed
+to parse and fell through to the authored procedure, which meant *silently
+answering a different question* (an assembly question got the gas-lift repair).
 
-1. **Never spin a large part.** Every rotation is damped by the part's radius
-   against the model's (`rotScale`), so the same `unscrew` turns a caster ~178°
-   and a seat ~29°. An undamped spin on a big part doesn't read as unscrewing,
-   it reads as *the whole chair rotating* — which is exactly the complaint that
-   prompted this design.
-2. **Additive over the explode state.** A part's position is rebuilt every frame
+Inside `fixanim.js`, these rules are load-bearing — don't regress them:
+
+1. **Gestures move along the part's own axis, not its explode direction.**
+   `part.direction` is radial (centroid minus model centre): it points a seat
+   bolt sideways and gives a central part like the gas cylinder a nearly
+   arbitrary direction. `workingAxis()` reads the part's own bounding box and
+   classifies it — **rod** (one long dimension) travels along its length, **plate**
+   (one short dimension) along its *normal*, blob falls back to radial. The
+   plate case is the one that isn't obvious and matters most: you lift a seat
+   off its face, and treating it as a rod slid the seat sideways out of the
+   chair. Vertical axes always point up (things come off upward, and the sign is
+   otherwise ambiguous for a central part).
+2. **Travel is sized to the part**, clamped to [0.07, 0.32]×model radius — a bolt
+   cap that slides as far as the seat reads as being thrown across the room.
+3. **Never spin a large part.** Every rotation is damped by the part's radius
+   against the model's, so the same `unscrew` turns a caster ~178° and a seat
+   ~29°. An undamped spin on a big part doesn't read as unscrewing, it reads as
+   *the whole chair rotating* — the complaint that prompted this design. The one
+   exception is `spin` (`UNDAMPED`), which needs a whole revolution to loop
+   seamlessly and is only ever chosen for wheels.
+4. **Every looping gesture must end where it began.** Not at rest — reverse
+   gestures like `install`/`drop_in` legitimately start offset and finish there.
+   `tap_loose` had its first mallet strike land exactly on p=0, so every repeat
+   opened with a jolt out of nowhere; the strikes are now phase-shifted inside
+   the window.
+5. **Additive over the explode state.** A part's position is rebuilt every frame
    as `restPosition + direction·explodeAmount + gesture`, so the explode tween,
    the slider and AR anchor refinement keep working underneath. `updateFixAnim`
-   therefore runs *after* `updateTweens`.
-3. **Rotation and scale pivot on the part** via `c − q·(s·c)` (geometry is baked
+   therefore runs *after* `updateTweens`. Note the explode base still uses
+   `direction` — that is explode.js's contract; only the gesture travel uses the
+   working axis.
+6. **Rotation and scale pivot on the part** via `c − q·(S·c)` (geometry is baked
    to group space, so a bare `mesh.quaternion` orbits the group origin). Verified
    at zero centre-drift.
 
