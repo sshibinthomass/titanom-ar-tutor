@@ -153,6 +153,9 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
     if (!listening) return;
     const now = performance.now();
     const energy = bandEnergy();
+    // Live tuning tap: set window.__vadHook in devtools to watch energy vs the
+    // adaptive floor on a real device (a noisy demo hall needs real numbers).
+    window.__vadHook?.(now, energy, floor, speechActive, aboveCount);
     // Hysteresis: harder to enter speech than to stay in it, so a word's quiet
     // tail doesn't chop the utterance while random peaks still can't start one.
     // The margins are deliberately modest — a soft or far-from-the-mic voice
@@ -165,7 +168,11 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
       // room's hum is tracked but the user's own speech never raises the bar.
       floor = Math.min(FLOOR_MAX, Math.max(FLOOR_MIN, floor + (energy - floor) * (energy < floor ? 0.25 : 0.008)));
       const need = isTtsSpeaking?.() ? ONSET_FRAMES_WHILE_TTS : ONSET_FRAMES;
-      aboveCount = energy > enterAt ? aboveCount + 1 : 0;
+      // Decay on a quiet frame instead of resetting: real speech dips between
+      // syllables, and a hard reset made longer onsets (the 8-frame barge-in
+      // gate especially) nearly unreachable. Noise still can't accumulate —
+      // anything under ~50% duty cycle random-walks back to zero.
+      aboveCount = energy > enterAt ? aboveCount + 1 : Math.max(0, aboveCount - 1);
       if (aboveCount >= need) {
         speechActive = true;
         speechStartAt = now - aboveCount * FRAME_MS;
@@ -253,7 +260,47 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
     aboveCount = 0;
     speechActive = false;
     startRecorder();
-    tick = setInterval(step, FRAME_MS);
+    await startTicker(srcNode, mySession);
+  }
+
+  // The VAD must tick even when JS timers don't: Chrome throttles setInterval
+  // to 1 Hz in occluded/background windows and under battery/energy saver —
+  // the symptom is speech that goes unnoticed for seconds, or an utterance
+  // that ends but isn't flushed until long after. An AudioWorklet is driven by
+  // the audio rendering thread, which keeps real-time cadence as long as the
+  // mic stream is live, so a tick arrives every FRAME_MS of *audio* time no
+  // matter what the page's timers are doing. setInterval survives only as the
+  // fallback where AudioWorklet is missing.
+  async function startTicker(srcNode, mySession) {
+    if (audioCtx.audioWorklet) {
+      try {
+        const samplesPerTick = Math.round(audioCtx.sampleRate * (FRAME_MS / 1000));
+        const code = `registerProcessor('vad-tick', class extends AudioWorkletProcessor {
+          constructor() { super(); this.n = 0; }
+          process() {
+            this.n += 128; // one render quantum
+            if (this.n >= ${samplesPerTick}) { this.n = 0; this.port.postMessage(0); }
+            return true;
+          }
+        });`;
+        const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+        await audioCtx.audioWorklet.addModule(url).finally(() => URL.revokeObjectURL(url));
+        if (!listening || mySession !== session) return; // stopped while the module loaded
+        const node = new AudioWorkletNode(audioCtx, 'vad-tick');
+        node.port.onmessage = () => step();
+        // The worklet only renders while it's on a path to the destination;
+        // route it there through a zero gain so the mic never becomes audible.
+        const mute = audioCtx.createGain();
+        mute.gain.value = 0;
+        srcNode.connect(node);
+        node.connect(mute);
+        mute.connect(audioCtx.destination);
+        return;
+      } catch (e) {
+        console.warn('VAD worklet unavailable, falling back to timer ticks:', e.message);
+      }
+    }
+    if (listening && mySession === session) tick = setInterval(step, FRAME_MS);
   }
 
   function stop() {
