@@ -174,6 +174,26 @@
       .card .body { font-size: 15px; line-height: 1.5; margin-bottom: 4px; }
       .card .body .partdesc { display: block; margin-top: 6px; font-size: 13px; line-height: 1.45; color: var(--muted); }
       .card .meta { font-size: 12px; color: var(--muted); }
+      /* The Fix walkthrough's spoken script: one line per narration beat, lit
+         as it is said, so the user can read along or catch up after looking
+         away. Lines already spoken stay legible but recede. */
+      .card .beats { margin-top: 10px; display: flex; flex-direction: column; gap: 2px; }
+      .card .beat {
+        position: relative; padding: 5px 0 5px 14px; font-size: 14px; line-height: 1.45;
+        color: var(--muted); opacity: 0.55; transition: opacity 0.25s ease, color 0.25s ease;
+      }
+      .card .beat::before {
+        content: ''; position: absolute; left: 0; top: 7px; bottom: 7px; width: 3px;
+        border-radius: 999px; background: transparent; transition: background 0.25s ease;
+      }
+      .card .beat.done { opacity: 0.75; }
+      .card .beat.active {
+        color: var(--text); opacity: 1; font-weight: 500;
+      }
+      .card .beat.active::before { background: var(--accent); }
+      @media (prefers-reduced-motion: reduce) {
+        .card .beat, .card .beat::before { transition: none; }
+      }
       /* Build progress in the Assemble puzzle card. */
       .card .progress {
         height: 5px; margin-top: 12px; border-radius: 999px;

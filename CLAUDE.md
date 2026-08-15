@@ -50,7 +50,7 @@ modules are focused, mostly-pure helpers it calls.
 | [src/main.js](src/main.js) | App shell: renderer/scene/camera/lights, model registry, UI wiring, mode state machine, voice + AR glue, render loop. |
 | [src/explode.js](src/explode.js) | The **core**. Splits a glTF into parts and drives the exploded view + per-part highlight/dim/isolate. |
 | [src/animate.js](src/animate.js) | Tween engine (keyed channels, driven from the render loop) + the camera flight that frames a part. |
-| [src/fixanim.js](src/fixanim.js) | Fix's motion primitives: looping clips (remove/install/unscrew/tap_loose/press_fit/turn/…) that act a step's verb out on its parts. LLM picks the verb, this module owns the motion. |
+| [src/fixanim.js](src/fixanim.js) | Fix's gesture library: 14 part gestures (remove/lift_off/unscrew/tap_loose/press_fit/spin/swap/…) + 3 whole-object ones (tip_over/stand_up/sit_test). The LLM picks the verb per spoken beat; this module owns the motion. |
 | [src/modes.js](src/modes.js) | The 5 modes + **authored per-model content** (fix steps, assemble prompts, diagnoses, quizzes) and semantic part names. |
 | [src/puzzle.js](src/puzzle.js) | Assemble's drag-to-build engine: scatter, ghost slots, snap magnetism, reject. Surface-agnostic — driven by a world-space ray. |
 | [src/select.js](src/select.js) | Raycast tap/click part-picking (drag threshold so orbiting ≠ tapping) + the desktop part-dragger. |
@@ -130,15 +130,11 @@ only the card content and which parts are lit change:
    strict JSON, grounded in `knowledgeDigest` and constrained to the live part
    names; `resolvePlanParts` maps each step's part names to indices and the
    walkthrough rides the same isolate + fly-to + TTS pipeline (Next/Back).
-   Each step also carries an **action verb** (`FIX_ACTIONS` in fixanim.js) the
-   LLM picks per step; fixanim.js plays that verb's looping motion clip on the
-   step's parts. The clip layer is **additive over the explode state** (base
-   re-derived from the live amount every frame, run after `updateTweens`) so it
-   never fights the explode tween/slider/AR — and rotation compensates with the
-   part's bbox centre because geometry is baked to group space (a naive
-   `mesh.quaternion` spin orbits the group origin). The authored
-   `CONTENT[*].fix` procedure (now with authored `action` verbs) is the
-   fallback when DGPT is unconfigured or unreachable — never the only path.
+   Each step is a list of **beats** — one spoken sentence plus the gesture that
+   illustrates it — so the model does what the voice is describing, sentence by
+   sentence. See "Fix's narrated gestures" below. The authored `CONTENT[*].fix`
+   procedure (one beat per step, carrying an authored verb) is the fallback when
+   DGPT is unconfigured or unreachable — never the only path.
 3. **Assemble** — a **drag-to-build puzzle** (see below); the user places each group.
 4. **Diagnose** — pick a symptom chip → highlight the likely part.
 5. **Quiz** — highlight a part, ask the user to name it.
@@ -157,6 +153,61 @@ Blender and checked against the official IKEA assembly manual (AA-251870-21);
 its fix/assemble/diagnose/quiz content and the per-part `MARKUS_INFO`
 descriptions are grounded in that manual and real IKEA part numbers — so keep
 new Markus content factual, not invented.
+
+### Fix's narrated gestures (`fixanim.js` + `playBeats` in main.js)
+
+A Fix step is not one instruction held on screen; it is a short **script**. The
+planner splits each step into 2–4 **beats** — one spoken sentence, the parts it
+touches, and one verb from `FIX_ACTIONS`. `playBeats()` walks them: it lights
+that sentence on the card, spotlights and flies to its parts, plays its gesture,
+speaks it, and only then moves on. So "lay the chair on its side" tips the
+chair, "back out the two flange bolts" turns them out, "flick the height lever"
+flicks it.
+
+What keeps the three channels in step:
+
+- **The gesture starts on `onStart`, not on request.** tts.js reports when audio
+  is actually audible and when it ends; ElevenLabs takes ~a second to generate,
+  and starting the motion at request time would run it ahead of the voice. Two
+  backstops keep the walkthrough moving when audio misbehaves: the gesture
+  starts anyway after a short lead (blocked autoplay, no voice at all), and each
+  beat is capped so a lost `onEnd` can't strand the sequence. `stop()` settles
+  any waiter, so barge-in can never hang it.
+- **One token owns the model.** `beatSeq` is bumped by Next/Back, mode changes,
+  `rebuild`, barge-in, and any spoken question; every `await` re-checks it. That
+  is what stops a mashed **Next** stacking narration, and what makes a question
+  outrank the walkthrough instead of talking over its own answer.
+- **The spotlight follows the sentence**, not the step — and a whole-object beat
+  un-ghosts everything first, because a chair tipping over at 7% opacity is
+  invisible.
+
+Inside `fixanim.js`, three rules are load-bearing — don't regress them:
+
+1. **Never spin a large part.** Every rotation is damped by the part's radius
+   against the model's (`rotScale`), so the same `unscrew` turns a caster ~178°
+   and a seat ~29°. An undamped spin on a big part doesn't read as unscrewing,
+   it reads as *the whole chair rotating* — which is exactly the complaint that
+   prompted this design.
+2. **Additive over the explode state.** A part's position is rebuilt every frame
+   as `restPosition + direction·explodeAmount + gesture`, so the explode tween,
+   the slider and AR anchor refinement keep working underneath. `updateFixAnim`
+   therefore runs *after* `updateTweens`.
+3. **Rotation and scale pivot on the part** via `c − q·(s·c)` (geometry is baked
+   to group space, so a bare `mesh.quaternion` orbits the group origin). Verified
+   at zero centre-drift.
+
+Object gestures rotate the **group** about the parent origin — which
+`frameModel()` guarantees is the floor-contact centre, on desktop and under the
+AR pivot alike — then re-ground via the `onGroupPose` callback, so the chair
+pivots onto its edge instead of sinking through the floor. `sit_test` must be a
+*squash* (`group.scale.y`, riding on top of AR's fit scale) rather than a drop:
+re-grounding cancels a downward offset exactly, and the gesture did nothing at
+all until that was found.
+
+Debug hooks, alongside `window.__parts`: `__plan()` (the loaded walkthrough),
+`__gesture(verb, indices)` (play one in isolation), `__tick(dt)` (advance the
+gesture layer by hand — a hidden or backgrounded tab gets no rAF, so this is how
+the animations stay testable).
 
 ### The Assemble puzzle (`puzzle.js`)
 
@@ -302,8 +353,9 @@ grounding only), calls DeutschlandGPT, and speaks the ≤2-sentence answer via
 (`PART: <name>` header) and main.js spotlights it — so asking about the gas
 lift while the seat is selected highlights the gas lift and answers. A second
 `ACTION: <verb>` header (whitelisted against `FIX_ACTIONS`) names the physical
-motion the answer describes, and main.js plays that clip on the part for a few
-loops — "how do I get the cylinder out?" shows the cylinder tapping loose. It
+motion the answer describes, and main.js plays that gesture for exactly as long
+as the answer is spoken — "how do I get the cylinder out?" taps the cylinder
+loose while it says so. It
 declines only questions unrelated to the whole object, never "wrong part"
 questions.
 
