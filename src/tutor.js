@@ -6,7 +6,7 @@
  */
 import { aiAvailable, chat, PLAN_MODEL } from './ai.js';
 import { startTrace } from './telemetry.js';
-import { FIX_ACTIONS, FIX_ACTION_GUIDE } from './fixanim.js';
+import { FIX_ACTIONS, FIX_ACTION_GUIDE, OBJECT_ACTIONS, isObjectAction } from './fixanim.js';
 
 /**
  * Diagnose-mode answer. The user picked (or spoke) a symptom that maps to one
@@ -69,10 +69,14 @@ export async function answerDiagnosis(ctx, { symptom, part, reference, question 
  * live part list, so DGPT can only reference parts that actually exist in the
  * split model.
  *
- * Returns { title, intro, steps:[{ parts:[names], text }] } — steps may be []
- * when the model judges the request unfixable on this object (intro then says
- * why, spoken). Returns null on any AI/parse failure so the caller can fall
- * back to the authored procedure; the demo never dead-ends.
+ * Each step is split into **beats** — one spoken sentence plus the gesture that
+ * illustrates it — so the model on screen does what the voice is describing,
+ * sentence by sentence, instead of holding one pose for a whole paragraph.
+ *
+ * Returns { title, intro, steps:[{ beats:[{ parts:[names], action, text }] }] }
+ * — steps may be [] when the model judges the request unfixable on this object
+ * (intro then says why, spoken). Returns null on any AI/parse failure so the
+ * caller can fall back to the authored procedure; the demo never dead-ends.
  */
 export async function generateFixPlan(ctx, request) {
   const trace = startTrace('ai-fix-plan', {
@@ -91,10 +95,16 @@ export async function generateFixPlan(ctx, request) {
     `The object is a ${ctx.modelLabel}. Its parts, with the EXACT names the app knows them by: ${partNames.join('; ')}.`,
     ctx.diagnostics && `Ground truth about this exact object — prefer it and never contradict it: ${ctx.diagnostics}`,
     'Reply with ONLY a JSON object — no markdown fences, no prose before or after — in exactly this shape:',
-    '{"title":"short plan title","intro":"one spoken sentence saying what we will do and why","steps":[{"parts":["exact part name"],"action":"remove","text":"one or two short spoken sentences of instruction"}]}',
-    'Rules: 3 to 7 steps, in the real repair order. Every entry in "parts" MUST be copied verbatim from the part list above — the part(s) the user physically works on in that step; use [] only if genuinely none apply.',
-    `"action" is the step's physical motion, which the app animates on the named parts. It MUST be one of: ${FIX_ACTIONS.join(', ')}. Meanings: ${FIX_ACTION_GUIDE}`,
-    'Keep instructions practical and grounded in the ground truth; do NOT invent tools, torque values, measurements, or part numbers it does not support. Plain spoken language, no markdown.',
+    '{"title":"short plan title","intro":"one spoken sentence saying what we will do and why","steps":[{"beats":[{"text":"ONE spoken sentence","parts":["exact part name"],"action":"unscrew"}]}]}',
+    'Rules: 3 to 6 steps, in the real repair order.',
+    // Beats are the whole point of the format: the app speaks one beat at a
+    // time and plays that beat's gesture on that beat's parts while it talks.
+    'Split every step into 2 to 4 "beats". A beat is ONE short spoken sentence describing ONE physical action, plus the parts it happens to and the gesture that shows it. The app speaks the beats in order and animates each one as it is spoken, so the sentence and the motion MUST describe the same thing. Never put two different actions in one beat.',
+    `"action" MUST be one of: ${FIX_ACTIONS.join(', ')}. Meanings: ${FIX_ACTION_GUIDE}`,
+    'Every entry in "parts" MUST be copied verbatim from the part list above — the part(s) that beat physically moves.',
+    `These actions move the WHOLE chair and take "parts": [] — ${OBJECT_ACTIONS.join(', ')}. Use tip_over for a beat that says to tip or lay the chair down, stand_up when it is set back on its feet, and sit_test for a beat about sitting on it or loading it. Every other action needs at least one part.`,
+    'Prefer the most physically specific action: lift_off/drop_in for something that comes straight off or drops straight in, unscrew/screw_in for threaded fasteners, tap_loose for a seized taper, press_fit for something pressed home, spin for wheels, turn for knobs, lever for paddles, wiggle for checking play, swap when a part is replaced by a new one, inspect only when nothing actually moves.',
+    'Keep instructions practical and grounded in the ground truth; do NOT invent tools, torque values, measurements, or part numbers it does not support. Plain spoken language, no markdown, and keep each beat under about 25 words so it is quick to say.',
     'If the request cannot be repaired on this object (wrong object, not a repair, nonsense), return {"title":"","intro":"<one spoken sentence explaining why and what they could ask instead>","steps":[]}.',
   ].filter(Boolean).join(' ');
 
@@ -104,12 +114,12 @@ export async function generateFixPlan(ctx, request) {
     try {
       // Planning gets the strongest model (PLAN_MODEL, Opus by default) — a
       // one-shot structured task where quality beats latency.
-      raw = await chat(messages, { temperature: 0.2, maxTokens: 900, trace, name: 'fix-plan', model: PLAN_MODEL });
+      raw = await chat(messages, { temperature: 0.2, maxTokens: 2200, trace, name: 'fix-plan', model: PLAN_MODEL });
     } catch (e) {
       // The premium tier can be rate-limited or momentarily down; one retry on
       // the everyday model before giving up to the authored fallback.
       console.warn(`fix-plan on ${PLAN_MODEL} failed (${e.message}), retrying on the default model`);
-      raw = await chat(messages, { temperature: 0.2, maxTokens: 900, trace, name: 'fix-plan-retry' });
+      raw = await chat(messages, { temperature: 0.2, maxTokens: 2200, trace, name: 'fix-plan-retry' });
     }
     const plan = extractFixPlan(raw);
     trace.end({ output: plan, metadata: { steps: plan?.steps?.length ?? 0, parsed: !!plan } });
@@ -130,18 +140,29 @@ function extractFixPlan(raw) {
   try { obj = JSON.parse(m[0]); } catch { return null; }
   if (!obj || !Array.isArray(obj.steps)) return null;
   const steps = obj.steps
-    .filter((s) => s && typeof s.text === 'string' && s.text.trim())
-    .map((s) => ({
-      parts: Array.isArray(s.parts) ? s.parts.filter((p) => typeof p === 'string' && p.trim()) : [],
-      // Whitelisted verb → motion primitive; anything else degrades to 'inspect'.
-      action: FIX_ACTIONS.includes(s.action) ? s.action : 'inspect',
-      text: s.text.trim(),
-    }));
+    // A step is a list of beats; a step that came back in the older flat shape
+    // ({parts, action, text}) is read as a single beat.
+    .map((s) => (s && Array.isArray(s.beats) ? s.beats : [s]))
+    .map((beats) => beats.filter((b) => b && typeof b.text === 'string' && b.text.trim()).map(normalizeBeat))
+    .filter((beats) => beats.length)
+    .map((beats) => ({ beats }));
+  if (!steps.length && !(typeof obj.intro === 'string' && obj.intro.trim())) return null;
   return {
     title: typeof obj.title === 'string' ? obj.title.trim() : '',
     intro: typeof obj.intro === 'string' ? obj.intro.trim() : '',
     steps,
   };
+}
+
+function normalizeBeat(b) {
+  // Whitelisted verb → gesture; anything invented degrades to 'inspect'.
+  let action = FIX_ACTIONS.includes(b.action) ? b.action : 'inspect';
+  const parts = Array.isArray(b.parts) ? b.parts.filter((p) => typeof p === 'string' && p.trim()) : [];
+  // A part-level gesture with no parts has nothing to move; keep the sentence
+  // but let it play as the whole-object "look it over" rather than silently
+  // animating nothing.
+  if (!parts.length && !isObjectAction(action)) action = 'inspect';
+  return { parts, action, text: b.text.trim() };
 }
 
 /**

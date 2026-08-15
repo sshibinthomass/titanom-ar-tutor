@@ -30,6 +30,18 @@ let seq = 0;             // generation token: any stop()/speak() invalidates old
 let currentAudio = null;
 let speaking = false;
 
+// The current utterance's lifecycle callbacks. Fix mode drives its narration
+// beats off these — the gesture starts when the audio actually starts, and the
+// next sentence only begins once this one has finished — so what the tutor
+// says and what the model does stay locked together. Each fires at most once,
+// and `stop()` (barge-in, a newer utterance, leaving the mode) settles them so
+// a waiting caller can never hang.
+let pendingStart = null;
+let pendingEnd = null;
+
+function fireStart() { const cb = pendingStart; pendingStart = null; cb?.(); }
+function fireEnd() { pendingStart = null; const cb = pendingEnd; pendingEnd = null; cb?.(); }
+
 export function isSpeaking() {
   return speaking;
 }
@@ -43,13 +55,21 @@ export function stop() {
     currentAudio = null;
   }
   if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+  fireEnd(); // whoever was waiting on this utterance is released, cancelled or not
 }
 
-/** Speak `text`. Resolves when playback starts (not when it ends). */
-export async function speak(text) {
-  if (!text) return;
-  stop();
+/**
+ * Speak `text`. Resolves when playback starts (not when it ends) — use the
+ * `onEnd` callback for that.
+ * opts: { onStart, onEnd } — each called at most once, and `onEnd` always
+ * eventually runs (playback ended, interrupted, or no voice available).
+ */
+export async function speak(text, { onStart = null, onEnd = null } = {}) {
+  if (!text) { onStart?.(); onEnd?.(); return; }
+  stop();         // releases the previous utterance's waiter
   const my = seq; // this utterance owns the channel until a newer stop()/speak()
+  pendingStart = onStart;
+  pendingEnd = onEnd;
 
   if (elevenLabsAvailable()) {
     try {
@@ -70,11 +90,17 @@ export async function speak(text) {
       audio._url = url;
       audio.onended = () => {
         URL.revokeObjectURL(url);
-        if (my === seq) { speaking = false; currentAudio = null; }
+        if (my === seq) { speaking = false; currentAudio = null; fireEnd(); }
       };
       currentAudio = audio;
       speaking = true;
-      await audio.play().catch((e) => { console.warn('audio play blocked', e); if (my === seq) speaking = false; });
+      let blocked = false;
+      await audio.play().catch((e) => {
+        console.warn('audio play blocked', e);
+        blocked = true;
+        if (my === seq) { speaking = false; fireEnd(); }
+      });
+      if (my === seq && !blocked) fireStart(); // audio is audible from here
       track('tts', { output: text, metadata: { provider: 'elevenlabs', voice: VOICE, chars: text.length } });
       return;
     } catch (e) {
@@ -88,10 +114,14 @@ export async function speak(text) {
   if ('speechSynthesis' in window && my === seq) {
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 1.0;
-    u.onend = () => { if (my === seq) speaking = false; };
-    u.onerror = () => { if (my === seq) speaking = false; };
+    u.onstart = () => { if (my === seq) fireStart(); };
+    u.onend = () => { if (my === seq) { speaking = false; fireEnd(); } };
+    u.onerror = () => { if (my === seq) { speaking = false; fireEnd(); } };
     speaking = true;
     window.speechSynthesis.speak(u);
     track('tts', { output: text, metadata: { provider: 'browser', chars: text.length } });
+    return;
   }
+  // No voice at all: release the waiter immediately so the visuals still run.
+  if (my === seq) { fireStart(); fireEnd(); }
 }

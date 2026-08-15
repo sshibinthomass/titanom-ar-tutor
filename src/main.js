@@ -11,7 +11,7 @@ import { speak, stop as stopSpeaking, isSpeaking } from './tts.js';
 import { primeSfx, playSfx } from './sfx.js';
 import { createRecognizer } from './voice.js';
 import { answerQuestion, answerDiagnosis, explainNextPart, generateFixPlan } from './tutor.js';
-import { startFixAnim, stopFixAnim, updateFixAnim } from './fixanim.js';
+import { startFixAnim, stopFixAnim, updateFixAnim, isObjectAction } from './fixanim.js';
 import { aiAvailable } from './ai.js';
 import { initTelemetry, track } from './telemetry.js';
 
@@ -220,7 +220,7 @@ function loadModel(key) {
 
 function rebuild() {
   stopPuzzle();  // release the ghosts before the geometry they borrow is disposed
-  stopFixAnim(); // and the step clip, before its part refs go stale
+  cancelBeats(); // and the step narration, before its part refs go stale
   // Any tween in flight still points at the outgoing part list — drop them both
   // before the meshes are disposed.
   cancelTween('explode');
@@ -594,7 +594,7 @@ function enterMode(id) {
   setModeButtons(id);
   cardExplode = null; // drop any stale inline slider before the card is rebuilt
   stopPuzzle();       // before resetParts, which assumes it owns part positions
-  stopFixAnim();      // ditto — the clip writes part positions every frame
+  cancelBeats();      // ditto — a gesture writes part positions every frame
   applyARInteraction();
   resetParts();
   selectedPart = -1;
@@ -650,15 +650,23 @@ let fixSeq = 0;         // newest fix request wins if two plans race
 
 function enterFix() {
   fixSeq++; // drop any plan still in flight from a previous visit / old part list
-  if (!aiAvailable()) {
-    const proc = resolveFix(currentKey(), parts);
-    steps = proc.steps; stepIndex = 0; stepTitle = proc.title; stepKicker = 'Fix';
-    fixState = 'guided';
-    mildExplode();
-    renderStep();
-    return;
-  }
+  if (!aiAvailable()) { runAuthoredFix(); return; }
   showFixAsk();
+}
+
+// The no-AI path: the authored procedure, played through the same beat
+// walkthrough (one beat per authored step, carrying that step's authored verb)
+// so it looks and sounds exactly like a generated plan.
+function runAuthoredFix() {
+  const proc = resolveFix(currentKey(), parts);
+  steps = proc.steps.map((s) => ({
+    beats: [{ indices: s.indices, action: s.action || 'inspect', text: s.text }],
+    indices: s.indices,
+  }));
+  stepIndex = 0; stepTitle = proc.title; stepKicker = 'Fix';
+  fixState = 'guided';
+  mildExplode();
+  renderStep();
 }
 
 // The ask-screen: what problem are we solving? The chips are authored symptoms
@@ -669,7 +677,7 @@ function showFixAsk(lead = '') {
   fixState = 'ask';
   steps = [];
   focusedPart = null;
-  stopFixAnim();
+  cancelBeats();
   clearPartStates(parts);
   setExplodeAmount(0, { animate: true });
   const chips = fixSuggestions(currentKey()).map((label) => ({
@@ -699,16 +707,12 @@ async function startFixRequest(request) {
   if (!plan || !plan.steps.length) {
     if (plan?.intro) { showFixAsk(plan.intro); return; } // "that's not fixable here, because…"
     // AI unreachable mid-request: run the authored procedure so the demo never dead-ends.
-    const proc = resolveFix(currentKey(), parts);
-    steps = proc.steps; stepIndex = 0; stepTitle = proc.title; stepKicker = 'Fix';
-    fixState = 'guided';
     track('fix-plan-fallback', { metadata: { model: ui.model.value } });
-    mildExplode();
-    renderStep();
+    runAuthoredFix();
     return;
   }
 
-  steps = plan.steps.map((s) => ({ indices: resolvePlanParts(parts, s.parts), action: s.action, text: s.text }));
+  steps = plan.steps.map(toStep);
   stepIndex = 0;
   stepTitle = plan.title || `Fix: ${request}`;
   stepKicker = 'Fix';
@@ -719,38 +723,164 @@ async function startFixRequest(request) {
   renderStep(plan.intro);
 }
 
+/**
+ * Normalise one planned step into the shape the walkthrough plays:
+ * { beats: [{ indices, action, text }], indices } — `indices` being every part
+ * the step touches, which is what gets spotlighted for the whole step.
+ *
+ * Beat part names are resolved here rather than in the planner so a name the
+ * LLM bent slightly still lands on a real part. A beat whose names resolve to
+ * nothing inherits the previous beat's parts (the sentence almost always
+ * continues working on the same thing) rather than animating nothing.
+ */
+function toStep(planStep) {
+  let last = [];
+  const beats = planStep.beats.map((b) => {
+    let indices = isObjectAction(b.action) ? [] : resolvePlanParts(parts, b.parts);
+    let action = b.action;
+    if (!indices.length && !isObjectAction(action)) {
+      indices = last;
+      if (!indices.length) action = 'inspect';
+    }
+    if (indices.length) last = indices;
+    return { indices, action, text: b.text };
+  });
+  return { beats, indices: [...new Set(beats.flatMap((b) => b.indices))] };
+}
+
+// Escape LLM-authored text before it goes near innerHTML.
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// A beat is held on screen at least this long, so even a four-word sentence
+// gives its gesture time to read.
+const MIN_BEAT_MS = 2000;
+
+let beatSeq = 0; // newest playback wins; Next/Back/barge-in/mode-change bump it
+
+/** Abandon any narration in flight and put the model back at rest. */
+function cancelBeats() {
+  beatSeq++;
+  stopFixAnim();
+}
+
+/**
+ * Speak one line, and report when it starts and ends.
+ *
+ * The gesture is started by `onStart` — i.e. when the audio is actually
+ * audible, not when we asked for it — which is what keeps the motion in step
+ * with the voice through ElevenLabs' generation latency. Two guards keep the
+ * walkthrough moving when audio misbehaves: the gesture starts anyway after a
+ * short lead if TTS never reports back (blocked autoplay, no voice), and the
+ * whole beat is capped so a lost `onEnd` can never strand the sequence.
+ */
+function narrate(text, onStart) {
+  return new Promise((resolve) => {
+    const t0 = performance.now();
+    let started = false, ended = false;
+    const start = () => { if (!started) { started = true; onStart?.(); } };
+    const end = () => {
+      if (ended) return;
+      ended = true;
+      const left = MIN_BEAT_MS - (performance.now() - t0);
+      if (left > 0) setTimeout(resolve, left); else resolve();
+    };
+    const words = (text.match(/\S+/g) || []).length;
+    const estimate = Math.min(14000, Math.max(MIN_BEAT_MS, (words / 2.6) * 1000 + 600));
+    const lead = setTimeout(start, 900);
+    const cap = setTimeout(end, estimate + 6000);
+    speak(text, {
+      onStart: () => { clearTimeout(lead); start(); },
+      onEnd: () => { clearTimeout(lead); clearTimeout(cap); start(); end(); },
+    });
+  });
+}
+
+/** Mark which beat is being spoken (-1 = none yet, length = all done). */
+function markBeat(active) {
+  const els = ui.cardBody.querySelectorAll('.beat');
+  els.forEach((el, i) => {
+    el.classList.toggle('active', i === active);
+    el.classList.toggle('done', i < active);
+  });
+}
+
+/**
+ * Walk a step's beats: highlight the sentence, fly to its parts, play its
+ * gesture, speak it, and only then move on. Every await re-checks the sequence
+ * token, so Next/Back or a spoken question stops the narration immediately
+ * instead of talking over what comes next.
+ */
+async function playBeats(preface) {
+  const my = ++beatSeq;
+  const s = steps[stepIndex];
+  if (!s) return;
+
+  if (preface) {
+    markBeat(-1);
+    await narrate(preface);
+    if (my !== beatSeq) return;
+  }
+
+  for (let i = 0; i < s.beats.length; i++) {
+    const b = s.beats[i];
+    markBeat(i);
+    // Spotlight follows the sentence. A whole-object beat ("lay the chair on
+    // its side") un-ghosts everything first — the chair tipping is the point,
+    // and at 7% opacity nobody would see it happen.
+    if (isObjectAction(b.action)) clearPartStates(parts);
+    else isolateParts(parts, b.indices.length ? b.indices : s.indices);
+    if (b.indices.length) {
+      focusedPart = parts[b.indices[0]].name; // "what is this?" follows the narration
+      flyTo(b.indices);
+    }
+    await narrate(b.text, () => {
+      if (my !== beatSeq) return;
+      startFixAnim(parts, b.indices, b.action, {
+        scale: modelRadius,
+        amount: parseFloat(ui.explode.value) || 0,
+        group: explodedGroup,
+        onGroupPose: groundExploded,
+      });
+    });
+    if (my !== beatSeq) return;
+    stopFixAnim(); // rest between sentences, so gestures never blur together
+    await new Promise((r) => setTimeout(r, 200));
+    if (my !== beatSeq) return;
+  }
+  markBeat(s.beats.length);
+}
+
 // `preface` is the plan's intro sentence, spoken once ahead of the first step.
 function renderStep(preface = '') {
   const title = stepTitle, kicker = stepKicker;
+  cancelBeats(); // stop the previous step's narration + restore its parts first
   if (!steps.length) { showCard(kicker, 'No procedure for this model yet.'); return; }
   const s = steps[stepIndex];
   const stepIndices = s.indices || [];
 
   isolateParts(parts, stepIndices); // spotlight this step's part(s), dim the rest
   flyTo(stepIndices); // and bring it to the user rather than making them orbit for it
-  // Show the step's physical motion on its parts, looping while the step is up.
-  // Delayed past the mild-explode tween (700 ms) so the clip starts from a
-  // settled pose instead of fighting the staggered spread.
-  startFixAnim(parts, stepIndices, s.action || 'inspect', {
-    scale: modelRadius,
-    amount: parseFloat(ui.explode.value) || 0,
-    delay: 0.85,
-  });
 
   const partName = stepIndices.length ? parts[stepIndices[0]].name : null;
   focusedPart = partName;
   const chips = kicker === 'Fix' && aiAvailable()
-    ? [{ label: '🎤 Fix something else', onClick: () => { stopSpeaking(); showFixAsk(); } }]
+    ? [
+        { label: '🔊 Say it again', onClick: () => renderStep() },
+        { label: '🎤 Fix something else', onClick: () => { stopSpeaking(); showFixAsk(); } },
+      ]
     : null;
+  // The spoken script is on the card, one line per beat, and lights up as it is
+  // said — so the user can read along, or catch up after looking away.
+  const script = s.beats.map((b) => `<div class="beat">${esc(b.text)}</div>`).join('');
   showCard(
     kicker,
-    `<b>${title}</b><br>${s.text}`,
-    `Step ${stepIndex + 1} of ${steps.length}` + (partName ? ` · ${partName}` : ' · (part not matched)'),
+    `<b>${esc(title)}</b><div class="beats">${script}</div>`,
+    `Step ${stepIndex + 1} of ${steps.length}` + (partName ? ` · ${partName}` : ''),
     { nav: true, chips }
   );
   ui.stepPrev.disabled = stepIndex === 0;
   ui.stepNext.textContent = stepIndex === steps.length - 1 ? 'Done ✔' : 'Next ▶';
-  say(preface ? `${preface} ${s.text}` : s.text);
+  playBeats(preface);
 }
 function goStep(delta) {
   if (!steps.length) return;
@@ -1093,6 +1223,11 @@ async function handleSpeech(text) {
   }
 
   const my = ++askSeq;
+  // A question outranks the walkthrough: stop narrating steps before answering.
+  // The VAD's barge-in already does this the moment the user speaks, but a
+  // transcript can also arrive without it (the Web Speech fallback fires no
+  // speech-start), and then the step would talk over its own answer.
+  cancelBeats();
   showCaption(`“${t}” · …thinking`);
   track('voice-question', { input: t, metadata: { mode: currentMode, part: focusedPart } });
   // The LLM answers about whichever part the question concerns and names it —
@@ -1104,15 +1239,22 @@ async function handleSpeech(text) {
   if (my !== askSeq) return;             // a newer question superseded this answer
   if (recognizer?.isCapturing()) return; // the user is mid-question — never talk over them
   const indices = part ? highlightPartByName(part) : [];
-  if (indices.length && action && !isPuzzleActive()) {
-    startFixAnim(parts, indices, action, {
+  showCaption(answer);
+  // Act the answer out while it is being spoken, and stop when it stops — the
+  // same start/end signals the Fix walkthrough runs on. The beat token owns the
+  // model, so a step starting meanwhile takes the gesture over cleanly.
+  const gesture = action && !isPuzzleActive() && (indices.length || isObjectAction(action)) ? action : null;
+  let myBeat = beatSeq;
+  narrate(answer, () => {
+    if (my !== askSeq || !gesture) return;
+    myBeat = ++beatSeq;
+    startFixAnim(parts, indices, gesture, {
       scale: modelRadius,
       amount: parseFloat(ui.explode.value) || 0,
-      loops: 3, // demonstrate, then settle — this is an answer, not a step held on screen
+      group: explodedGroup,
+      onGroupPose: groundExploded,
     });
-  }
-  showCaption(answer);
-  say(answer);
+  }).then(() => { if (myBeat === beatSeq) stopFixAnim(); });
 }
 
 /**
@@ -1145,12 +1287,37 @@ function highlightPartByName(name) {
 // DEBUG: simulate a spoken phrase from the console (no mic needed) — exercises
 // the exact same routing as real speech, incl. Fix-mode planning.
 window.__ask = handleSpeech;
+// DEBUG: advance the gesture layer by hand. The render loop is the only caller
+// in real use, but a hidden or backgrounded tab gets no rAF at all, so this is
+// how the animations stay testable headlessly.
+window.__tick = (dt = 1 / 60) => updateFixAnim(dt, parseFloat(ui.explode.value) || 0);
+// DEBUG: the walkthrough currently loaded — which beats, gestures and parts the
+// planner produced, and where we are in it.
+window.__plan = () => ({
+  title: stepTitle,
+  stepIndex,
+  steps: steps.map((s) => ({
+    beats: s.beats?.map((b) => ({ action: b.action, text: b.text, parts: b.indices.map((i) => parts[i].name) })),
+  })),
+});
+// DEBUG: play any gesture on any parts, for eyeballing one in isolation.
+window.__gesture = (action, indices = []) => {
+  cancelBeats();
+  startFixAnim(parts, indices, action, {
+    scale: modelRadius,
+    amount: parseFloat(ui.explode.value) || 0,
+    group: explodedGroup,
+    onGroupPose: groundExploded,
+  });
+  return { action, indices };
+};
 
 const recognizer = createRecognizer({
   onResult: handleSpeech,
   // Barge-in: the instant the user starts talking, the tutor yields — their next
-  // question must never compete with a half-finished answer.
-  onSpeechStart: () => stopSpeaking(),
+  // question must never compete with a half-finished answer, and a Fix
+  // walkthrough must not carry on to the next sentence over their voice.
+  onSpeechStart: () => { stopSpeaking(); cancelBeats(); },
   // Lets the VAD demand more sustained energy while the tutor is audible, so
   // speaker bleed the echo canceller misses can't trigger a false barge-in.
   isTtsSpeaking: isSpeaking,
