@@ -997,7 +997,18 @@ async function handleSpeech(text) {
   // seat is selected highlights the gas lift and answers about it.
   const { part, answer } = await answerQuestion(getContext(), t);
   if (my !== askSeq) return;             // a newer question superseded this answer
-  if (recognizer?.isCapturing()) return; // the user is mid-question — never talk over them
+  // If the mic is mid-capture, hold the answer until the utterance resolves
+  // instead of discarding it: if that capture turns out to be a new question,
+  // askSeq supersedes this answer naturally; if it was a noise blip (or the
+  // old stuck-VAD state), the user still gets answered. Dropping here silently
+  // was how "it heard me but never replied" happened.
+  const holdUntil = performance.now() + 8000;
+  while (recognizer?.isCapturing() && performance.now() < holdUntil) {
+    await new Promise((r) => setTimeout(r, 150));
+    if (my !== askSeq) return;
+  }
+  if (my !== askSeq) return;
+  if (recognizer?.isCapturing()) return; // still talking after 8 s — stay quiet
   if (part) highlightPartByName(part);
   showCaption(answer);
   say(answer);

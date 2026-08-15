@@ -259,8 +259,12 @@ exceptions in `handleSpeech` (a bare mute phrase, and "move it" inside an AR
 session, which has no button) are deliberate and complete.
 
 Capture (`voice.js`) is an always-on pipeline, not the Web Speech API: a
-WebAudio **VAD** (band-limited 300–3400 Hz energy over an adaptive noise
-floor, with hysteresis + a minimum-duration gate) finds utterances,
+WebAudio **VAD** (band-limited 300–3400 Hz energy over an adaptive
+minimum-statistics noise floor — steady energy that never dips for ~3 s is
+re-learned as ambient, so a fan or AGC-boosted room tone can't lock the VAD
+in "speech" — with hysteresis + a minimum-duration gate, ticked from an
+AudioWorklet on the audio thread because Chrome throttles JS timers to 1 Hz
+in occluded windows and under battery saver) finds utterances,
 `MediaRecorder` captures them, and the `stt.js` provider chain transcribes
 them: **ElevenLabs Scribe v2** first (`/v1/speech-to-text`, model
 `scribe_v2` via `VITE_ELEVENLABS_STT_MODEL` — browser-direct because

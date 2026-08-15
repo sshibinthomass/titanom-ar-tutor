@@ -37,6 +37,7 @@ const MAX_UTTER_MS = 15000;          // force-flush a monologue so it still gets
 const IDLE_RESTART_MS = 8000;        // recycle the recorder while silent → small uploads
 const FLOOR_MIN = 3;                 // noise-floor clamp: never fully deaf…
 const FLOOR_MAX = 90;                // …and never adapted up to speech level
+const FLOOR_WIN_FRAMES = 100;        // ~3 s minimum-statistics window for the floor
 
 export function speechRecognitionAvailable() {
   return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -96,7 +97,9 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
   let ext = 'webm';
 
   let floor = 8;            // adaptive ambient-noise estimate
-  let aboveCount = 0;       // consecutive frames above the onset threshold
+  let winMin = Infinity;    // quietest frame of the current floor window
+  let winCount = 0;         // frames into the current floor window
+  let aboveCount = 0;       // recent frames above the onset threshold
   let speechActive = false;
   let speechStartAt = 0;
   let lastVoiceAt = 0;
@@ -156,6 +159,22 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
     // Live tuning tap: set window.__vadHook in devtools to watch energy vs the
     // adaptive floor on a real device (a noisy demo hall needs real numbers).
     window.__vadHook?.(now, energy, floor, speechActive, aboveCount);
+
+    // Minimum-statistics floor: chase the quietest moment of the last ~3 s, in
+    // BOTH states. Real speech always leaves dips between words, so the window
+    // minimum stays near the room's ambient level — but energy that never dips
+    // for 3 s straight is noise by definition, and the floor must rise to meet
+    // it. Without this, a steady hum (fan, AGC-boosted room tone) above the
+    // floor locks the VAD in "speech" forever: the floor could only adapt
+    // during silence, and the VAD never saw silence again — utterances ran to
+    // the 15 s cap and answers were held back for a capture that never ended.
+    winMin = Math.min(winMin, energy);
+    if (++winCount >= FLOOR_WIN_FRAMES) {
+      floor = Math.min(FLOOR_MAX, Math.max(FLOOR_MIN, floor + (winMin - floor) * 0.5));
+      winMin = Infinity;
+      winCount = 0;
+    }
+
     // Hysteresis: harder to enter speech than to stay in it, so a word's quiet
     // tail doesn't chop the utterance while random peaks still can't start one.
     // The margins are deliberately modest — a soft or far-from-the-mic voice
@@ -164,15 +183,16 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
     const exitAt = floor + Math.max(4, floor * 0.3);
 
     if (!speechActive) {
-      // Adapt the floor only while silent — fast down, very slow up — so the
-      // room's hum is tracked but the user's own speech never raises the bar.
-      floor = Math.min(FLOOR_MAX, Math.max(FLOOR_MIN, floor + (energy - floor) * (energy < floor ? 0.25 : 0.008)));
+      // Fast-down tracking between the window updates, so a loud burst that
+      // briefly raised the floor doesn't deafen the next quiet question.
+      if (energy < floor) floor = Math.max(FLOOR_MIN, floor + (energy - floor) * 0.25);
       const need = isTtsSpeaking?.() ? ONSET_FRAMES_WHILE_TTS : ONSET_FRAMES;
       // Decay on a quiet frame instead of resetting: real speech dips between
-      // syllables, and a hard reset made longer onsets (the 8-frame barge-in
-      // gate especially) nearly unreachable. Noise still can't accumulate —
-      // anything under ~50% duty cycle random-walks back to zero.
-      aboveCount = energy > enterAt ? aboveCount + 1 : Math.max(0, aboveCount - 1);
+      // syllables, and a hard reset made longer onsets nearly unreachable.
+      // Noise still can't accumulate — under ~50% duty cycle it random-walks
+      // back to zero. While the tutor is audible the hard reset stays, so
+      // speaker bleed the echo canceller misses can't build up to a barge-in.
+      aboveCount = energy > enterAt ? aboveCount + 1 : (isTtsSpeaking?.() ? 0 : Math.max(0, aboveCount - 1));
       if (aboveCount >= need) {
         speechActive = true;
         speechStartAt = now - aboveCount * FRAME_MS;
@@ -257,6 +277,8 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
     bandHi = Math.min(analyser.frequencyBinCount - 1, Math.round(SPEECH_BAND[1] / binHz));
     [blobType, ext] = pickMime();
     floor = 8;
+    winMin = Infinity;
+    winCount = 0;
     aboveCount = 0;
     speechActive = false;
     startRecorder();
