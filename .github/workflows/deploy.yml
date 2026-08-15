@@ -30,6 +30,8 @@ jobs:
           VITE_ELEVENLABS_API_KEY: ${{ secrets.VITE_ELEVENLABS_API_KEY }}
           VITE_ELEVENLABS_VOICE_ID: ${{ secrets.VITE_ELEVENLABS_VOICE_ID }}
           VITE_ELEVENLABS_MODEL: ${{ secrets.VITE_ELEVENLABS_MODEL }}
+          # Mic speech-to-text (primary); empty falls back to scribe_v2 in code.
+          VITE_ELEVENLABS_STT_MODEL: ${{ secrets.VITE_ELEVENLABS_STT_MODEL }}
           VITE_DGPT_BASE_URL: ${{ secrets.VITE_DGPT_BASE_URL }}
           VITE_DGPT_API_KEY: ${{ secrets.VITE_DGPT_API_KEY }}
           VITE_DGPT_MODEL: ${{ secrets.VITE_DGPT_MODEL }}

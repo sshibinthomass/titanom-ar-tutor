@@ -1,7 +1,11 @@
 /**
  * Text-to-speech: the tutor's voice.
  *
- * Primary: ElevenLabs streaming TTS (the sponsor tech).
+ * Primary: ElevenLabs streaming TTS (the sponsor tech), played back through a
+ * MediaSource buffer so audio starts on the FIRST mp3 chunk instead of after
+ * the whole file downloads — with eleven_flash_v2_5 the tutor starts talking
+ * a few hundred ms after speak(), not a second-plus. Browsers without MSE for
+ * audio (iOS Safari) keep the old whole-blob path.
  * Fallback: the browser's built-in speechSynthesis, so the app still talks
  * during development when no ElevenLabs key is set.
  *
@@ -20,7 +24,10 @@ import { track } from './telemetry.js';
 
 const KEY = import.meta.env.VITE_ELEVENLABS_API_KEY;
 const VOICE = import.meta.env.VITE_ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM';
-const MODEL = import.meta.env.VITE_ELEVENLABS_MODEL || 'eleven_turbo_v2_5';
+// flash_v2_5 is ElevenLabs' lowest-latency model (~75 ms to first audio) and
+// still multilingual — for two-sentence tutor lines the quality gap to turbo
+// is inaudible, the snappiness is not.
+const MODEL = import.meta.env.VITE_ELEVENLABS_MODEL || 'eleven_flash_v2_5';
 
 export function elevenLabsAvailable() {
   return !!KEY;
@@ -45,6 +52,54 @@ export function stop() {
   if ('speechSynthesis' in window) window.speechSynthesis.cancel();
 }
 
+// MSE lets us feed mp3 chunks into an <audio> element as they arrive. Safari
+// on iOS has no MediaSource for audio — it takes the whole-blob path below.
+function mseSupported() {
+  return typeof MediaSource !== 'undefined' && !!MediaSource.isTypeSupported?.('audio/mpeg');
+}
+
+// Pipe the fetch body into a MediaSource buffer, starting playback on the
+// first chunk. Throws only if nothing has played yet (so speak() can fall
+// back); a failure mid-stream lets whatever buffered finish instead.
+async function playStreaming(res, my) {
+  const ms = new MediaSource();
+  const url = URL.createObjectURL(ms);
+  const audio = new Audio(url);
+  audio._url = url;
+  await new Promise((r) => ms.addEventListener('sourceopen', r, { once: true }));
+  if (my !== seq) { URL.revokeObjectURL(url); res.body.cancel().catch(() => {}); return; }
+  const sb = ms.addSourceBuffer('audio/mpeg');
+  currentAudio = audio;
+  speaking = true;
+  audio.onended = () => {
+    URL.revokeObjectURL(url);
+    if (my === seq) { speaking = false; currentAudio = null; }
+  };
+  const reader = res.body.getReader();
+  let started = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (my !== seq) { reader.cancel().catch(() => {}); return; } // superseded: stop() already paused it
+      if (done) break;
+      sb.appendBuffer(value);
+      await new Promise((r) => {
+        sb.addEventListener('updateend', r, { once: true });
+        sb.addEventListener('error', r, { once: true });
+      });
+      if (!started) {
+        started = true;
+        await audio.play().catch((e) => { console.warn('audio play blocked', e); if (my === seq) speaking = false; });
+      }
+    }
+    if (ms.readyState === 'open') ms.endOfStream();
+  } catch (e) {
+    if (!started) throw e; // nothing audible yet — let speak() fall back
+    console.warn('TTS stream ended early:', e.message);
+    if (ms.readyState === 'open') { try { ms.endOfStream(); } catch { /* detached */ } }
+  }
+}
+
 /** Speak `text`. Resolves when playback starts (not when it ends). */
 export async function speak(text) {
   if (!text) return;
@@ -63,8 +118,14 @@ export async function speak(text) {
         }),
       });
       if (!res.ok) throw new Error(`ElevenLabs ${res.status}: ${await res.text().catch(() => '')}`);
+      if (my !== seq) { res.body?.cancel().catch(() => {}); return; } // superseded during generation
+      if (mseSupported() && res.body) {
+        await playStreaming(res, my);
+        track('tts', { output: text, metadata: { provider: 'elevenlabs', voice: VOICE, chars: text.length, streamed: true } });
+        return;
+      }
       const blob = await res.blob();
-      if (my !== seq) return; // superseded while the audio was being generated
+      if (my !== seq) return; // superseded while the audio was downloading
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audio._url = url;

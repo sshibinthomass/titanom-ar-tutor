@@ -1102,7 +1102,18 @@ async function handleSpeech(text) {
   // the part *acts it out* (a few loops, then it settles back).
   const { part, action, answer } = await answerQuestion(getContext(), t);
   if (my !== askSeq) return;             // a newer question superseded this answer
-  if (recognizer?.isCapturing()) return; // the user is mid-question — never talk over them
+  // If the mic is mid-capture, hold the answer until the utterance resolves
+  // instead of discarding it: if that capture turns out to be a new question,
+  // askSeq supersedes this answer naturally; if it was a noise blip (or the
+  // old stuck-VAD state), the user still gets answered. Dropping here silently
+  // was how "it heard me but never replied" happened.
+  const holdUntil = performance.now() + 8000;
+  while (recognizer?.isCapturing() && performance.now() < holdUntil) {
+    await new Promise((r) => setTimeout(r, 150));
+    if (my !== askSeq) return;
+  }
+  if (my !== askSeq) return;
+  if (recognizer?.isCapturing()) return; // still talking after 8 s — stay quiet
   const indices = part ? highlightPartByName(part) : [];
   if (indices.length && action && !isPuzzleActive()) {
     startFixAnim(parts, indices, action, {
@@ -1163,7 +1174,7 @@ const recognizer = createRecognizer({
 });
 if (!recognizer) {
   ui.micBtn.disabled = true;
-  ui.micBtn.title = 'Voice needs a microphone plus a DeutschlandGPT key (or Chrome).';
+  ui.micBtn.title = 'Voice needs a microphone plus an ElevenLabs or DeutschlandGPT key (or Chrome).';
 }
 ui.micBtn.addEventListener('click', () => {
   if (!recognizer) return;
