@@ -261,7 +261,7 @@ export async function startAR(opts) {
 
   // Fit to ~0.7 m. Measure the *assembled* model when the caller can supply it:
   // the live bounds grow with the explode amount, so entering AR from a mode
-  // that spreads the parts (Fix, Quiz) would otherwise scale the
+  // that spreads the parts (Fix) would otherwise scale the
   // object down to fit its exploded silhouette — and reassembling mid-session
   // would then leave a chair well under 0.7 m standing on the floor.
   const box = fitBox || new THREE.Box3().setFromObject(group);
