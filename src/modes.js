@@ -339,7 +339,7 @@ const CONTENT = {
         de: 'Feste Angaben: Sitzhöhe 46 bis 57 Zentimeter, zugelassen bis 110 Kilogramm, die Armlehnen haben eine feste Höhe und eine verstellbare Variante gibt es nicht. IKEA weist darauf hin, dass die Gasdruckfeder nur von geschultem Personal getauscht oder repariert werden darf — nimm diesen Hinweis in jeden Plan auf, der sie berührt.' },
     ],
     // `action` picks the motion primitive (fixanim.js) each step animates with —
-    // the same verbs the DGPT planner chooses from, so the no-AI fallback moves
+    // the same verbs the OpenAI planner chooses from, so the no-AI fallback moves
     // exactly like a generated plan.
     fix: {
       title: { en: 'Fix a sinking Markus — replace the gas lift',
@@ -594,7 +594,7 @@ const ASSEMBLE_STEPS = {
  * the authored fault symptoms — the problems we already know this object
  * has — so the suggestions ride the existing authored knowledge instead of
  * becoming a second, parallel hardcode. They are just canned voice inputs:
- * tapping one feeds the same DGPT planner a spoken phrase would.
+ * tapping one feeds the same OpenAI planner a spoken phrase would.
  */
 export function fixSuggestions(modelKey) {
   const c = CONTENT[modelKey];
@@ -610,7 +610,7 @@ export function fixSuggestions(modelKey) {
 }
 
 /**
- * Resolve a DGPT plan step's part names → live part indices. Exact-name match
+ * Resolve an OpenAI plan step's part names → live part indices. Exact-name match
  * first (case-insensitive), collecting EVERY part that shares the name or
  * extends it ("Caster" → Caster wheels / stem / brake hood ×5, "Armrest" →
  * both frames and pads) — the same family rule Assemble uses. A name the model
@@ -866,7 +866,7 @@ function akin(a, b) {
  * impossible procedures came from. A hit is handed to the planner as the cause
  * to build around, and shown to the user immediately as a grounded lead while
  * the plan generates. Local and deterministic on purpose: no AI call, so it
- * costs nothing and works when DGPT is unreachable.
+ * costs nothing and works when OpenAI is unreachable.
  *
  * Matched on the symptom only. The suggestion chips send a symptom verbatim, so
  * the main path always hits; a free-form phrase that misses simply gets no

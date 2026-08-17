@@ -1,7 +1,6 @@
 /**
  * The home screen's "Scan an object": the phone camera → one still frame →
- * DeutschlandGPT vision → which of the app's objects is the user standing in
- * front of.
+ * OpenAI vision → which of the app's objects is the user standing in front of.
  *
  * Two halves, deliberately in one module because they only exist for each
  * other: the camera plumbing (getUserMedia → <video> → a JPEG data URL) and the
@@ -93,7 +92,7 @@ export function captureFrame(video, { maxSize = 768, quality = 0.8 } = {}) {
 // ---- Classification --------------------------------------------------------
 
 /**
- * Ask DeutschlandGPT which of the app's objects the photo shows.
+ * Ask OpenAI which of the app's objects the photo shows.
  * Returns one of SCAN_LABELS — 'none' whenever we can't be confident, including
  * when the AI is unconfigured or unreachable, so the caller has exactly one
  * "couldn't tell, pick manually" path to handle.

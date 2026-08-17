@@ -3,13 +3,12 @@
  *
  * Primary: **ElevenLabs Scribe v2** (`POST /v1/speech-to-text`) — the sponsor's
  * STT, called straight from the browser with the same key the voice already
- * uses. Two reasons it leads: Scribe v2 is markedly more accurate than
- * whisper-1 on accented / far-mic / noisy speech (the exact audio a phone held
- * at a chair produces), and it's faster here because ElevenLabs serves CORS —
- * the request skips the dev-proxy/Worker hop every DGPT call has to take.
+ * uses. It leads because Scribe v2 is markedly more accurate than whisper-1 on
+ * accented / far-mic / noisy speech — the exact audio a phone held at a chair
+ * produces.
  *
- * Fallback: DGPT Whisper (ai.transcribe) — used when no ElevenLabs key is set,
- * or per-utterance when Scribe fails. A 4xx from Scribe (key without STT
+ * Fallback: OpenAI Whisper (ai.transcribe) — used when no ElevenLabs key is
+ * set, or per-utterance when Scribe fails. A 4xx from Scribe (key without STT
  * permission, unknown model) retires it for the whole session, so later
  * utterances go straight to Whisper instead of paying a doomed request first;
  * a network error / 5xx is treated as transient and Scribe stays primary.
@@ -17,7 +16,7 @@
  * Both paths return { text, provider } so the caller can report which engine
  * actually heard the user.
  */
-import { sttAvailable as dgptSttAvailable, transcribe as dgptTranscribe } from './ai.js';
+import { sttAvailable as whisperAvailable, transcribe as whisperTranscribe } from './ai.js';
 import { track } from './telemetry.js';
 import { sttLang } from './i18n.js';
 
@@ -28,7 +27,7 @@ const SCRIBE_MODEL = import.meta.env.VITE_ELEVENLABS_STT_MODEL || 'scribe_v2';
 let scribeUsable = !!KEY; // flipped off for the session on a hard (4xx) failure
 
 export function sttAvailable() {
-  return scribeUsable || dgptSttAvailable();
+  return scribeUsable || whisperAvailable();
 }
 
 async function scribeTranscribe(blob, filename, lang) {
@@ -74,11 +73,11 @@ export async function transcribe(blob, { filename = 'utterance.webm' } = {}) {
       return { text, provider: 'scribe' };
     } catch (e) {
       if (e.status >= 400 && e.status < 500) scribeUsable = false;
-      console.warn('Scribe STT failed, falling back to DGPT Whisper:', e.message);
+      console.warn('Scribe STT failed, falling back to OpenAI Whisper:', e.message);
       track('stt-error', { metadata: { provider: 'scribe', error: e.message, lang, retired: !scribeUsable }, level: 'ERROR' });
-      if (!dgptSttAvailable()) throw e; // no fallback configured — surface the real error
+      if (!whisperAvailable()) throw e; // no fallback configured — surface the real error
     }
   }
-  const text = await dgptTranscribe(blob, { filename, language: lang });
+  const text = await whisperTranscribe(blob, { filename, language: lang });
   return { text, provider: 'whisper' };
 }

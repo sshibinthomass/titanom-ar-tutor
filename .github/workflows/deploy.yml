@@ -32,11 +32,15 @@ jobs:
           VITE_ELEVENLABS_MODEL: ${{ secrets.VITE_ELEVENLABS_MODEL }}
           # Mic speech-to-text (primary); empty falls back to scribe_v2 in code.
           VITE_ELEVENLABS_STT_MODEL: ${{ secrets.VITE_ELEVENLABS_STT_MODEL }}
-          VITE_DGPT_BASE_URL: ${{ secrets.VITE_DGPT_BASE_URL }}
-          VITE_DGPT_API_KEY: ${{ secrets.VITE_DGPT_API_KEY }}
-          VITE_DGPT_MODEL: ${{ secrets.VITE_DGPT_MODEL }}
-          # Mic speech-to-text model; empty falls back to whisper-1 in code.
-          VITE_DGPT_STT_MODEL: ${{ secrets.VITE_DGPT_STT_MODEL }}
+          # OpenAI is called browser-direct (it serves CORS), so the key alone
+          # makes the deployed site work. Set VITE_OPENAI_BASE_URL to the
+          # Worker instead if you'd rather the key stayed out of the bundle.
+          VITE_OPENAI_API_KEY: ${{ secrets.VITE_OPENAI_API_KEY }}
+          VITE_OPENAI_BASE_URL: ${{ secrets.VITE_OPENAI_BASE_URL }}
+          # Empty falls back to gpt-4o / gpt-4.1 / whisper-1 in code.
+          VITE_OPENAI_MODEL: ${{ secrets.VITE_OPENAI_MODEL }}
+          VITE_OPENAI_PLAN_MODEL: ${{ secrets.VITE_OPENAI_PLAN_MODEL }}
+          VITE_OPENAI_STT_MODEL: ${{ secrets.VITE_OPENAI_STT_MODEL }}
           # Only the Worker's /langfuse URL is bundled — the Langfuse keys
           # themselves live as Worker secrets, never in the client bundle.
           VITE_LANGFUSE_BASE_URL: ${{ secrets.VITE_LANGFUSE_BASE_URL }}

@@ -1,5 +1,5 @@
 /**
- * The "brain" glue: answers spoken questions via DeutschlandGPT with context
+ * The "brain" glue: answers spoken questions via OpenAI with context
  * about what the user is currently looking at. The mic is a pure question
  * channel — spoken phrases are never parsed into app commands (that used to
  * live here as classifyCommand and made the app act on misheard noise).
@@ -54,7 +54,7 @@ function germanStyle() {
  * names the exact parts to spotlight, so isolate + camera flight + TTS all ride
  * the same guided-step pipeline as before. The plan is grounded in the authored
  * knowledge digest (the real IKEA manual for the Markus) and constrained to the
- * live part list, so DGPT can only reference parts that actually exist in the
+ * live part list, so OpenAI can only reference parts that actually exist in the
  * split model.
  *
  * Each step is split into **beats** — one spoken sentence plus the gesture that
@@ -85,7 +85,7 @@ export async function generateFixPlan(ctx, request, { fault } = {}) {
   try {
     let raw;
     try {
-      // Planning gets the strongest model (PLAN_MODEL, Opus by default) — a
+      // Planning gets the stronger model (PLAN_MODEL, gpt-4.1 by default) — a
       // one-shot structured task where quality beats latency.
       // Beats make a plan verbose: 6 steps x 4 beats of JSON runs well past
       // 2000 tokens, and a cut-off reply used to fail to parse and drop us into
@@ -350,7 +350,7 @@ export async function explainNextPart(ctx, { attempted, expected, stepText }) {
  * learner cannot yet know what the piece is called. Describing it by shape,
  * position or function ("the star thing at the bottom", "the pole in the
  * middle") is a legitimate answer to a prompt that asked about function, and
- * resolving that to one part is exactly the semantic job DGPT is for. main.js
+ * resolving that to one part is exactly the semantic job OpenAI is for. main.js
  * tries an exact local match first, so this only runs for the descriptive case.
  *
  * The model is deliberately **not told which part is correct**. Given the answer
@@ -408,7 +408,7 @@ export async function resolveSpokenPart(ctx, phrase, candidates) {
 }
 
 /**
- * Answer a free-form question about the current object via DeutschlandGPT.
+ * Answer a free-form question about the current object via OpenAI.
  * context: { modelLabel, parts:[names], mode, focusedPart, partInfo, faults }
  *
  * Returns { part, action, answer }: `part` is the part the question turned out

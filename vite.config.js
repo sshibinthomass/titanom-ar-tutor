@@ -17,16 +17,12 @@ export default defineConfig(({ mode }) => {
     base: './',
     server: {
       host: true, // expose on the LAN so a phone can reach the dev server
-      // Both upstreams below reject browser CORS, so the browser can't call them
-      // directly. In dev, the app hits these local paths and Vite forwards them
-      // server-side — which also lets us attach secrets the client never sees.
+      // OpenAI and ElevenLabs both serve CORS, so the app calls them straight
+      // from the page — in dev exactly as in the deployed build. The only
+      // upstream that still needs a hop is Langfuse, and not for CORS: its
+      // ingestion API wants a *secret* key, which we attach here so the browser
+      // never holds it.
       proxy: {
-        // DeutschlandGPT (the AI tutor brain).
-        '/dgpt-api': {
-          target: 'https://api.deutschlandgpt.de',
-          changeOrigin: true,
-          rewrite: (p) => p.replace(/^\/dgpt-api/, '/v2'),
-        },
         // Langfuse ingestion. Inject Basic auth here so the browser sends
         // telemetry credential-free (secret key stays on this Node process).
         '/lf-api': {

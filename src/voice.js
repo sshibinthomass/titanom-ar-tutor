@@ -2,7 +2,7 @@
  * Speech-to-text: the tutor's ears.
  *
  * Capture is a MediaRecorder feeding the STT provider chain (stt.js: ElevenLabs
- * Scribe v2 first, DGPT Whisper fallback). What differs is who decides where an
+ * Scribe v2 first, OpenAI Whisper fallback). What differs is who decides where an
  * utterance *starts and ends* — and there are two answers, because they fail in
  * opposite ways:
  *
@@ -532,7 +532,7 @@ function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus,
   };
 }
 
-// ---- Fallback: Web Speech API (Chrome only, no DGPT key needed) --------------
+// ---- Fallback: Web Speech API (Chrome only, no OpenAI key needed) --------------
 
 function createWebSpeechRecognizer({ lang = null, onResult, onStateChange, onSpeechStart, handsFree = false } = {}) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;

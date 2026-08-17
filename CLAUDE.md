@@ -56,7 +56,7 @@ modules are focused, mostly-pure helpers it calls.
 | [src/gate.js](src/gate.js) | **The front door.** One shared 4-digit passcode in front of the whole app; main.js routes nothing until it is entered. |
 | [src/router.js](src/router.js) | **Links.** The hash-URL grammar (`#/`, `#/scan`, `#/objects`, `#/<model>/<mode>`), plus navigate/parse/listen. Owns no state and knows no ids — the caller passes the vocabulary in. |
 | [src/home.js](src/home.js) | The **home screen** — the front door. Scan the real object with the camera, or pick from the list. Owns the overlay's views and the camera lifecycle. |
-| [src/vision.js](src/vision.js) | The scan itself: rear camera → one JPEG frame → DGPT vision → one of `chair` / `bicycle` / `bed` / `none`. |
+| [src/vision.js](src/vision.js) | The scan itself: rear camera → one JPEG frame → OpenAI vision → one of `chair` / `bicycle` / `bed` / `none`. |
 | [src/explode.js](src/explode.js) | The **core**. Splits a glTF into parts and drives the exploded view + per-part highlight/dim/isolate. |
 | [src/animate.js](src/animate.js) | Tween engine (keyed channels, driven from the render loop) + the camera flight that frames a part. |
 | [src/fixanim.js](src/fixanim.js) | Fix's gesture library: 22 part gestures (remove/lift_off/unscrew/tap_loose/press_fit/align/tug/spin/grease/wipe/…) + 6 whole-object ones (tip_over/flip_over/stand_up/sit_test/rock_test/roll_away). The LLM picks the verb per spoken beat; this module owns the motion. |
@@ -67,8 +67,8 @@ modules are focused, mostly-pure helpers it calls.
 | [src/tts.js](src/tts.js) | Text-to-speech. ElevenLabs primary (streamed via MediaSource so audio starts on the first chunk), browser `speechSynthesis` fallback; race-proof (one voice at a time) and interruptible. |
 | [src/sfx.js](src/sfx.js) | The puzzle's sound cues (snap / reject / dismantle). ElevenLabs **sound generation**, pre-generated + cached; WebAudio synth fallback. |
 | [src/voice.js](src/voice.js) | Mic capture: MediaRecorder → the stt.js provider chain (works on iOS), bounded either by **push-to-talk** (the default — hold 🎤, which opens the mic and closes it again on release so playback stays on the loudspeaker) or by the opt-in WebAudio **VAD**; Web Speech API fallback. Fires barge-in the moment the user speaks. |
-| [src/stt.js](src/stt.js) | Transcription provider chain: ElevenLabs **Scribe v2** primary (browser-direct, no proxy hop) → DGPT Whisper fallback. |
-| [src/ai.js](src/ai.js) | DeutschlandGPT chat client (OpenAI-compatible `/chat/completions`). |
+| [src/stt.js](src/stt.js) | Transcription provider chain: ElevenLabs **Scribe v2** primary (browser-direct, no proxy hop) → OpenAI Whisper fallback. |
+| [src/ai.js](src/ai.js) | OpenAI client (`/chat/completions` + Whisper), called browser-direct. |
 | [src/tutor.js](src/tutor.js) | "Brain" glue: classify a spoken phrase into an app command vs. a free-form question, then answer via AI with context. |
 | [src/i18n.js](src/i18n.js) | **Language.** The selected language (`en`/`de`), the UI dictionary, the authored-content resolver `tr()`, and the locale codes the speech stack needs. One switch flips chrome, content, voice, transcription and every LLM prompt. |
 | [src/icons.js](src/icons.js) | **Iconography.** One inline stroke set + the two ways it reaches the DOM: `hydrateIcons()` for static markup, `setLabel()` for buttons the app builds or relabels. No emoji anywhere. |
@@ -177,7 +177,7 @@ camera.
 
 - **Scan** opens the rear camera (`facingMode: { ideal: 'environment' }` — not
   `exact`, or a laptop with only a front camera has no scan at all), takes one
-  still, and asks DGPT vision which object it is. The frame is downscaled to
+  still, and asks OpenAI vision which object it is. The frame is downscaled to
   768 px on the long edge: telling a chair from a bed does not need 1280, and
   these models are billed and slowed by pixels. The shot **replaces the live
   preview** while the answer is generated — a preview that keeps moving invites
@@ -271,7 +271,7 @@ phone, and `display:none` during AR — so the card is the only place the spread
 can be adjusted on the surfaces the app is actually used on.
 
 2. **Fix** — **voice-first**: the user says (or taps a suggested symptom for)
-   what's wrong; `generateFixPlan` (tutor.js) has DGPT draft a step plan as
+   what's wrong; `generateFixPlan` (tutor.js) has OpenAI draft a step plan as
    strict JSON, grounded in `knowledgeDigest` and constrained to the live part
    names; `resolvePlanParts` maps each step's part names to indices and the
    walkthrough rides the same isolate + fly-to + TTS pipeline (Next/Back).
@@ -282,10 +282,10 @@ can be adjusted on the surfaces the app is actually used on.
    **beats** — one spoken sentence plus the gesture that illustrates it — so the
    model does what the voice is describing, sentence by sentence. See "Fix's narrated gestures" below. The authored `CONTENT[*].fix`
    procedure (one beat per step, carrying an authored verb) is the fallback when
-   DGPT is unconfigured or unreachable — never the only path.
+   OpenAI is unconfigured or unreachable — never the only path.
    **Fix always opens on the question**, planner or no planner. The ask screen —
    "what should we fix?", the symptom chips, the mic — *is* the mode; the
-   walkthrough is what an answer produces. Without DGPT the answer is the
+   walkthrough is what an answer produces. Without OpenAI the answer is the
    authored procedure instead of a generated plan, but the question, the
    suggestions, the "fix something else" chip and the **Done → ask again** loop
    all behave identically. It used to skip straight to the authored procedure
@@ -519,7 +519,7 @@ The rules that make it work — don't regress them:
    round trip this adds to questions in Assemble is the price of it.
 3. **Exact matches never reach the LLM.** `localPartAnswer` strips a little
    filler and matches names exactly, so "star base" is graded instantly. That is
-   also the only resolver when DGPT is unconfigured — there, and only there, it
+   also the only resolver when OpenAI is unconfigured — there, and only there, it
    also accepts the name inside a short phrase, guarded by `QUESTION_LEAD`.
 4. **Group names are answers.** A step *is* a group, and "caster" is what a
    learner says — so `puzzleAnswerByName` matches a part whose name equals the
@@ -558,7 +558,7 @@ content routes* also exist and are not commands — in both, the utterance is th
 content that mode exists to receive, and neither can navigate or switch modes:
 
 1. **Fix, waiting for a problem** (`fixState === 'ask' | 'planning'`): the
-   utterance is the fix request itself — it feeds `startFixRequest` (the DGPT
+   utterance is the fix request itself — it feeds `startFixRequest` (the OpenAI
    planner), exactly like tapping a suggestion chip.
 2. **Assemble, with a step unanswered** (`puzzleStatus().awaiting`): the
    utterance is the learner's *answer* to "which part goes on next?" — see
@@ -568,9 +568,8 @@ content that mode exists to receive, and neither can navigate or switch modes:
 
 Capture (`voice.js`) is a `MediaRecorder` feeding the `stt.js` provider chain —
 **ElevenLabs Scribe v2** first (`/v1/speech-to-text`, model `scribe_v2` via
-`VITE_ELEVENLABS_STT_MODEL` — browser-direct because ElevenLabs serves CORS, so
-no proxy hop), DGPT Whisper as fallback (`ai.transcribe()`,
-`/v2/audio/transcriptions`, `VITE_DGPT_STT_MODEL`). A 4xx from Scribe retires it
+`VITE_ELEVENLABS_STT_MODEL`), OpenAI Whisper as fallback (`ai.transcribe()`,
+`/v1/audio/transcriptions`, `VITE_OPENAI_STT_MODEL`). A 4xx from Scribe retires it
 for the session; network errors fall back per-utterance. Transcripts that are
 only an STT filler-hallucination ("you", "thank you") are dropped. Web Speech
 survives only as the fallback when neither remote STT is configured; otherwise
@@ -639,7 +638,7 @@ you hold against your ear and stays there for the rest of the session. So:
 Answering: `tutor.answerQuestion()` builds a system prompt with the current
 model, its part names, active mode, focused part (resolves "this"/"it"), and
 ALL authored per-part facts (`partInfoDigest` — never shown in the UI, LLM
-grounding only), calls DeutschlandGPT, and speaks the ≤2-sentence answer via
+grounding only), calls OpenAI, and speaks the ≤2-sentence answer via
 `tts.speak()`. The LLM also names which part the question was about
 (`PART: <name>` header) and main.js spotlights it — so asking about the gas
 lift while the seat is selected highlights the gas lift and answers. A second
@@ -672,7 +671,7 @@ questions.
    has already replaced before answering the real one.
 
 TTS, STT and AI all **degrade gracefully**: no ElevenLabs key → browser
-speech + Whisper STT; no DeutschlandGPT → Web Speech recognition + a canned
+speech + Whisper STT; no OpenAI → Web Speech recognition + a canned
 local answer.
 
 ### Look (`index.html`'s style block + `icons.js`)
@@ -827,9 +826,10 @@ key via Basic auth, which must never enter a static bundle. So the browser sends
 - **dev:** the app POSTs to `/lf-api/*`; the Vite proxy ([vite.config.js](vite.config.js))
   adds `Authorization: Basic <public:secret>` from the non-`VITE_`-prefixed
   `LANGFUSE_*` vars (so they're never bundled) and forwards to Langfuse Cloud.
-- **prod:** set `VITE_LANGFUSE_BASE_URL` to the Worker's `/langfuse` route — the
-  same Worker as DGPT ([worker/](worker/dgpt-proxy.js)), which holds the keys as
-  secrets. If it's unset, telemetry is a **silent no-op** (like AI/TTS degrade).
+- **prod:** set `VITE_LANGFUSE_BASE_URL` to the Worker's `/langfuse` route
+  ([worker/](worker/ai-proxy.js)), which holds the keys as secrets. If it's
+  unset, telemetry is a **silent no-op** (like AI/TTS degrade). Telemetry is now
+  the Worker's only *required* job — the AI reaches OpenAI without it.
 
 Instrumentation points: `answerQuestion` (tutor.js) opens the trace and `chat`
 (ai.js) records the generation; `main.js` calls `track()`/`initTelemetry()` for
@@ -876,8 +876,7 @@ anchor (a new floor spot). Ported from the reference
 ## Configuration & secrets
 
 Config is via env vars (see [.env.example](.env.example)) — copy to `.env`
-(gitignored). ElevenLabs voice/model, DeutschlandGPT key/base/model, Langfuse
-keys.
+(gitignored). ElevenLabs voice/model, OpenAI key/base/models, Langfuse keys.
 
 > 🔐 **Every `VITE_`-prefixed value is baked into the public JS bundle** (static
 > site) and visible to anyone who opens the deployed site. Use **restricted /
@@ -890,25 +889,37 @@ keys.
 > (a proxy URL, not a key). This is the pattern the other keys *should* use; a
 > real backend would proxy those too.
 
-### DeutschlandGPT + Langfuse both need a proxy
+### Only Langfuse needs a proxy
 
-Neither can be called from the browser directly (DGPT has no CORS; Langfuse
-needs a secret key). Same two-path pattern for both:
-- **dev:** the app calls `/dgpt-api/*` and `/lf-api/*`; the Vite proxy forwards
-  them server-side (and injects Langfuse Basic auth). See [vite.config.js](vite.config.js).
-- **prod:** deploy the single Cloudflare Worker in [worker/](worker/dgpt-proxy.js)
-  (holds the keys as secrets, adds CORS, routes `/langfuse/*` to Langfuse and
-  everything else to DGPT). Set `VITE_DGPT_BASE_URL` to its root and
-  `VITE_LANGFUSE_BASE_URL` to its `/langfuse` route — and **don't** set
-  `VITE_DGPT_API_KEY` or any `LANGFUSE_*` key in the app.
+**OpenAI is called straight from the page** — it serves CORS (verified:
+`Access-Control-Allow-Origin: *` on `/v1/*`), so the same single request works
+on localhost and on GitHub Pages. That is the whole reason the deployed site
+needs nothing but `VITE_OPENAI_API_KEY`: there is no dev proxy for it, no Worker
+route it depends on, and no prod/dev divergence to debug. The predecessor
+backend had no CORS and needed both.
+
+Langfuse still needs a hop, and not for CORS — its ingestion API authenticates
+with a *secret* key, which a static bundle must never carry:
+- **dev:** the app calls `/lf-api/*`; the Vite proxy forwards it server-side and
+  injects Basic auth. See [vite.config.js](vite.config.js).
+- **prod:** deploy the Cloudflare Worker in [worker/](worker/ai-proxy.js) (keys
+  as secrets) and set `VITE_LANGFUSE_BASE_URL` to its `/langfuse` route. Never
+  set a `LANGFUSE_*` key in the app.
+
+The Worker will also proxy OpenAI (any non-`/langfuse` path, forwarded to
+`api.openai.com/v1`) if you'd rather not bake a billable key into the bundle:
+set `VITE_OPENAI_BASE_URL` to the Worker root and leave `VITE_OPENAI_API_KEY`
+unset — the client then sends no `Authorization` header and the Worker adds it.
+That is a hardening option, not a requirement.
 
 ## Deploy
 
 [.github/workflows/deploy.yml](.github/workflows/deploy.yml) builds and deploys
 to GitHub Pages on push to `main` (Vite `base: './'` so it works under the Pages
 sub-path). The build reads the `VITE_*` values from repo **Actions secrets**
-(the ElevenLabs/DGPT keys plus `VITE_LANGFUSE_BASE_URL` — note the Langfuse keys
-themselves are **not** here; they live as Worker secrets).
+(the ElevenLabs/OpenAI keys plus `VITE_LANGFUSE_BASE_URL` — note the Langfuse keys
+themselves are **not** here; they live as Worker secrets). `VITE_OPENAI_API_KEY`
+is the one secret the deployed AI actually needs; everything else degrades.
 
 **Status / gotcha:** the build job passes but deploy fails until a repo **admin**
 does two one-time manual steps:

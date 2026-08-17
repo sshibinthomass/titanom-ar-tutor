@@ -4,7 +4,7 @@
  * Two ways in, and they answer the same question ("what are we working on?")
  * from opposite ends:
  *  1. **Scan an object** — open the rear camera, take one photo, and let
- *     DeutschlandGPT vision (vision.js) say which of the app's objects it is.
+ *     OpenAI vision (vision.js) say which of the app's objects it is.
  *     A hit selects that model automatically; `none` drops the user on the
  *     picker rather than guessing.
  *  2. **Select an object** — the plain list, for when the object isn't in front

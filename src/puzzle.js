@@ -508,7 +508,7 @@ function releaseHeld() {
 /**
  * Answer the current step by **naming** a part rather than dragging one — the
  * voice route (main.js resolves the spoken phrase to a canonical name first,
- * locally when it can and via DGPT when the learner described the part instead
+ * locally when it can and via OpenAI when the learner described the part instead
  * of naming it).
  *
  * It deliberately reuses the drag outcomes instead of inventing its own: a

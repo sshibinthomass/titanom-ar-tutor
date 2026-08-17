@@ -1,33 +1,44 @@
 /**
- * DeutschlandGPT client.
- * Docs: https://titanom.deutschlandgpt.de/docs/platform-api/createChatCompletion
- *   POST https://api.deutschlandgpt.de/v2/chat/completions
+ * OpenAI client — the tutor's brain (chat, vision, and the STT fallback).
+ * Docs: https://platform.openai.com/docs/api-reference/chat
+ *   POST https://api.openai.com/v1/chat/completions
  *   Authorization: Bearer <key>
  *   body: { model, messages, temperature, max_completion_tokens, ... }
  *   text at: choices[0].message.content
  *
- * Only the API key is required — the base URL and model default sensibly.
- * Available models include: claude-4.5-sonnet, gpt-4o, gemini-2.5-flash.
+ * Only the API key is required — the base URL and models default sensibly.
+ *
+ * **Called straight from the browser, in dev and in prod alike.** OpenAI serves
+ * CORS (`Access-Control-Allow-Origin: *` on /v1/*, verified against the live
+ * API), so unlike the old proxied backend there is no dev-proxy or Worker hop:
+ * one request, from the page, on GitHub Pages as well as localhost. Set
+ * VITE_OPENAI_BASE_URL to a key-holding proxy (see worker/) if you'd rather the
+ * key never reached the bundle — the client then sends no Authorization header
+ * and the proxy adds it.
  */
-// DeutschlandGPT has no CORS, so the browser cannot call it directly.
-//  • dev:  Vite proxies /dgpt-api → api.deutschlandgpt.de/v2 (see vite.config.js)
-//  • prod: set VITE_DGPT_BASE_URL to a CORS-enabled proxy/Worker URL (see worker/)
-const BASE_ENV = import.meta.env.VITE_DGPT_BASE_URL;
-const BASE = (BASE_ENV || (import.meta.env.DEV ? '/dgpt-api' : 'https://api.deutschlandgpt.de/v2')).replace(/\/$/, '');
-const KEY = import.meta.env.VITE_DGPT_API_KEY;
-const MODEL = import.meta.env.VITE_DGPT_MODEL || 'claude-4.5-sonnet';
+const BASE_ENV = import.meta.env.VITE_OPENAI_BASE_URL;
+const BASE = (BASE_ENV || 'https://api.openai.com/v1').replace(/\/$/, '');
+const KEY = import.meta.env.VITE_OPENAI_API_KEY;
+const MODEL = import.meta.env.VITE_OPENAI_MODEL || 'gpt-4o';
 // The Fix planner's model. Planning is a one-shot structured task where quality
 // beats latency (the user watches a "…planning" card, not a silent pause in
-// speech), so it gets the strongest model; conversational answers stay on the
+// speech), so it gets the stronger model; conversational answers stay on the
 // faster default above.
-export const PLAN_MODEL = import.meta.env.VITE_DGPT_PLAN_MODEL || 'claude-opus-5';
+//
+// Why gpt-4.1 and not a reasoning model: every call here sends an explicit
+// `temperature` and a `max_completion_tokens` budget sized for the plan's JSON.
+// The reasoning tiers pin temperature to 1 and spend part of that budget on
+// hidden reasoning tokens, which truncates long plans — exactly the failure
+// parseTruncated() exists to survive, so don't invite it by default.
+export const PLAN_MODEL = import.meta.env.VITE_OPENAI_PLAN_MODEL || 'gpt-4.1';
 // The home screen's object scan (vision.js) sends an image content part, so this
 // model must be multimodal — the default is, but a deployment that points
-// VITE_DGPT_MODEL at a text-only model needs this override or the scan 400s.
-export const VISION_MODEL = import.meta.env.VITE_DGPT_VISION_MODEL || MODEL;
+// VITE_OPENAI_MODEL at a text-only model needs this override or the scan 400s.
+export const VISION_MODEL = import.meta.env.VITE_OPENAI_VISION_MODEL || MODEL;
 // Speech-to-text model for /audio/transcriptions. whisper-1 is verified against
-// the live API; the platform also offers voxtral-mini-2507, chirp-3, scribe_v1/v2.
-const STT_MODEL = import.meta.env.VITE_DGPT_STT_MODEL || 'whisper-1';
+// the live API; gpt-4o-transcribe / gpt-4o-mini-transcribe are the newer
+// alternatives on the same endpoint.
+const STT_MODEL = import.meta.env.VITE_OPENAI_STT_MODEL || 'whisper-1';
 
 // Available if we have a key, or a custom endpoint (proxy/Worker) that adds auth itself.
 export function aiAvailable() {
@@ -40,19 +51,19 @@ export function sttAvailable() {
 }
 
 /**
- * Transcribe a recorded utterance (a Blob from MediaRecorder) via the
- * OpenAI-compatible Whisper endpoint. Returns the transcript text ('' if the
- * clip contained no speech). The filename extension matters: the server sniffs
- * the container from it, so pass one that matches the recorder's mime type.
+ * Transcribe a recorded utterance (a Blob from MediaRecorder) via the Whisper
+ * endpoint. Returns the transcript text ('' if the clip contained no speech).
+ * The filename extension matters: the server sniffs the container from it, so
+ * pass one that matches the recorder's mime type.
  */
 export async function transcribe(blob, { filename = 'utterance.webm', language = null, trace = null } = {}) {
-  if (!aiAvailable()) throw new Error('DeutschlandGPT not configured (set VITE_DGPT_API_KEY)');
+  if (!aiAvailable()) throw new Error('OpenAI not configured (set VITE_OPENAI_API_KEY)');
   const form = new FormData();
   form.append('file', blob, filename);
   form.append('model', STT_MODEL);
-  // ISO-639-1 language hint (the OpenAI-compatible `language` field). The app
-  // is monolingual per selection, so telling Whisper which language to expect
-  // is both more accurate on short clips and enforces the product rule.
+  // ISO-639-1 language hint. The app is monolingual per selection, so telling
+  // Whisper which language to expect is both more accurate on short clips and
+  // enforces the product rule.
   if (language) form.append('language', language);
   const startTime = new Date().toISOString();
   // No manual Content-Type — the browser must set the multipart boundary itself.
@@ -63,7 +74,7 @@ export async function transcribe(blob, { filename = 'utterance.webm', language =
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    const msg = `DeutschlandGPT STT ${res.status}: ${body.slice(0, 200)}`;
+    const msg = `OpenAI STT ${res.status}: ${body.slice(0, 200)}`;
     trace?.generation({ name: 'stt', model: STT_MODEL, startTime, level: 'ERROR', statusMessage: msg });
     throw new Error(msg);
   }
@@ -81,8 +92,8 @@ export async function transcribe(blob, { filename = 'utterance.webm', language =
  * this call as a generation — model, I/O, token usage and latency all land in
  * Langfuse. It's optional; without it the call is untraced but identical.
  */
-export async function chat(messages, { temperature = 0.4, maxTokens = 320, trace = null, name = 'deutschlandgpt', model = MODEL } = {}) {
-  if (!aiAvailable()) throw new Error('DeutschlandGPT not configured (set VITE_DGPT_API_KEY)');
+export async function chat(messages, { temperature = 0.4, maxTokens = 320, trace = null, name = 'openai', model = MODEL } = {}) {
+  if (!aiAvailable()) throw new Error('OpenAI not configured (set VITE_OPENAI_API_KEY)');
   const startTime = new Date().toISOString();
   const modelParameters = { temperature, max_completion_tokens: maxTokens };
   const res = await fetch(`${BASE}/chat/completions`, {
@@ -96,7 +107,7 @@ export async function chat(messages, { temperature = 0.4, maxTokens = 320, trace
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    const msg = `DeutschlandGPT ${res.status}: ${body.slice(0, 200)}`;
+    const msg = `OpenAI ${res.status}: ${body.slice(0, 200)}`;
     trace?.generation({ name, model, modelParameters, input: messages, startTime, level: 'ERROR', statusMessage: msg });
     throw new Error(msg);
   }

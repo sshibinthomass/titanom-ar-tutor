@@ -844,11 +844,11 @@ function addCardExplodeSlider() {
   cardExplode = { slider, val };
 }
 
-// --- Fix: voice-first, DGPT-planned repair ------------------------------------
-// The user says (or taps a suggested) problem; DeutschlandGPT drafts a step plan
+// --- Fix: voice-first, OpenAI-planned repair ------------------------------------
+// The user says (or taps a suggested) problem; OpenAI drafts a step plan
 // grounded in the authored knowledge digest and constrained to the live part
 // names, and the app walks it with the same isolate + camera-flight + TTS
-// pipeline the authored procedure used. Without DGPT the authored procedure
+// pipeline the authored procedure used. Without OpenAI the authored procedure
 // runs exactly as before — the fallback, not the feature.
 let fixState = 'ask';   // 'ask' (waiting for a problem) | 'planning' | 'guided'
 let fixSeq = 0;         // newest fix request wins if two plans race
@@ -857,7 +857,7 @@ let fixSeq = 0;         // newest fix request wins if two plans race
  * Fix always opens by *asking*. That question is the mode — you say what's
  * wrong (or tap a symptom), and only then does it plan and walk you through it.
  *
- * It used to skip straight to the authored procedure when DGPT was unreachable,
+ * It used to skip straight to the authored procedure when OpenAI was unreachable,
  * which quietly changed what the mode *is*: a walkthrough of a repair nobody
  * asked for, with the suggestions never shown. Without AI the answer to the
  * question is simply the authored procedure instead of a generated plan (see
@@ -910,7 +910,7 @@ function showFixAsk(lead = '') {
   say(lead || t('fix.askSpoken'));
 }
 
-/** A problem arrived (spoken or tapped): plan it with DGPT and start the walkthrough. */
+/** A problem arrived (spoken or tapped): plan it with OpenAI and start the walkthrough. */
 async function startFixRequest(request) {
   const my = ++fixSeq;
   fixState = 'planning';
@@ -1313,7 +1313,7 @@ function onPuzzleCorrect({ step, assisted }) {
  * already say the drop failed, so the words don't repeat that — they name the
  * part to reach for instead. `expected` leads; the tutor then adds why it has to
  * come first. Falls back to the step's own instruction line whenever
- * DeutschlandGPT is unreachable, so the guidance is never silent.
+ * OpenAI is unreachable, so the guidance is never silent.
  */
 async function onPuzzleWrong({ step, attempted, expected, expectedLabel }) {
   const seq = ++wrongSeq;
@@ -1399,7 +1399,7 @@ const ANSWER_STOPWORDS = new Set(['the', 'and', 'for', 'with', 'that', 'this', '
  *
  * Exact match only (after stripping filler), because a false positive here is
  * expensive: it would turn a question into a wrong answer and cost the learner
- * a mistake. The one exception is when DGPT is unconfigured — then this is the
+ * a mistake. The one exception is when OpenAI is unconfigured — then this is the
  * only resolver there is, so it also accepts the name embedded in a short
  * phrase, guarded against anything that opens like a question.
  */
@@ -1479,7 +1479,7 @@ async function assembleVoiceAnswer(phrase) {
   if (!before) return false;
 
   // Fast path: they simply said the name. No round trip — and the only path
-  // that still works with no DGPT configured.
+  // that still works with no OpenAI configured.
   let name = localPartAnswer(phrase);
 
   if (!name) {
