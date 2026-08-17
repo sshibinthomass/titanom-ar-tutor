@@ -2,7 +2,7 @@
  * Speech-to-text: the tutor's ears.
  *
  * Capture is a MediaRecorder feeding the STT provider chain (stt.js: ElevenLabs
- * Scribe v2 first, OpenAI Whisper fallback). What differs is who decides where an
+ * Scribe v2 first, OpenAI transcription fallback). What differs is who decides where an
  * utterance *starts and ends* — and there are two answers, because they fail in
  * opposite ways:
  *
@@ -125,7 +125,7 @@ export function createRecognizer(opts = {}) {
   return null;
 }
 
-// ---- Primary: VAD + MediaRecorder + remote STT (Scribe v2 / Whisper) --------
+// ---- Primary: VAD + MediaRecorder + remote STT (Scribe v2 / OpenAI) --------
 
 function createVadRecognizer({ onResult, onStateChange, onSpeechStart, onStatus, onError, isTtsSpeaking, handsFree = false } = {}) {
   let listening = false;

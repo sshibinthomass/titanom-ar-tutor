@@ -3,15 +3,15 @@
  *
  * Primary: **ElevenLabs Scribe v2** (`POST /v1/speech-to-text`) — the sponsor's
  * STT, called straight from the browser with the same key the voice already
- * uses. It leads because Scribe v2 is markedly more accurate than whisper-1 on
- * accented / far-mic / noisy speech — the exact audio a phone held at a chair
- * produces.
+ * uses. It leads because it is strong on accented / far-mic / noisy speech —
+ * the exact audio a phone held at a chair produces.
  *
- * Fallback: OpenAI Whisper (ai.transcribe) — used when no ElevenLabs key is
- * set, or per-utterance when Scribe fails. A 4xx from Scribe (key without STT
- * permission, unknown model) retires it for the whole session, so later
- * utterances go straight to Whisper instead of paying a doomed request first;
- * a network error / 5xx is treated as transient and Scribe stays primary.
+ * Fallback: OpenAI transcription (ai.transcribe, `gpt-4o-transcribe` by
+ * default) — used when no ElevenLabs key is set, or per-utterance when Scribe
+ * fails. A 4xx from Scribe (key without STT permission, unknown model) retires
+ * it for the whole session, so later utterances go straight to OpenAI instead
+ * of paying a doomed request first; a network error / 5xx is treated as
+ * transient and Scribe stays primary.
  *
  * Both paths return { text, provider } so the caller can report which engine
  * actually heard the user.
@@ -73,7 +73,7 @@ export async function transcribe(blob, { filename = 'utterance.webm' } = {}) {
       return { text, provider: 'scribe' };
     } catch (e) {
       if (e.status >= 400 && e.status < 500) scribeUsable = false;
-      console.warn('Scribe STT failed, falling back to OpenAI Whisper:', e.message);
+      console.warn('Scribe STT failed, falling back to OpenAI transcription:', e.message);
       track('stt-error', { metadata: { provider: 'scribe', error: e.message, lang, retired: !scribeUsable }, level: 'ERROR' });
       if (!whisperAvailable()) throw e; // no fallback configured — surface the real error
     }

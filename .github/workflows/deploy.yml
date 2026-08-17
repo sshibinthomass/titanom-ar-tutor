@@ -37,7 +37,7 @@ jobs:
           # Worker instead if you'd rather the key stayed out of the bundle.
           VITE_OPENAI_API_KEY: ${{ secrets.VITE_OPENAI_API_KEY }}
           VITE_OPENAI_BASE_URL: ${{ secrets.VITE_OPENAI_BASE_URL }}
-          # Empty falls back to gpt-4o / gpt-4.1 / whisper-1 in code.
+          # Empty falls back to gpt-5.6-terra / gpt-5.6-sol / gpt-4o-transcribe.
           VITE_OPENAI_MODEL: ${{ secrets.VITE_OPENAI_MODEL }}
           VITE_OPENAI_PLAN_MODEL: ${{ secrets.VITE_OPENAI_PLAN_MODEL }}
           VITE_OPENAI_STT_MODEL: ${{ secrets.VITE_OPENAI_STT_MODEL }}

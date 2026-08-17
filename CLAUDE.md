@@ -67,8 +67,8 @@ modules are focused, mostly-pure helpers it calls.
 | [src/tts.js](src/tts.js) | Text-to-speech. ElevenLabs primary (streamed via MediaSource so audio starts on the first chunk), browser `speechSynthesis` fallback; race-proof (one voice at a time) and interruptible. |
 | [src/sfx.js](src/sfx.js) | The puzzle's sound cues (snap / reject / dismantle). ElevenLabs **sound generation**, pre-generated + cached; WebAudio synth fallback. |
 | [src/voice.js](src/voice.js) | Mic capture: MediaRecorder → the stt.js provider chain (works on iOS), bounded either by **push-to-talk** (the default — hold 🎤, which opens the mic and closes it again on release so playback stays on the loudspeaker) or by the opt-in WebAudio **VAD**; Web Speech API fallback. Fires barge-in the moment the user speaks. |
-| [src/stt.js](src/stt.js) | Transcription provider chain: ElevenLabs **Scribe v2** primary (browser-direct, no proxy hop) → OpenAI Whisper fallback. |
-| [src/ai.js](src/ai.js) | OpenAI client (`/chat/completions` + Whisper), called browser-direct. |
+| [src/stt.js](src/stt.js) | Transcription provider chain: ElevenLabs **Scribe v2** primary (browser-direct, no proxy hop) → OpenAI transcription fallback (`gpt-4o-transcribe`). |
+| [src/ai.js](src/ai.js) | OpenAI client (`/chat/completions` + transcription), called browser-direct. Learns each model's quirks (no custom temperature, reasoning eats the token budget). |
 | [src/tutor.js](src/tutor.js) | "Brain" glue: classify a spoken phrase into an app command vs. a free-form question, then answer via AI with context. |
 | [src/i18n.js](src/i18n.js) | **Language.** The selected language (`en`/`de`), the UI dictionary, the authored-content resolver `tr()`, and the locale codes the speech stack needs. One switch flips chrome, content, voice, transcription and every LLM prompt. |
 | [src/icons.js](src/icons.js) | **Iconography.** One inline stroke set + the two ways it reaches the DOM: `hydrateIcons()` for static markup, `setLabel()` for buttons the app builds or relabels. No emoji anywhere. |
@@ -568,7 +568,7 @@ content that mode exists to receive, and neither can navigate or switch modes:
 
 Capture (`voice.js`) is a `MediaRecorder` feeding the `stt.js` provider chain —
 **ElevenLabs Scribe v2** first (`/v1/speech-to-text`, model `scribe_v2` via
-`VITE_ELEVENLABS_STT_MODEL`), OpenAI Whisper as fallback (`ai.transcribe()`,
+`VITE_ELEVENLABS_STT_MODEL`), OpenAI transcription as fallback (`ai.transcribe()`,
 `/v1/audio/transcriptions`, `VITE_OPENAI_STT_MODEL`). A 4xx from Scribe retires it
 for the session; network errors fall back per-utterance. Transcripts that are
 only an STT filler-hallucination ("you", "thank you") are dropped. Web Speech
@@ -671,7 +671,7 @@ questions.
    has already replaced before answering the real one.
 
 TTS, STT and AI all **degrade gracefully**: no ElevenLabs key → browser
-speech + Whisper STT; no OpenAI → Web Speech recognition + a canned
+speech + OpenAI STT; no OpenAI → Web Speech recognition + a canned
 local answer.
 
 ### Look (`index.html`'s style block + `icons.js`)
@@ -781,7 +781,7 @@ What each downstream module does with it — don't regress these:
    facts, the parts list and the answer are all one language. (An English header
    on German facts invites the model to answer in English.)
 4. **STT is pinned, not auto-detected**: `language_code` for Scribe,
-   `language` for Whisper, `rec.lang` for Web Speech. On short or noisy audio
+   `language` for OpenAI, `rec.lang` for Web Speech. On short or noisy audio
    auto-detect mistakes German for English or Dutch, so the hint is strictly
    more accurate. It is a *hint*, though, not a gate — verified against the live
    API, Scribe v2 still returns German text for clearly-German audio even when

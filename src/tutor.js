@@ -85,7 +85,7 @@ export async function generateFixPlan(ctx, request, { fault } = {}) {
   try {
     let raw;
     try {
-      // Planning gets the stronger model (PLAN_MODEL, gpt-4.1 by default) — a
+      // Planning gets the stronger model (PLAN_MODEL, gpt-5.6-sol by default) — a
       // one-shot structured task where quality beats latency.
       // Beats make a plan verbose: 6 steps x 4 beats of JSON runs well past
       // 2000 tokens, and a cut-off reply used to fail to parse and drop us into

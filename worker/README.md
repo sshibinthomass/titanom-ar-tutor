@@ -76,5 +76,5 @@ curl -X POST https://ai-proxy.<your-subdomain>.workers.dev/langfuse/api/public/i
 OpenAI:
 
 ```bash
-curl -X POST https://ai-proxy.<your-subdomain>.workers.dev/chat/completions -H "Content-Type: application/json" -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Say OK"}],"max_completion_tokens":10}'
+curl -X POST https://ai-proxy.<your-subdomain>.workers.dev/chat/completions -H "Content-Type: application/json" -d '{"model":"gpt-5.6-terra","messages":[{"role":"user","content":"Say OK"}],"max_completion_tokens":10}'
 ```

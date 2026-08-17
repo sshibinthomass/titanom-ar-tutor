@@ -132,7 +132,11 @@ export async function identifyObject(dataUrl) {
           ],
         },
       ],
-      { temperature: 0, maxTokens: 12, model: VISION_MODEL, trace, name: 'scan-classify' }
+      // The answer is one word, but the cap has to leave room for a reasoning
+      // model to think first — thinking is spent from this same budget, and a
+      // 12-token cap came back empty (ai.js retries that, but only after
+      // re-uploading the photo, which is the expensive part of this call).
+      { temperature: 0, maxTokens: 300, model: VISION_MODEL, trace, name: 'scan-classify' }
     );
     const label = normalizeLabel(raw);
     trace.end({ output: label, metadata: { raw } });
