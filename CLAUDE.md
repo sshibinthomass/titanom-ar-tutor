@@ -53,6 +53,7 @@ modules are focused, mostly-pure helpers it calls.
 | File | Responsibility |
 |------|----------------|
 | [src/main.js](src/main.js) | App shell: renderer/scene/camera/lights, model registry, UI wiring, mode state machine, voice + AR glue, render loop. |
+| [src/gate.js](src/gate.js) | **The front door.** One shared 4-digit passcode in front of the whole app; main.js routes nothing until it is entered. |
 | [src/router.js](src/router.js) | **Links.** The hash-URL grammar (`#/`, `#/scan`, `#/objects`, `#/<model>/<mode>`), plus navigate/parse/listen. Owns no state and knows no ids — the caller passes the vocabulary in. |
 | [src/home.js](src/home.js) | The **home screen** — the front door. Scan the real object with the camera, or pick from the list. Owns the overlay's views and the camera lifecycle. |
 | [src/vision.js](src/vision.js) | The scan itself: rear camera → one JPEG frame → DGPT vision → one of `chair` / `bicycle` / `bed` / `none`. |
@@ -72,6 +73,34 @@ modules are focused, mostly-pure helpers it calls.
 | [src/i18n.js](src/i18n.js) | **Language.** The selected language (`en`/`de`), the UI dictionary, the authored-content resolver `tr()`, and the locale codes the speech stack needs. One switch flips chrome, content, voice, transcription and every LLM prompt. |
 | [src/icons.js](src/icons.js) | **Iconography.** One inline stroke set + the two ways it reaches the DOM: `hydrateIcons()` for static markup, `setLabel()` for buttons the app builds or relabels. No emoji anywhere. |
 | [src/telemetry.js](src/telemetry.js) | Langfuse tracing. Batches ingestion events to a credential-free proxy (Vite in dev, Worker in prod). No-op when unconfigured. |
+
+### The passcode gate (`gate.js`)
+
+The app sits behind **one shared 4-digit code — `0204`** (the `PASSCODE`
+constant). No accounts, no per-user secrets: everyone who uses the tutor uses
+that code. Three properties, and they are the whole design:
+
+1. **Every way in lands on it.** The whole `// ---- Go` block in main.js —
+   `applyRoute(bootRoute)`, the boot `loadModel`, the `onRouteChange`
+   subscription — lives inside `requireUnlock(…)`, so a pasted deep link
+   (`#/markus-chair/fix`), a bookmark or a scan link is *read after* the unlock
+   and still opens exactly the screen it names. Don't move routing back out.
+2. **The overlay is markup, not script.** `#lock` is in index.html, visible on
+   the first frame; gate.js only ever *hides* it. An overlay raised by JS would
+   let a deep link flash the object it points at before asking.
+3. **One entry per session.** The unlock is remembered in `sessionStorage`
+   (keyed to the code itself, so changing `PASSCODE` retires old sessions), so a
+   reload doesn't re-ask but a fresh tab — somebody opening the link — does.
+
+The language toggle sits **above** the lock (`.corner-controls` z-index, plus
+`body.lock-open #langToggle` on mobile) for the same reason it sits above the
+home screen: it is now the first thing a visitor sees. That is also why the
+language-switch handler skips `enterMode` while `isLocked()` — behind the lock
+there is no model or route to re-resolve yet.
+
+> ⚠️ **It is a door, not a vault.** This is a static site: the code ships in the
+> JS bundle and devtools reveals it, exactly like the `VITE_`-prefixed keys.
+> It keeps the demo from being walk-in-able; it is not access control.
 
 ### Links (`router.js`)
 

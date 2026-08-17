@@ -131,6 +131,18 @@ const STRINGS = {
   'btn.home':           { en: 'Home',                          de: 'Start' },
   'btn.homeTitle':      { en: 'Back to the object chooser',  de: 'Zurück zur Objektauswahl' },
 
+  // -- Passcode lock ---------------------------------------------------------
+  // The app is shared behind one code, so this is the front door — every way in
+  // (a cold load, a pasted link, a new tab) lands here first.
+  'lock.title':         { en: 'Enter the passcode',           de: 'Passcode eingeben' },
+  'lock.sub':           { en: 'This tutor is shared behind one 4-digit code. Ask the team for it.',
+                          de: 'Dieser Tutor ist durch einen gemeinsamen 4-stelligen Code geschützt. Frag das Team danach.' },
+  'lock.field':         { en: 'Passcode',                     de: 'Passcode' },
+  'lock.placeholder':   { en: '4 digits',                     de: '4 Ziffern' },
+  'lock.submit':        { en: 'Unlock',                       de: 'Entsperren' },
+  'lock.wrong':         { en: "That code isn't right. Try again.",
+                          de: 'Der Code stimmt nicht. Versuch es nochmal.' },
+
   // -- Home screen -----------------------------------------------------------
   'home.sub':           { en: 'What are we working on?',     de: 'Woran arbeiten wir?' },
   'home.scan':          { en: 'Scan an object',              de: 'Objekt scannen' },
@@ -346,13 +358,14 @@ export function t(key, vars = null) {
 
 /**
  * Apply the dictionary to the static markup: every element carrying
- * `data-i18n` (text content), `data-i18n-title` (tooltip) or `data-i18n-html`
- * gets its string re-read. Called on boot and on every language switch, so the
- * chrome flips without a reload.
+ * `data-i18n` (text content), `data-i18n-title` (tooltip) or
+ * `data-i18n-placeholder` (an input's hint) gets its string re-read. Called on
+ * boot and on every language switch, so the chrome flips without a reload.
  */
 export function applyStaticTranslations(root = document) {
   document.documentElement.lang = lang;
   for (const el of root.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
   for (const el of root.querySelectorAll('[data-i18n-title]')) el.title = t(el.dataset.i18nTitle);
+  for (const el of root.querySelectorAll('[data-i18n-placeholder]')) el.placeholder = t(el.dataset.i18nPlaceholder);
   document.title = t('app.title');
 }

@@ -680,11 +680,12 @@
       /* Language + theme share one flex cluster so neither has to know the
          other's width (the theme label changes with the theme, the language
          label with the language). */
-      /* Above the home overlay (z 70) on purpose: language and theme are global
-         preferences and the home screen is the first thing a visitor sees, so
-         that is exactly where they need to be reachable. */
+      /* Above the home overlay (z 70) *and* the passcode lock (z 200) on purpose:
+         language and theme are global preferences, and the lock is now the first
+         thing a visitor sees — a German speaker needs the switch before they can
+         read what is being asked of them. */
       .corner-controls {
-        position: fixed; top: 16px; right: 16px; z-index: 75;
+        position: fixed; top: 16px; right: 16px; z-index: 210;
         display: flex; gap: 8px; align-items: center;
       }
       .corner-controls > button {
@@ -791,6 +792,64 @@
       /* A "Home" button on the home screen is nonsense; the language and theme
          toggles beside it stay, which is why the cluster sits above the overlay. */
       body.home-open #homeBtn { display: none; }
+      /* Nor on the lock screen, where nothing behind it is reachable yet. */
+      body.lock-open .modebar, body.lock-open .dock, body.lock-open .panel { display: none; }
+
+      /* ---- Passcode lock -------------------------------------------------
+         The real front door: the app is shared behind one 4-digit code, so
+         every way in — a cold load, a pasted deep link, a new tab — meets this
+         first. It is in the *markup*, visible before any JS runs (src/gate.js
+         only ever hides it), because an overlay raised by script would let a
+         deep link flash the object it points at first. Above the home overlay
+         (z 70) and the corner cluster's old 75 for the same reason. */
+      .lock {
+        position: fixed; inset: 0; z-index: 200;
+        display: flex; align-items: center; justify-content: center; overflow-y: auto;
+        background: var(--bg-grad); color: var(--text);
+        padding: calc(28px + env(safe-area-inset-top, 0px)) 20px
+                 calc(28px + env(safe-area-inset-bottom, 0px));
+      }
+      .lock[hidden] { display: none; }
+      /* Same breathing dome as the home screen: the first thing a visitor sees
+         should already look like something is listening. */
+      .lock::after {
+        content: ''; position: absolute; inset: 0; pointer-events: none;
+        background: var(--dome); animation: breathe 9s ease-in-out infinite;
+      }
+      .lock-inner { width: min(360px, 100%); position: relative; z-index: 1; text-align: center; }
+      .lock-icon {
+        width: 54px; height: 54px; margin: 0 auto 16px; border-radius: 50%;
+        display: grid; place-items: center;
+        background: var(--chip-sel); border: 1px solid var(--chip-sel-border);
+        color: var(--accent-text);
+      }
+      .lock-icon .ico { width: 25px; height: 25px; }
+      .lock-title { font-size: 23px; font-weight: 700; letter-spacing: -0.015em; margin: 0 0 7px; }
+      .lock-sub { color: var(--muted); font-size: 14.5px; line-height: 1.5; margin: 0 0 22px; }
+      .lock-form { display: flex; flex-direction: column; gap: 10px; }
+      /* Tracked-out mono digits, centred: the field reads as a code, not as a
+         password box — there is no username here and nothing personal about it. */
+      #lockInput {
+        width: 100%; min-height: 60px; padding: 0 14px;
+        border: 1px solid var(--chip-idle-border); border-radius: var(--r-row);
+        background: var(--panel-solid); color: var(--text);
+        font: 600 26px var(--font-mono); font-variant-numeric: tabular-nums;
+        letter-spacing: 0.42em; text-indent: 0.42em;   /* indent balances the trailing track */
+        text-align: center;
+      }
+      #lockInput::placeholder { font: 400 14px var(--font-ui); letter-spacing: 0; color: var(--faint); }
+      #lockInput:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-color: var(--accent); }
+      .lock-error {
+        min-height: 17px; font: 400 11.5px var(--font-mono); letter-spacing: 0.04em;
+        color: var(--danger); visibility: hidden;
+      }
+      .lock-error.show { visibility: visible; }
+      .lock.shake .lock-inner { animation: lockshake 0.4s ease; }
+      @keyframes lockshake {
+        10%, 90% { transform: translateX(-2px); }
+        30%, 70% { transform: translateX(5px); }
+        50%      { transform: translateX(-7px); }
+      }
 
       /* ---- AR mode: hide the dev chrome, show exit ---- */
       body.ar-active .panel,
@@ -863,8 +922,10 @@
          still glow rather than none — the depth is the point, the breathing is
          the flourish. */
       @media (prefers-reduced-motion: reduce) {
-        .ambient .dome, .home::after, .fab.mic.listening, .place-guide-icon,
-        .loader-dial, .loader.spin .loader-arc { animation: none; }
+        .ambient .dome, .home::after, .lock::after, .fab.mic.listening,
+        .place-guide-icon, .loader-dial, .loader.spin .loader-arc { animation: none; }
+        /* The shake is feedback, not decoration — the error line carries it here. */
+        .lock.shake .lock-inner { animation: none; }
       }
 
       /* ---- Medium widths: give the centred mode bar its room back ---------
@@ -899,7 +960,7 @@
            On the home screen there is no panel to open — and no object yet — so
            the toggle comes back, the one place a German speaker most needs it. */
         #langToggle { display: none; }
-        body.home-open #langToggle { display: flex; }
+        body.home-open #langToggle, body.lock-open #langToggle { display: flex; }
 
         .modebar {
           top: calc(10px + env(safe-area-inset-top, 0px));
@@ -1154,6 +1215,31 @@
           </div>
           <button id="homeScanAlt"><span data-icon="list"></span><span class="lbl" data-i18n="scan.chooseInstead">Pick from the list</span></button>
         </div>
+      </div>
+    </div>
+
+    <!-- Passcode lock: the front door. Everyone shares one 4-digit code, so this
+         is markup rather than something JS raises — it must already be painted on
+         the first frame, or a deep link would flash the object it names before
+         asking. src/gate.js only ever hides it, and main.js routes nothing until
+         it does. -->
+    <div class="lock" id="lock">
+      <div class="lock-inner">
+        <div class="lock-icon"><span data-icon="lock"></span></div>
+        <h1 class="lock-title" data-i18n="lock.title">Enter the passcode</h1>
+        <p class="lock-sub" data-i18n="lock.sub">This tutor is shared behind one 4-digit code. Ask the team for it.</p>
+        <form class="lock-form" id="lockForm" autocomplete="off">
+          <!-- type=password so the code isn't readable over a shoulder;
+               inputmode=numeric brings up the phone's keypad rather than the full
+               keyboard. The field accepts 4 digits and submits itself on the last
+               one (see gate.js). -->
+          <input id="lockInput" type="password" inputmode="numeric" pattern="[0-9]*"
+                 maxlength="4" autocomplete="off" spellcheck="false"
+                 data-i18n-placeholder="lock.placeholder" placeholder="4 digits"
+                 data-i18n-title="lock.field" title="Passcode" aria-describedby="lockError" />
+          <div class="lock-error" id="lockError" role="alert" data-i18n="lock.wrong">That code isn't right. Try again.</div>
+          <button type="submit" class="primary" id="lockSubmit"><span data-icon="lock"></span><span class="lbl" data-i18n="lock.submit">Unlock</span></button>
+        </form>
       </div>
     </div>
 

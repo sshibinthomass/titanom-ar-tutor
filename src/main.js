@@ -20,6 +20,7 @@ import { aiAvailable } from './ai.js';
 import { initHome, openHome, closeHome, isHomeOpen, homeView as homeScreenView, refreshHome } from './home.js';
 import { initTelemetry, track } from './telemetry.js';
 import { routePath, currentRoute, navigate, onRouteChange } from './router.js';
+import { requireUnlock, isLocked } from './gate.js';
 
 // ---- Model registry --------------------------------------------------------
 
@@ -2149,7 +2150,10 @@ onLangChange((next) => {
   if (!arSupported) { setLabel(ui.startAR, t('btn.arUnsupported')); ui.startAR.title = t('btn.arTitle'); }
   paintStatus();
   buildLegend();                     // part names are display names
-  enterMode(currentMode);            // re-resolve the mode's content in the new language
+  // The lock screen is reachable in both languages (the toggle sits above it), and
+  // behind it there is no model, no route and no mode to re-resolve yet — boot
+  // will enter one in the language that is selected by then.
+  if (!isLocked()) enterMode(currentMode);   // re-resolve the mode's content in the new language
 });
 
 // ---- Render loop -----------------------------------------------------------
@@ -2314,30 +2318,36 @@ function setDocumentTitle(route) {
   document.title = `${modelLabel(MODELS[route.model])} · ${t(`kicker.${route.mode}`)} · ${app}`;
 }
 
-onRouteChange(() => {
-  const route = currentRoute(routeVocab());
-  applyRoute(route);
-  // Boot normalises the URL; so must this, or a link naming something the app no
-  // longer offers — a bookmark to a retired mode, a typo — leaves the address bar
-  // claiming a screen the user isn't on. `replace` fires no hashchange, and
-  // re-applying a route the app is already on is a no-op regardless.
-  navigate(routePath(route), { replace: true });
-});
-
 // ---- Go --------------------------------------------------------------------
 
-// Boot straight into the hero IKEA Markus and fetch nothing else — the other
-// models are only loaded when the user actually selects one.
-//
-// On the home screen the load starts *behind* the overlay rather than after a
-// choice: the Markus is both the default and the "chair" the scan resolves to,
-// so by the time the user has framed a photo or read the list it is usually
-// already built. A link straight to an object skips the overlay entirely and
-// loads whatever that link names.
-const bootRoute = currentRoute(routeVocab());
-if (bootRoute.kind === 'home') loadModel(ui.model.value);
-applyRoute(bootRoute, 'boot');
-// Normalise what the user pasted (`#`, `#/markus-chair`, an unknown mode) to the
-// canonical path, in place — replaceState fires no hashchange, and applyRoute
-// has already run.
-navigate(routePath(bootRoute), { replace: true });
+// Everything below is behind the shared passcode (see src/gate.js). Nothing
+// routes, loads or listens to the address bar until the code is in — which is
+// what makes a deep link ask for it too: `#/markus-chair/fix` is read here,
+// *after* the unlock, so the link still opens exactly the screen it names.
+requireUnlock(() => {
+  onRouteChange(() => {
+    const route = currentRoute(routeVocab());
+    applyRoute(route);
+    // Boot normalises the URL; so must this, or a link naming something the app no
+    // longer offers — a bookmark to a retired mode, a typo — leaves the address bar
+    // claiming a screen the user isn't on. `replace` fires no hashchange, and
+    // re-applying a route the app is already on is a no-op regardless.
+    navigate(routePath(route), { replace: true });
+  });
+
+  // Boot straight into the hero IKEA Markus and fetch nothing else — the other
+  // models are only loaded when the user actually selects one.
+  //
+  // On the home screen the load starts *behind* the overlay rather than after a
+  // choice: the Markus is both the default and the "chair" the scan resolves to,
+  // so by the time the user has framed a photo or read the list it is usually
+  // already built. A link straight to an object skips the overlay entirely and
+  // loads whatever that link names.
+  const bootRoute = currentRoute(routeVocab());
+  if (bootRoute.kind === 'home') loadModel(ui.model.value);
+  applyRoute(bootRoute, 'boot');
+  // Normalise what the user pasted (`#`, `#/markus-chair`, an unknown mode) to the
+  // canonical path, in place — replaceState fires no hashchange, and applyRoute
+  // has already run.
+  navigate(routePath(bootRoute), { replace: true });
+});
